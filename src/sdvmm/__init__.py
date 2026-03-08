@@ -3,6 +3,8 @@
 from .domain.models import (
     AppConfig,
     AppConfigValidationResult,
+    DownloadsIntakeResult,
+    DownloadsWatchPollResult,
     DuplicateUniqueIdFinding,
     InstalledMod,
     ManifestDependency,
@@ -40,6 +42,8 @@ from .services.app_state_store import (
 __all__ = [
     "AppConfig",
     "AppConfigValidationResult",
+    "DownloadsIntakeResult",
+    "DownloadsWatchPollResult",
     "DuplicateUniqueIdFinding",
     "InstalledMod",
     "ManifestDependency",

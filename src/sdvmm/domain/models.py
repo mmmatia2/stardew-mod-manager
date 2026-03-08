@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from sdvmm.domain.install_codes import SandboxInstallAction
 from sdvmm.domain.package_codes import PackageFindingKind
@@ -15,6 +16,10 @@ class AppConfig:
     game_path: Path
     mods_path: Path
     app_data_path: Path
+    sandbox_mods_path: Path | None = None
+    sandbox_archive_path: Path | None = None
+    watched_downloads_path: Path | None = None
+    scan_target: str = "configured_real_mods"
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +148,32 @@ class PackageInspectionResult:
     mods: tuple[PackageModEntry, ...]
     warnings: tuple[PackageWarning, ...]
     findings: tuple[PackageFinding, ...]
+
+
+IntakeClassification = Literal[
+    "new_install_candidate",
+    "update_replace_candidate",
+    "multi_mod_package",
+    "unusable_package",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadsIntakeResult:
+    package_path: Path
+    classification: IntakeClassification
+    message: str
+    mods: tuple[PackageModEntry, ...]
+    matched_installed_unique_ids: tuple[str, ...]
+    warnings: tuple[PackageWarning, ...]
+    findings: tuple[PackageFinding, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadsWatchPollResult:
+    watched_path: Path
+    known_zip_paths: tuple[Path, ...]
+    intakes: tuple[DownloadsIntakeResult, ...]
 
 
 @dataclass(frozen=True, slots=True)

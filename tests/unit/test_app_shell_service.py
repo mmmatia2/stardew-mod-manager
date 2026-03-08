@@ -342,7 +342,12 @@ def test_check_updates_returns_no_remote_link_for_unlinked_mod(tmp_path: Path, m
     assert report.statuses[0].remote_link is None
 
 
-def test_check_updates_marks_metadata_unavailable_for_nexus_link(tmp_path: Path, mods_case_path) -> None:
+def test_check_updates_marks_metadata_unavailable_for_nexus_link(
+    tmp_path: Path,
+    mods_case_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SDVMM_NEXUS_API_KEY", raising=False)
     service = AppShellService(state_file=tmp_path / "app-state.json")
     inventory = service.scan(str(mods_case_path("update_keys_manifest")))
 
@@ -352,6 +357,7 @@ def test_check_updates_marks_metadata_unavailable_for_nexus_link(tmp_path: Path,
     assert report.statuses[0].state == "metadata_unavailable"
     assert report.statuses[0].remote_link is not None
     assert report.statuses[0].remote_link.provider == "nexus"
+    assert "[missing_api_key]" in (report.statuses[0].message or "")
 
 
 def _create_mod(mods_root: Path, folder_name: str, unique_id: str) -> None:

@@ -40,11 +40,19 @@ def load_app_config(state_file: Path) -> AppConfig | None:
     game_path = _require_non_empty_string(app_config, "game_path")
     mods_path = _require_non_empty_string(app_config, "mods_path")
     app_data_path = _require_non_empty_string(app_config, "app_data_path")
+    sandbox_mods_path = _optional_non_empty_string(app_config, "sandbox_mods_path")
+    sandbox_archive_path = _optional_non_empty_string(app_config, "sandbox_archive_path")
+    watched_downloads_path = _optional_non_empty_string(app_config, "watched_downloads_path")
+    scan_target = _optional_non_empty_string(app_config, "scan_target") or "configured_real_mods"
 
     return AppConfig(
         game_path=Path(game_path),
         mods_path=Path(mods_path),
         app_data_path=Path(app_data_path),
+        sandbox_mods_path=Path(sandbox_mods_path) if sandbox_mods_path else None,
+        sandbox_archive_path=Path(sandbox_archive_path) if sandbox_archive_path else None,
+        watched_downloads_path=Path(watched_downloads_path) if watched_downloads_path else None,
+        scan_target=scan_target,
     )
 
 
@@ -55,6 +63,14 @@ def save_app_config(state_file: Path, config: AppConfig) -> None:
             "game_path": str(config.game_path),
             "mods_path": str(config.mods_path),
             "app_data_path": str(config.app_data_path),
+            "sandbox_mods_path": str(config.sandbox_mods_path) if config.sandbox_mods_path else None,
+            "sandbox_archive_path": (
+                str(config.sandbox_archive_path) if config.sandbox_archive_path else None
+            ),
+            "watched_downloads_path": (
+                str(config.watched_downloads_path) if config.watched_downloads_path else None
+            ),
+            "scan_target": config.scan_target,
         },
     }
 
@@ -66,4 +82,13 @@ def _require_non_empty_string(data: dict[str, object], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
         raise AppStateStoreError(f"app_config.{key} must be a non-empty string")
+    return value
+
+
+def _optional_non_empty_string(data: dict[str, object], key: str) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise AppStateStoreError(f"app_config.{key} must be a non-empty string when provided")
     return value

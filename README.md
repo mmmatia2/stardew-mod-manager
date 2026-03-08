@@ -49,6 +49,11 @@ Minimal local-first foundation for scanning a Stardew Valley `Mods` directory.
 - automatic install into real game Mods directory
 - full rollback/archive/history systems
 
+## Metadata notes
+
+- Metadata checks are awareness-only; they do not download or install mods.
+- Nexus version checks require `SDVMM_NEXUS_API_KEY` in the environment.
+
 ## Local development
 
 ```bash

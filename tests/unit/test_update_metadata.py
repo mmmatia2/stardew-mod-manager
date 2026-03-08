@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping
+
+import pytest
 
 from sdvmm.domain.models import InstalledMod, ModsInventory
 from sdvmm.services.update_metadata import (
+    AUTH_FAILURE,
+    MISSING_API_KEY,
+    NEXUS_API_KEY_ENV,
+    REQUEST_FAILURE,
+    RESPONSE_MISSING_VERSION,
     MetadataFetchError,
     check_updates_for_inventory,
     compare_versions,
@@ -12,16 +20,33 @@ from sdvmm.services.update_metadata import (
 
 
 class StubFetcher:
-    def __init__(self, payloads: dict[str, dict[str, object]] | None = None, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        payloads: dict[str, dict[str, object]] | None = None,
+        *,
+        error_by_url: dict[str, MetadataFetchError] | None = None,
+    ) -> None:
         self._payloads = payloads or {}
-        self._fail = fail
+        self._error_by_url = error_by_url or {}
+        self.calls: list[tuple[str, dict[str, str]]] = []
 
-    def fetch_json(self, url: str, timeout_seconds: float) -> dict[str, object]:
-        if self._fail:
-            raise MetadataFetchError("simulated fetch failure")
+    def fetch_json(
+        self,
+        url: str,
+        timeout_seconds: float,
+        headers: Mapping[str, str] | None = None,
+    ) -> dict[str, object]:
+        _ = timeout_seconds
+        captured_headers = dict(headers or {})
+        self.calls.append((url, captured_headers))
+
+        if url in self._error_by_url:
+            raise self._error_by_url[url]
+
         payload = self._payloads.get(url)
         if payload is None:
-            raise MetadataFetchError(f"no payload for {url}")
+            raise MetadataFetchError(REQUEST_FAILURE, f"no payload for {url}")
+
         return payload
 
 
@@ -31,43 +56,29 @@ def test_compare_versions_derives_expected_ordering() -> None:
     assert compare_versions("1.4.0", "1.3.9") == 1
 
 
-def test_update_available_when_remote_version_is_newer() -> None:
-    mod = _mod(
-        unique_id="Sample.Mod",
-        version="1.0.0",
-        update_keys=("Json:https://example.test/mod-a.json",),
+def test_real_nexus_updatekey_forms_are_resolved() -> None:
+    assert resolve_remote_link(("Nexus:12345",)).provider == "nexus"
+    assert resolve_remote_link(("Nexus: 19508",)).provider == "nexus"
+    assert resolve_remote_link(("nexus:15223",)).provider == "nexus"
+    assert (
+        resolve_remote_link(("Nexus:https://www.nexusmods.com/stardewvalley/mods/541",)).provider
+        == "nexus"
     )
+
+
+def test_nexus_provider_reports_up_to_date_when_remote_equals_installed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+
+    mod = _mod(unique_id="Sample.Nexus", version="3.2.1", update_keys=("Nexus:12345",))
     inventory = _inventory((mod,))
+    url = "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json"
     fetcher = StubFetcher(
         payloads={
-            "https://example.test/mod-a.json": {
-                "version": "1.1.0",
-                "page_url": "https://example.test/mod-a",
-            }
-        }
-    )
-
-    report = check_updates_for_inventory(inventory, fetcher=fetcher)
-
-    status = report.statuses[0]
-    assert status.state == "update_available"
-    assert status.remote_version == "1.1.0"
-    assert status.remote_link is not None
-    assert status.remote_link.page_url == "https://example.test/mod-a"
-
-
-def test_up_to_date_when_remote_version_matches_installed() -> None:
-    mod = _mod(
-        unique_id="Sample.Mod",
-        version="2.0.0",
-        update_keys=("Json:https://example.test/mod-a.json",),
-    )
-    inventory = _inventory((mod,))
-    fetcher = StubFetcher(
-        payloads={
-            "https://example.test/mod-a.json": {
-                "version": "2.0.0",
-                "page_url": "https://example.test/mod-a",
+            url: {
+                "version": "3.2.1",
+                "url": "https://www.nexusmods.com/stardewvalley/mods/12345",
             }
         }
     )
@@ -76,47 +87,184 @@ def test_up_to_date_when_remote_version_matches_installed() -> None:
 
     status = report.statuses[0]
     assert status.state == "up_to_date"
-    assert status.remote_version == "2.0.0"
+    assert status.remote_version == "3.2.1"
+    assert fetcher.calls[0][0] == url
+    assert fetcher.calls[0][1].get("apikey") == "test-api-key"
 
 
-def test_no_remote_link_state_when_update_keys_are_missing() -> None:
-    mod = _mod(unique_id="Sample.NoLink", version="1.0.0", update_keys=tuple())
+def test_nexus_provider_reports_update_available_when_remote_is_newer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+
+    mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
+    inventory = _inventory((mod,))
+    fetcher = StubFetcher(
+        payloads={
+            "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json": {
+                "version": "1.2.0",
+                "url": "https://www.nexusmods.com/stardewvalley/mods/12345",
+            }
+        }
+    )
+
+    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+
+    status = report.statuses[0]
+    assert status.state == "update_available"
+    assert status.remote_version == "1.2.0"
+
+
+def test_nexus_missing_api_key_is_reported_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
+
+    mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
     inventory = _inventory((mod,))
 
     report = check_updates_for_inventory(inventory, fetcher=StubFetcher())
 
     status = report.statuses[0]
-    assert status.state == "no_remote_link"
-    assert status.remote_version is None
-    assert status.remote_link is None
+    assert status.state == "metadata_unavailable"
+    assert f"[{MISSING_API_KEY}]" in (status.message or "")
+    assert NEXUS_API_KEY_ENV in (status.message or "")
 
 
-def test_metadata_unavailable_when_fetch_fails() -> None:
+def test_malformed_nexus_updatekey_is_reported_explicitly() -> None:
     mod = _mod(
-        unique_id="Sample.Mod",
+        unique_id="Sample.BadNexus",
+        version="1.0.0",
+        update_keys=("Nexus:not-a-mod-id",),
+    )
+    inventory = _inventory((mod,))
+
+    report = check_updates_for_inventory(inventory, fetcher=StubFetcher())
+
+    status = report.statuses[0]
+    assert status.state == "metadata_unavailable"
+    assert "[malformed_update_key]" in (status.message or "")
+
+
+def test_nexus_auth_or_request_failure_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+
+    mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
+    inventory = _inventory((mod,))
+    url = "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json"
+
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=StubFetcher(
+            error_by_url={
+                url: MetadataFetchError(AUTH_FAILURE, "HTTP 401: Please provide a valid API Key")
+            }
+        ),
+    )
+
+    status = report.statuses[0]
+    assert status.state == "metadata_unavailable"
+    assert f"[{AUTH_FAILURE}]" in (status.message or "")
+
+
+def test_nexus_response_missing_version_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+
+    mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
+    inventory = _inventory((mod,))
+
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=StubFetcher(
+            payloads={
+                "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json": {
+                    "name": "Example Mod"
+                }
+            }
+        ),
+    )
+
+    status = report.statuses[0]
+    assert status.state == "metadata_unavailable"
+    assert f"[{RESPONSE_MISSING_VERSION}]" in (status.message or "")
+
+
+def test_no_regression_for_json_provider() -> None:
+    mod = _mod(
+        unique_id="Sample.Json",
         version="1.0.0",
         update_keys=("Json:https://example.test/mod-a.json",),
     )
     inventory = _inventory((mod,))
-
-    report = check_updates_for_inventory(inventory, fetcher=StubFetcher(fail=True))
-
-    status = report.statuses[0]
-    assert status.state == "metadata_unavailable"
-    assert status.remote_link is not None
-    assert "Could not load remote metadata" in (status.message or "")
-
-
-def test_resolve_remote_link_prefers_metadata_capable_provider() -> None:
-    link = resolve_remote_link(
-        (
-            "Nexus:12345",
-            "GitHub:owner/repo",
-        )
+    fetcher = StubFetcher(
+        payloads={"https://example.test/mod-a.json": {"version": "1.1.0"}}
     )
 
-    assert link is not None
-    assert link.provider == "github"
+    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+
+    assert report.statuses[0].state == "update_available"
+
+
+def test_no_regression_for_github_provider() -> None:
+    mod = _mod(
+        unique_id="Sample.GitHub",
+        version="2.5.0",
+        update_keys=("GitHub:owner/repo",),
+    )
+    inventory = _inventory((mod,))
+    fetcher = StubFetcher(
+        payloads={
+            "https://api.github.com/repos/owner/repo/releases/latest": {
+                "tag_name": "v2.5.0"
+            }
+        }
+    )
+
+    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+
+    assert report.statuses[0].state == "up_to_date"
+
+
+def test_no_regression_for_no_remote_link_behavior() -> None:
+    mod = _mod(unique_id="Sample.NoLink", version="1.0.0", update_keys=tuple())
+    inventory = _inventory((mod,))
+
+    report = check_updates_for_inventory(inventory, fetcher=StubFetcher())
+
+    assert report.statuses[0].state == "no_remote_link"
+    assert report.statuses[0].remote_link is None
+
+
+def test_provider_fallback_uses_nexus_when_github_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+
+    mod = _mod(
+        unique_id="Sample.Mixed",
+        version="1.0.0",
+        update_keys=("GitHub:owner/repo", "Nexus:12345"),
+    )
+    inventory = _inventory((mod,))
+    fetcher = StubFetcher(
+        payloads={
+            "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json": {
+                "version": "1.1.0"
+            }
+        },
+        error_by_url={
+            "https://api.github.com/repos/owner/repo/releases/latest": MetadataFetchError(
+                AUTH_FAILURE,
+                "HTTP 403: rate limited",
+            )
+        },
+    )
+
+    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+
+    status = report.statuses[0]
+    assert status.state == "update_available"
+    assert status.remote_link is not None
+    assert status.remote_link.provider == "nexus"
+
 
 
 def _inventory(mods: tuple[InstalledMod, ...]) -> ModsInventory:

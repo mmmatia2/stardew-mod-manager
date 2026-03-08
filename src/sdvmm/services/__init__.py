@@ -13,6 +13,7 @@ from .sandbox_installer import (
     build_sandbox_install_plan,
     execute_sandbox_install_plan,
 )
+from .downloads_intake import initialize_known_zip_paths, poll_watched_directory
 from .update_metadata import (
     MetadataFetchError,
     check_updates_for_inventory,
@@ -30,6 +31,8 @@ __all__ = [
     "parse_manifest_text",
     "build_sandbox_install_plan",
     "execute_sandbox_install_plan",
+    "initialize_known_zip_paths",
+    "poll_watched_directory",
     "save_app_config",
     "scan_mods_directory",
     "check_updates_for_inventory",

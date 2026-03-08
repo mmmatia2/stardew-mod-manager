@@ -1,6 +1,8 @@
 from .models import (
     AppConfig,
     AppConfigValidationResult,
+    DownloadsIntakeResult,
+    DownloadsWatchPollResult,
     DuplicateUniqueIdFinding,
     InstalledMod,
     ManifestDependency,
@@ -32,6 +34,8 @@ from .warning_codes import ParseWarningCode
 __all__ = [
     "AppConfig",
     "AppConfigValidationResult",
+    "DownloadsIntakeResult",
+    "DownloadsWatchPollResult",
     "DuplicateUniqueIdFinding",
     "InstalledMod",
     "ManifestDependency",
