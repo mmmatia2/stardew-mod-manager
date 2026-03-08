@@ -88,6 +88,8 @@ def test_nexus_provider_reports_up_to_date_when_remote_equals_installed(
     status = report.statuses[0]
     assert status.state == "up_to_date"
     assert status.remote_version == "3.2.1"
+    assert status.remote_requirements_state == "requirements_absent"
+    assert status.remote_requirements == ()
     assert fetcher.calls[0][0] == url
     assert fetcher.calls[0][1].get("apikey") == "test-api-key"
 
@@ -113,6 +115,7 @@ def test_nexus_provider_reports_update_available_when_remote_is_newer(
     status = report.statuses[0]
     assert status.state == "update_available"
     assert status.remote_version == "1.2.0"
+    assert status.remote_requirements_state == "requirements_absent"
 
 
 def test_nexus_missing_api_key_is_reported_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,6 +130,7 @@ def test_nexus_missing_api_key_is_reported_explicitly(monkeypatch: pytest.Monkey
     assert status.state == "metadata_unavailable"
     assert f"[{MISSING_API_KEY}]" in (status.message or "")
     assert NEXUS_API_KEY_ENV in (status.message or "")
+    assert status.remote_requirements_state == "requirements_unavailable"
 
 
 def test_malformed_nexus_updatekey_is_reported_explicitly() -> None:
@@ -142,6 +146,7 @@ def test_malformed_nexus_updatekey_is_reported_explicitly() -> None:
     status = report.statuses[0]
     assert status.state == "metadata_unavailable"
     assert "[malformed_update_key]" in (status.message or "")
+    assert status.remote_requirements_state == "requirements_unavailable"
 
 
 def test_nexus_auth_or_request_failure_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,6 +168,7 @@ def test_nexus_auth_or_request_failure_is_reported(monkeypatch: pytest.MonkeyPat
     status = report.statuses[0]
     assert status.state == "metadata_unavailable"
     assert f"[{AUTH_FAILURE}]" in (status.message or "")
+    assert status.remote_requirements_state == "requirements_unavailable"
 
 
 def test_nexus_response_missing_version_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -185,6 +191,7 @@ def test_nexus_response_missing_version_is_reported(monkeypatch: pytest.MonkeyPa
     status = report.statuses[0]
     assert status.state == "metadata_unavailable"
     assert f"[{RESPONSE_MISSING_VERSION}]" in (status.message or "")
+    assert status.remote_requirements_state == "requirements_absent"
 
 
 def test_no_regression_for_json_provider() -> None:
@@ -231,6 +238,7 @@ def test_no_regression_for_no_remote_link_behavior() -> None:
 
     assert report.statuses[0].state == "no_remote_link"
     assert report.statuses[0].remote_link is None
+    assert report.statuses[0].remote_requirements_state == "no_remote_link"
 
 
 def test_provider_fallback_uses_nexus_when_github_fails(
@@ -264,6 +272,31 @@ def test_provider_fallback_uses_nexus_when_github_fails(
     assert status.state == "update_available"
     assert status.remote_link is not None
     assert status.remote_link.provider == "nexus"
+    assert status.remote_requirements_state == "requirements_absent"
+
+
+def test_remote_requirements_are_exposed_when_provider_payload_includes_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+
+    mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
+    inventory = _inventory((mod,))
+    fetcher = StubFetcher(
+        payloads={
+            "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json": {
+                "version": "1.0.0",
+                "requirements": ["SMAPI", "Content Patcher"],
+            }
+        }
+    )
+
+    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+
+    status = report.statuses[0]
+    assert status.state == "up_to_date"
+    assert status.remote_requirements_state == "requirements_present"
+    assert status.remote_requirements == ("Content Patcher", "SMAPI")
 
 
 

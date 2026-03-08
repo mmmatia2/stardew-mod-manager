@@ -22,8 +22,15 @@ from sdvmm.domain.models import (
     ModUpdateReport,
     ModsInventory,
     PackageInspectionResult,
+    RemoteRequirementGuidance,
     SandboxInstallPlan,
     SandboxInstallResult,
+)
+from sdvmm.domain.remote_requirement_codes import (
+    NO_REMOTE_LINK_FOR_REQUIREMENTS,
+    REQUIREMENTS_ABSENT,
+    REQUIREMENTS_PRESENT,
+    REQUIREMENTS_UNAVAILABLE,
 )
 
 
@@ -186,8 +193,15 @@ def build_package_inspection_text(result: PackageInspectionResult) -> str:
     lines.append("")
     lines.append(
         build_dependency_preflight_text(
-            title="Package dependency preflight:",
+            title="Manifest dependency preflight (blocking/local):",
             findings=result.dependency_findings,
+        )
+    )
+    lines.append("")
+    lines.append(
+        build_remote_requirement_guidance_text(
+            title="Remote requirement guidance (non-blocking/source-declared):",
+            guidance=result.remote_requirements,
         )
     )
 
@@ -238,8 +252,15 @@ def build_sandbox_install_plan_text(plan: SandboxInstallPlan) -> str:
     lines.append("")
     lines.append(
         build_dependency_preflight_text(
-            title="Plan dependency preflight:",
+            title="Manifest dependency preflight (blocking/local):",
             findings=plan.dependency_findings,
+        )
+    )
+    lines.append("")
+    lines.append(
+        build_remote_requirement_guidance_text(
+            title="Remote requirement guidance (non-blocking/source-declared):",
+            guidance=plan.remote_requirements,
         )
     )
 
@@ -268,6 +289,7 @@ def build_sandbox_install_result_text(result: SandboxInstallResult) -> str:
 def build_update_report_text(report: ModUpdateReport) -> str:
     lines: list[str] = []
     lines.append("Mod metadata/update status:")
+    lines.append("Manifest dependency blocking is separate from remote requirement guidance.")
 
     if not report.statuses:
         lines.append("- No installed mods in current inventory.")
@@ -284,6 +306,10 @@ def build_update_report_text(report: ModUpdateReport) -> str:
             lines.append(f"  remote: {status.remote_link.page_url}")
         if status.message:
             lines.append(f"  note: {status.message}")
+        lines.append(
+            f"  remote-requirements[{status.remote_requirements_state}]: "
+            f"{_format_remote_requirements_inline(status.remote_requirements, status.remote_requirements_message)}"
+        )
 
     return "\n".join(lines)
 
@@ -292,6 +318,7 @@ def build_downloads_intake_text(result: DownloadsWatchPollResult) -> str:
     lines: list[str] = []
     lines.append(f"Watched downloads: {result.watched_path}")
     lines.append(f"Known zip files: {len(result.known_zip_paths)}")
+    lines.append("Manifest dependency preflight stays blocking; remote requirements are guidance only.")
     lines.append("")
 
     if not result.intakes:
@@ -335,6 +362,12 @@ def _format_single_intake(intake: DownloadsIntakeResult) -> list[str]:
         lines.append(f"  dependency-summary: {dependency_summary}")
         for detail in _intake_dependency_details(intake.dependency_findings):
             lines.append(f"  dependency: {detail}")
+
+    remote_summary = _remote_requirements_summary(intake.remote_requirements)
+    if remote_summary:
+        lines.append(f"  remote-requirements-summary: {remote_summary}")
+        for detail in _remote_requirement_details(intake.remote_requirements):
+            lines.append(f"  remote-requirement: {detail}")
 
     return lines
 
@@ -388,6 +421,81 @@ def _intake_dependency_details(
         elif finding.state == UNRESOLVED_DEPENDENCY_CONTEXT:
             details.append(
                 f"{finding.required_by_unique_id} unresolved dependency context for {finding.dependency_unique_id}"
+            )
+
+    return tuple(details)
+
+
+def build_remote_requirement_guidance_text(
+    *,
+    title: str,
+    guidance: tuple[RemoteRequirementGuidance, ...],
+) -> str:
+    lines: list[str] = [title]
+    if not guidance:
+        lines.append("- none")
+        return "\n".join(lines)
+
+    for item in guidance:
+        provider = item.provider or "none"
+        lines.append(
+            "- "
+            f"{item.name} ({item.unique_id}) | provider={provider} | state={item.state}"
+        )
+        if item.requirements:
+            joined = "; ".join(item.requirements)
+            lines.append(f"  requirements: {joined}")
+        if item.message:
+            lines.append(f"  note: {item.message}")
+        if item.remote_link is not None:
+            lines.append(f"  remote: {item.remote_link.page_url}")
+
+    return "\n".join(lines)
+
+
+def _format_remote_requirements_inline(
+    requirements: tuple[str, ...],
+    message: str | None,
+) -> str:
+    if requirements:
+        return "; ".join(requirements)
+    if message:
+        return message
+    return "unavailable"
+
+
+def _remote_requirements_summary(guidance: tuple[RemoteRequirementGuidance, ...]) -> str:
+    if not guidance:
+        return ""
+
+    present = sum(1 for item in guidance if item.state == REQUIREMENTS_PRESENT)
+    absent = sum(1 for item in guidance if item.state == REQUIREMENTS_ABSENT)
+    unavailable = sum(1 for item in guidance if item.state == REQUIREMENTS_UNAVAILABLE)
+    no_link = sum(1 for item in guidance if item.state == NO_REMOTE_LINK_FOR_REQUIREMENTS)
+    return (
+        f"present={present}, "
+        f"absent={absent}, "
+        f"unavailable={unavailable}, "
+        f"no_link={no_link}"
+    )
+
+
+def _remote_requirement_details(
+    guidance: tuple[RemoteRequirementGuidance, ...],
+) -> tuple[str, ...]:
+    details: list[str] = []
+    for item in guidance:
+        if item.state == REQUIREMENTS_PRESENT:
+            details.append(
+                f"{item.unique_id} remote requirements: {', '.join(item.requirements)}"
+            )
+        elif item.state == REQUIREMENTS_ABSENT:
+            details.append(f"{item.unique_id} remote requirements: none declared by source")
+        elif item.state == NO_REMOTE_LINK_FOR_REQUIREMENTS:
+            details.append(f"{item.unique_id} remote requirements: no remote link")
+        elif item.state == REQUIREMENTS_UNAVAILABLE:
+            details.append(
+                f"{item.unique_id} remote requirements unavailable: {item.message or 'provider error'}"
             )
 
     return tuple(details)

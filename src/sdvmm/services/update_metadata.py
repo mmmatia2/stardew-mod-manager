@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 import json
 import os
 import re
+from html import unescape
 from typing import Any, Mapping, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -14,6 +15,12 @@ from sdvmm.domain.models import (
     ModUpdateStatus,
     ModsInventory,
     RemoteModLink,
+)
+from sdvmm.domain.remote_requirement_codes import (
+    NO_REMOTE_LINK_FOR_REQUIREMENTS,
+    REQUIREMENTS_ABSENT,
+    REQUIREMENTS_PRESENT,
+    REQUIREMENTS_UNAVAILABLE,
 )
 from sdvmm.domain.update_codes import (
     GITHUB_PROVIDER,
@@ -120,6 +127,9 @@ class MetadataProviderAdapter(Protocol):
     def extract_page_url(self, payload: Mapping[str, Any]) -> str | None:
         """Extract a user-facing remote page URL from provider payload, if present."""
 
+    def extract_requirements(self, payload: Mapping[str, Any]) -> tuple[str, ...]:
+        """Extract source-declared remote requirements, if available."""
+
 
 class JsonProviderAdapter:
     provider = JSON_PROVIDER
@@ -152,6 +162,9 @@ class JsonProviderAdapter:
 
     def extract_page_url(self, payload: Mapping[str, Any]) -> str | None:
         return _extract_generic_page_url(payload)
+
+    def extract_requirements(self, payload: Mapping[str, Any]) -> tuple[str, ...]:
+        return _extract_generic_requirements(payload)
 
 
 class GithubProviderAdapter:
@@ -192,6 +205,9 @@ class GithubProviderAdapter:
 
     def extract_page_url(self, payload: Mapping[str, Any]) -> str | None:
         return _extract_generic_page_url(payload)
+
+    def extract_requirements(self, payload: Mapping[str, Any]) -> tuple[str, ...]:
+        return _extract_generic_requirements(payload)
 
 
 class NexusProviderAdapter:
@@ -250,6 +266,14 @@ class NexusProviderAdapter:
         if isinstance(value, str) and _looks_like_url(value) and "nexusmods.com" in value.casefold():
             return value.strip()
         return None
+
+    def extract_requirements(self, payload: Mapping[str, Any]) -> tuple[str, ...]:
+        # Nexus payloads vary by endpoint/version; parse common requirement shapes conservatively.
+        for key in ("requirements", "mod_requirements", "dependencies", "requires"):
+            extracted = _extract_requirement_items(payload.get(key))
+            if extracted:
+                return extracted
+        return tuple()
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +403,9 @@ def _check_single_mod(
         state=NO_REMOTE_LINK,
         remote_link=links[0] if links else None,
         message=None,
+        remote_requirements_state=NO_REMOTE_LINK_FOR_REQUIREMENTS,
+        remote_requirements=tuple(),
+        remote_requirements_message="No remote link is available for requirement guidance.",
     )
 
     if not links:
@@ -388,10 +415,16 @@ def _check_single_mod(
                 base_status,
                 state=METADATA_UNAVAILABLE,
                 message=f"[{issue.reason}] {issue.message}",
+                remote_requirements_state=REQUIREMENTS_UNAVAILABLE,
+                remote_requirements_message=f"[{issue.reason}] {issue.message}",
             )
         return base_status
 
     failures: list[ProviderFailure] = []
+    best_requirements_state = REQUIREMENTS_UNAVAILABLE
+    best_requirements: tuple[str, ...] = tuple()
+    best_requirements_message: str | None = None
+    best_link = links[0]
 
     for link in links:
         provider = _PROVIDERS_BY_NAME.get(link.provider)
@@ -425,6 +458,18 @@ def _check_single_mod(
         if page_url:
             link = replace(link, page_url=page_url)
 
+        remote_requirements = provider.extract_requirements(payload)
+        if remote_requirements:
+            remote_requirements_state = REQUIREMENTS_PRESENT
+            remote_requirements_message = "Remote source declares additional requirements."
+        else:
+            remote_requirements_state = REQUIREMENTS_ABSENT
+            remote_requirements_message = "Remote source does not declare explicit requirements."
+        best_requirements_state = remote_requirements_state
+        best_requirements = remote_requirements
+        best_requirements_message = remote_requirements_message
+        best_link = link
+
         remote_version = provider.extract_version(payload)
         if remote_version is None:
             failures.append(
@@ -454,6 +499,9 @@ def _check_single_mod(
                 remote_link=link,
                 remote_version=remote_version,
                 message="Remote version is newer than installed version.",
+                remote_requirements_state=remote_requirements_state,
+                remote_requirements=remote_requirements,
+                remote_requirements_message=remote_requirements_message,
             )
 
         return replace(
@@ -462,6 +510,9 @@ def _check_single_mod(
             remote_link=link,
             remote_version=remote_version,
             message="Installed version is up to date.",
+            remote_requirements_state=remote_requirements_state,
+            remote_requirements=remote_requirements,
+            remote_requirements_message=remote_requirements_message,
         )
 
     fallback_link = links[0]
@@ -469,8 +520,11 @@ def _check_single_mod(
     return replace(
         base_status,
         state=METADATA_UNAVAILABLE,
-        remote_link=fallback_link,
+        remote_link=best_link or fallback_link,
         message=message,
+        remote_requirements_state=best_requirements_state,
+        remote_requirements=best_requirements,
+        remote_requirements_message=best_requirements_message or message,
     )
 
 
@@ -536,6 +590,65 @@ def _extract_generic_version(payload: Mapping[str, Any]) -> str | None:
             return value.strip()
 
     return None
+
+
+def _extract_generic_requirements(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    for key in ("requirements", "Dependencies", "dependencies", "requires"):
+        extracted = _extract_requirement_items(payload.get(key))
+        if extracted:
+            return extracted
+    return tuple()
+
+
+def _extract_requirement_items(value: object) -> tuple[str, ...]:
+    if value is None:
+        return tuple()
+
+    if isinstance(value, str):
+        return _split_requirement_text(value)
+
+    if isinstance(value, Mapping):
+        items: list[str] = []
+        for nested_key in ("name", "display_name", "description", "requirement", "value"):
+            nested = value.get(nested_key)
+            if isinstance(nested, str):
+                items.extend(_split_requirement_text(nested))
+        if not items:
+            for nested_value in value.values():
+                items.extend(_extract_requirement_items(nested_value))
+        return _dedupe_requirement_items(items)
+
+    if isinstance(value, list):
+        items: list[str] = []
+        for item in value:
+            items.extend(_extract_requirement_items(item))
+        return _dedupe_requirement_items(items)
+
+    return tuple()
+
+
+def _split_requirement_text(raw_text: str) -> tuple[str, ...]:
+    text = unescape(raw_text.strip())
+    if not text:
+        return tuple()
+
+    text = re.sub(r"<[^>]+>", " ", text)
+    chunks = re.split(r"[\n\r;,]+", text)
+    items = [chunk.strip(" -*\t") for chunk in chunks if chunk.strip(" -*\t")]
+    return _dedupe_requirement_items(items)
+
+
+def _dedupe_requirement_items(items: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    deduped: dict[str, str] = {}
+    for raw_item in items:
+        item = str(raw_item).strip()
+        if not item:
+            continue
+        key = item.casefold()
+        if key not in deduped:
+            deduped[key] = item
+
+    return tuple(sorted(deduped.values(), key=str.casefold))
 
 
 def _extract_generic_page_url(payload: Mapping[str, Any]) -> str | None:

@@ -26,6 +26,7 @@ from .update_metadata import (
     compare_versions,
     resolve_remote_link,
 )
+from .remote_requirements import evaluate_remote_requirements_for_package_mods
 
 __all__ = [
     "APP_STATE_VERSION",
@@ -47,6 +48,7 @@ __all__ = [
     "save_app_config",
     "scan_mods_directory",
     "check_updates_for_inventory",
+    "evaluate_remote_requirements_for_package_mods",
     "compare_versions",
     "resolve_remote_link",
     "MetadataFetchError",

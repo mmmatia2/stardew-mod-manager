@@ -20,6 +20,7 @@ from .models import (
     PackageWarning,
     ParseWarning,
     PathValidationIssue,
+    RemoteRequirementGuidance,
     RemoteModLink,
     SandboxInstallPlan,
     SandboxInstallPlanEntry,
@@ -43,6 +44,13 @@ from .environment_codes import (
 )
 from .install_codes import BLOCKED, INSTALL_NEW, OVERWRITE_WITH_ARCHIVE, SandboxInstallAction
 from .package_codes import PackageFindingKind
+from .remote_requirement_codes import (
+    NO_REMOTE_LINK_FOR_REQUIREMENTS,
+    REQUIREMENTS_ABSENT,
+    REQUIREMENTS_PRESENT,
+    REQUIREMENTS_UNAVAILABLE,
+    RemoteRequirementState,
+)
 from .unique_id import canonicalize_unique_id
 from .scan_codes import ScanEntryKind
 from .update_codes import RemoteLinkProvider, UpdateState
@@ -76,6 +84,12 @@ __all__ = [
     "ParseWarning",
     "ParseWarningCode",
     "PathValidationIssue",
+    "RemoteRequirementGuidance",
+    "RemoteRequirementState",
+    "REQUIREMENTS_PRESENT",
+    "REQUIREMENTS_ABSENT",
+    "REQUIREMENTS_UNAVAILABLE",
+    "NO_REMOTE_LINK_FOR_REQUIREMENTS",
     "RemoteModLink",
     "RemoteLinkProvider",
     "SandboxInstallPlan",

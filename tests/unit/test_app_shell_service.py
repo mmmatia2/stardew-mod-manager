@@ -195,6 +195,25 @@ def test_inspect_zip_with_inventory_context_resolves_content_pack_for_dependency
     )
 
 
+def test_inspect_zip_with_inventory_context_includes_remote_requirement_guidance(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    package = tmp_path / "simple.zip"
+
+    with ZipFile(package, "w") as archive:
+        archive.writestr(
+            "Simple/manifest.json",
+            '{"Name":"Simple","UniqueID":"Sample.Simple","Version":"1.0.0"}',
+        )
+
+    result = service.inspect_zip_with_inventory_context(str(package), _empty_inventory())
+
+    assert len(result.remote_requirements) == 1
+    assert result.remote_requirements[0].unique_id == "Sample.Simple"
+    assert result.remote_requirements[0].state == "no_remote_link"
+
+
 def test_inspect_zip_rejects_invalid_zip_content(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     package = tmp_path / "broken.zip"
@@ -300,6 +319,8 @@ def test_build_sandbox_install_plan_allows_safe_custom_target(tmp_path: Path) ->
 
     assert len(plan.entries) == 1
     assert plan.sandbox_mods_path == sandbox
+    assert len(plan.remote_requirements) == 1
+    assert plan.remote_requirements[0].state == "no_remote_link"
 
 
 def test_build_sandbox_install_plan_includes_dependency_preflight_warnings(
@@ -605,6 +626,8 @@ def test_initialize_and_poll_downloads_watch_detects_new_zip(tmp_path: Path) -> 
     )
     assert len(result.intakes) == 1
     assert result.intakes[0].classification == "new_install_candidate"
+    assert len(result.intakes[0].remote_requirements) == 1
+    assert result.intakes[0].remote_requirements[0].state == "no_remote_link"
 
 
 def test_select_intake_result_returns_selected_entry(tmp_path: Path) -> None:

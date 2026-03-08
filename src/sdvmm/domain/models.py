@@ -8,6 +8,7 @@ from sdvmm.domain.dependency_codes import DependencyState
 from sdvmm.domain.environment_codes import EnvironmentState
 from sdvmm.domain.install_codes import SandboxInstallAction
 from sdvmm.domain.package_codes import PackageFindingKind
+from sdvmm.domain.remote_requirement_codes import RemoteRequirementState
 from sdvmm.domain.scan_codes import ScanEntryKind
 from sdvmm.domain.update_codes import RemoteLinkProvider, UpdateState
 from sdvmm.domain.warning_codes import ParseWarningCode
@@ -103,11 +104,33 @@ class ModUpdateStatus:
     state: UpdateState
     remote_link: RemoteModLink | None
     message: str | None = None
+    remote_requirements_state: RemoteRequirementState = "requirements_unavailable"
+    remote_requirements: tuple[str, ...] = tuple()
+    remote_requirements_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ModUpdateReport:
     statuses: tuple[ModUpdateStatus, ...]
+
+
+RemoteRequirementContextSource = Literal[
+    "package_inspection",
+    "downloads_intake",
+    "sandbox_plan",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteRequirementGuidance:
+    source: RemoteRequirementContextSource
+    unique_id: str
+    name: str
+    provider: RemoteLinkProvider | None
+    state: RemoteRequirementState
+    requirements: tuple[str, ...]
+    remote_link: RemoteModLink | None
+    message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +179,7 @@ class PackageModEntry:
     version: str
     manifest_path: str
     dependencies: tuple[ManifestDependency, ...] = tuple()
+    update_keys: tuple[str, ...] = tuple()
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +203,7 @@ class PackageInspectionResult:
     warnings: tuple[PackageWarning, ...]
     findings: tuple[PackageFinding, ...]
     dependency_findings: tuple[DependencyPreflightFinding, ...] = tuple()
+    remote_requirements: tuple[RemoteRequirementGuidance, ...] = tuple()
 
 
 IntakeClassification = Literal[
@@ -199,6 +224,7 @@ class DownloadsIntakeResult:
     warnings: tuple[PackageWarning, ...]
     findings: tuple[PackageFinding, ...]
     dependency_findings: tuple[DependencyPreflightFinding, ...] = tuple()
+    remote_requirements: tuple[RemoteRequirementGuidance, ...] = tuple()
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,6 +259,7 @@ class SandboxInstallPlan:
     package_warnings: tuple[PackageWarning, ...]
     plan_warnings: tuple[str, ...]
     dependency_findings: tuple[DependencyPreflightFinding, ...] = tuple()
+    remote_requirements: tuple[RemoteRequirementGuidance, ...] = tuple()
 
 
 @dataclass(frozen=True, slots=True)

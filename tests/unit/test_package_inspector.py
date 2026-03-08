@@ -141,6 +141,28 @@ def test_package_inspection_exposes_dependency_preflight_without_inventory_conte
     assert result.dependency_findings[0].state == "unresolved_dependency_context"
 
 
+def test_package_inspection_preserves_update_keys_for_remote_awareness(tmp_path: Path) -> None:
+    package_path = tmp_path / "package.zip"
+    _build_zip(
+        package_path,
+        {
+            "ModA/manifest.json": (
+                "{"
+                '"Name":"Mod A",'
+                '"UniqueID":"Sample.ModA",'
+                '"Version":"1.0.0",'
+                '"UpdateKeys":["Nexus:12345"]'
+                "}"
+            )
+        },
+    )
+
+    result = inspect_zip_package(package_path)
+
+    assert len(result.mods) == 1
+    assert result.mods[0].update_keys == ("Nexus:12345",)
+
+
 def test_package_inspection_surfaces_content_pack_for_dependency_without_inventory_context(
     tmp_path: Path,
 ) -> None:

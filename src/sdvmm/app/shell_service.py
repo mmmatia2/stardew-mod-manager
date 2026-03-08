@@ -16,6 +16,7 @@ from sdvmm.domain.models import (
     ModUpdateReport,
     ModsInventory,
     PackageInspectionResult,
+    PackageModEntry,
     SandboxInstallPlan,
     SandboxInstallResult,
 )
@@ -47,6 +48,7 @@ from sdvmm.services.sandbox_installer import (
     execute_sandbox_install_plan as execute_sandbox_install_plan_service,
 )
 from sdvmm.services.update_metadata import check_updates_for_inventory
+from sdvmm.services.remote_requirements import evaluate_remote_requirements_for_package_mods
 
 
 class AppShellError(ValueError):
@@ -255,7 +257,15 @@ class AppShellService:
             installed_mods=inventory.mods if inventory is not None else None,
             source="package_inspection",
         )
-        return replace(base_result, dependency_findings=dependency_findings)
+        remote_requirements = evaluate_remote_requirements_for_package_mods(
+            base_result.mods,
+            source="package_inspection",
+        )
+        return replace(
+            base_result,
+            dependency_findings=dependency_findings,
+            remote_requirements=remote_requirements,
+        )
 
     @staticmethod
     def evaluate_installed_dependency_preflight(
@@ -287,11 +297,22 @@ class AppShellService:
         watched_path = self._parse_and_validate_watched_downloads_path(watched_downloads_path_text)
 
         try:
-            return poll_watched_directory(
+            result = poll_watched_directory(
                 watched_path=watched_path,
                 known_zip_paths=known_zip_paths,
                 inventory=inventory,
             )
+            enriched_intakes = tuple(
+                replace(
+                    intake,
+                    remote_requirements=evaluate_remote_requirements_for_package_mods(
+                        intake.mods,
+                        source="downloads_intake",
+                    ),
+                )
+                for intake in result.intakes
+            )
+            return replace(result, intakes=enriched_intakes)
         except OSError as exc:
             raise AppShellError(f"Could not poll watched downloads directory: {exc}") from exc
 
@@ -452,7 +473,19 @@ class AppShellService:
                 base_findings=plan.dependency_findings,
                 installed_inventory=inventory,
             )
-            return _apply_dependency_preflight_to_plan(plan, dependency_findings)
+            plan_with_dependency_preflight = _apply_dependency_preflight_to_plan(
+                plan,
+                dependency_findings,
+            )
+            inspected_mods = _inspect_package_mod_entries(package_path)
+            remote_requirements = evaluate_remote_requirements_for_package_mods(
+                inspected_mods,
+                source="sandbox_plan",
+            )
+            return replace(
+                plan_with_dependency_preflight,
+                remote_requirements=remote_requirements,
+            )
         except (SandboxInstallError, zipfile.BadZipFile) as exc:
             raise AppShellError(str(exc)) from exc
         except OSError as exc:
@@ -869,3 +902,8 @@ def _apply_dependency_preflight_to_plan(
         plan_warnings=tuple(plan_warnings),
         dependency_findings=dependency_findings,
     )
+
+
+def _inspect_package_mod_entries(package_path: Path) -> tuple[PackageModEntry, ...]:
+    inspection = inspect_zip_package(package_path)
+    return inspection.mods

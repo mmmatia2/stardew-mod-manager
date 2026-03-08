@@ -154,6 +154,7 @@ def _parse_manifest_entry(
         version=manifest.version,
         manifest_path=manifest_entry,
         dependencies=manifest.dependencies,
+        update_keys=manifest.update_keys,
     )
     return mod_entry, warnings
 

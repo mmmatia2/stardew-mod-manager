@@ -23,6 +23,7 @@ Minimal local-first foundation for scanning a Stardew Valley `Mods` directory.
   - explicit sandbox scan context after sandbox install actions
   - conservative destination safety guard that blocks sandbox installs to configured real Mods path
   - metadata/update awareness checks for installed mods (no auto download/install)
+  - provider-aware remote requirement guidance (Nexus first) kept separate from manifest dependency blocking
   - configurable local Downloads watcher for new zip intake (no auto install)
   - dependency preflight awareness for installed mods, inspected packages, intake results, and sandbox plans
   - local game environment detection for game path, Mods path, and SMAPI presence
@@ -47,7 +48,7 @@ Minimal local-first foundation for scanning a Stardew Valley `Mods` directory.
 - SQLite or any persistence layer
 - full installer/update/rollback pipeline for real game Mods
 - profile switching implementation
-- metadata network checks
+- automatic metadata/download actions
 - SMAPI diagnostics flows
 - unrestricted deep recursive scan
 - automatic install into real game Mods directory
@@ -57,6 +58,8 @@ Minimal local-first foundation for scanning a Stardew Valley `Mods` directory.
 
 - Metadata checks are awareness-only; they do not download or install mods.
 - Nexus version checks require `SDVMM_NEXUS_API_KEY` in the environment.
+- Manifest dependency preflight is local/package truth for blocking decisions.
+- Remote/source-declared requirements are complementary guidance and are non-blocking by default.
 
 ## Local development
 
