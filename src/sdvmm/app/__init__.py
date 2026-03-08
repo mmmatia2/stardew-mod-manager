@@ -1,6 +1,7 @@
 from .inventory_presenter import (
     build_downloads_intake_text,
     build_findings_text,
+    build_intake_correlation_text,
     build_package_inspection_text,
     build_sandbox_install_plan_text,
     build_sandbox_install_result_text,
@@ -12,6 +13,7 @@ from .shell_service import (
     SCAN_TARGET_SANDBOX_MODS,
     AppShellError,
     AppShellService,
+    IntakeUpdateCorrelation,
     InstallTargetSafetyDecision,
     ScanResult,
     ScanTargetKind,
@@ -21,6 +23,7 @@ from .shell_service import (
 __all__ = [
     "AppShellError",
     "AppShellService",
+    "IntakeUpdateCorrelation",
     "InstallTargetSafetyDecision",
     "ScanResult",
     "ScanTargetKind",
@@ -29,6 +32,7 @@ __all__ = [
     "StartupConfigState",
     "build_findings_text",
     "build_downloads_intake_text",
+    "build_intake_correlation_text",
     "build_package_inspection_text",
     "build_sandbox_install_plan_text",
     "build_sandbox_install_result_text",

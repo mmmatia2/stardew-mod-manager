@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sdvmm.app.shell_service import IntakeUpdateCorrelation
 from sdvmm.domain.models import (
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
@@ -232,3 +233,18 @@ def _intake_next_action(classification: str) -> str:
     if classification == "update_replace_candidate":
         return "actionable (plan install, review overwrite/archive preflight)"
     return "actionable (plan install)"
+
+
+def build_intake_correlation_text(correlations: tuple[IntakeUpdateCorrelation, ...]) -> str:
+    lines: list[str] = []
+    lines.append("Intake update-flow guidance:")
+
+    if not correlations:
+        lines.append("- none")
+        return "\n".join(lines)
+
+    for correlation in correlations:
+        lines.append(f"- {correlation.intake.package_path.name}: {correlation.summary}")
+        lines.append(f"  next-step: {correlation.next_step}")
+
+    return "\n".join(lines)

@@ -27,6 +27,7 @@ from PySide6.QtGui import QDesktopServices
 from sdvmm.app.inventory_presenter import (
     build_downloads_intake_text,
     build_findings_text,
+    build_intake_correlation_text,
     build_package_inspection_text,
     build_sandbox_install_plan_text,
     build_sandbox_install_result_text,
@@ -37,14 +38,17 @@ from sdvmm.app.shell_service import (
     SCAN_TARGET_SANDBOX_MODS,
     AppShellError,
     AppShellService,
+    IntakeUpdateCorrelation,
 )
 from sdvmm.domain.models import (
     AppConfig,
     DownloadsIntakeResult,
+    ModUpdateStatus,
     ModUpdateReport,
     ModsInventory,
     SandboxInstallPlan,
 )
+from sdvmm.domain.unique_id import canonicalize_unique_id
 
 
 class MainWindow(QMainWindow):
@@ -56,8 +60,11 @@ class MainWindow(QMainWindow):
         self._current_inventory: ModsInventory | None = None
         self._current_update_report: ModUpdateReport | None = None
         self._row_remote_links: dict[int, str] = {}
+        self._row_update_statuses: dict[int, ModUpdateStatus] = {}
         self._known_watched_zip_paths: tuple[Path, ...] = tuple()
         self._detected_intakes: tuple[DownloadsIntakeResult, ...] = tuple()
+        self._intake_correlations: tuple[IntakeUpdateCorrelation, ...] = tuple()
+        self._guided_update_unique_ids: tuple[str, ...] = tuple()
 
         self.setWindowTitle("Stardew Mod Manager - Local Scan")
         self.resize(950, 600)
@@ -397,6 +404,7 @@ class MainWindow(QMainWindow):
         self._current_update_report = report
         self._apply_update_report(report)
         self._findings_box.setPlainText(build_update_report_text(report))
+        self._recompute_intake_correlations()
         self._set_status(f"Update check complete: {len(report.statuses)} mod(s)")
 
     def _on_open_remote_page(self) -> None:
@@ -424,6 +432,24 @@ class MainWindow(QMainWindow):
             message = f"Could not open remote page: {url}"
             QMessageBox.critical(self, "Open failed", message)
             self._set_status(message)
+            return
+
+        status = self._row_update_statuses.get(row)
+        if status is not None and status.state == "update_available":
+            self._guided_update_unique_ids = self._add_guided_unique_id(
+                self._guided_update_unique_ids,
+                status.unique_id,
+            )
+            self._recompute_intake_correlations()
+            hint = self._shell_service.build_manual_update_flow_hint(
+                unique_id=status.unique_id,
+                watched_downloads_path_text=self._watched_downloads_path_input.text(),
+                watcher_running=self._watch_timer.isActive(),
+            )
+            self._findings_box.setPlainText(hint)
+            self._set_status(
+                f"Opened remote page for update target {status.unique_id}. Follow guided steps."
+            )
             return
 
         self._set_status(f"Opened remote page: {url}")
@@ -471,15 +497,29 @@ class MainWindow(QMainWindow):
         if not result.intakes:
             return
 
+        new_correlations = self._shell_service.correlate_intakes_with_updates(
+            intakes=result.intakes,
+            update_report=self._current_update_report,
+            guided_update_unique_ids=self._guided_update_unique_ids,
+        )
         self._detected_intakes = self._detected_intakes + result.intakes
-        self._refresh_intake_selector()
-        self._findings_box.setPlainText(build_downloads_intake_text(result))
+        self._recompute_intake_correlations()
+        self._findings_box.setPlainText(
+            "\n\n".join(
+                (
+                    build_downloads_intake_text(result),
+                    build_intake_correlation_text(new_correlations),
+                )
+            )
+        )
         self._set_status(f"Detected {len(result.intakes)} new package(s) in watched downloads.")
 
     def _render_inventory(self, inventory: ModsInventory) -> None:
         self._current_inventory = inventory
         self._current_update_report = None
         self._row_remote_links = {}
+        self._row_update_statuses = {}
+        self._guided_update_unique_ids = tuple()
         self._mods_table.setRowCount(len(inventory.mods))
 
         for row, mod in enumerate(inventory.mods):
@@ -499,6 +539,7 @@ class MainWindow(QMainWindow):
 
         by_folder = {status.folder_path: status for status in report.statuses}
         self._row_remote_links = {}
+        self._row_update_statuses = {}
 
         for row, mod in enumerate(self._current_inventory.mods):
             status = by_folder.get(mod.folder_path)
@@ -509,6 +550,7 @@ class MainWindow(QMainWindow):
 
             self._mods_table.setItem(row, 3, QTableWidgetItem(status.remote_version or "-"))
             self._mods_table.setItem(row, 4, QTableWidgetItem(status.state))
+            self._row_update_statuses[row] = status
             if status.remote_link is not None:
                 self._row_remote_links[row] = status.remote_link.page_url
 
@@ -524,6 +566,7 @@ class MainWindow(QMainWindow):
     def _on_watched_path_changed(self, *_: object) -> None:
         self._known_watched_zip_paths = tuple()
         self._detected_intakes = tuple()
+        self._intake_correlations = tuple()
         self._refresh_intake_selector()
         if self._watch_timer.isActive():
             self._watch_timer.stop()
@@ -569,12 +612,20 @@ class MainWindow(QMainWindow):
 
         self._pending_install_plan = plan
         self._findings_box.setPlainText(build_sandbox_install_plan_text(plan))
-        self._set_status(
-            f"Install plan ready from intake package: {plan.package_path.name}"
-        )
+        correlation = self._selected_intake_correlation()
+        if correlation is not None and correlation.matched_update_available_unique_ids:
+            self._set_status(
+                "Install plan ready for detected update package. "
+                "Review overwrite/archive actions before execution."
+            )
+            return
+        self._set_status(f"Install plan ready from intake package: {plan.package_path.name}")
 
     def _on_intake_selection_changed(self, *_: object) -> None:
         self._plan_selected_intake_button.setEnabled(self._selected_intake_index() >= 0)
+        correlation = self._selected_intake_correlation()
+        if correlation is not None:
+            self._set_status(correlation.next_step)
 
     def _current_inventory_or_empty(self) -> ModsInventory:
         if self._current_inventory is not None:
@@ -618,14 +669,20 @@ class MainWindow(QMainWindow):
 
         self._intake_result_combo.setEnabled(True)
         for idx, intake in enumerate(self._detected_intakes):
+            correlation = self._intake_correlations[idx] if idx < len(self._intake_correlations) else None
             actionable = (
                 "actionable"
                 if self._shell_service.is_actionable_intake_result(intake)
                 else "non-actionable"
             )
+            flow_tag = ""
+            if correlation is not None and correlation.matched_guided_update_unique_ids:
+                flow_tag = ", guided-update-match"
+            elif correlation is not None and correlation.matched_update_available_unique_ids:
+                flow_tag = ", update-available-match"
             label = (
                 f"{intake.package_path.name} "
-                f"[{intake.classification}, {actionable}]"
+                f"[{intake.classification}, {actionable}{flow_tag}]"
             )
             self._intake_result_combo.addItem(label, idx)
 
@@ -637,6 +694,26 @@ class MainWindow(QMainWindow):
         if isinstance(value, int):
             return value
         return -1
+
+    def _selected_intake_correlation(self) -> IntakeUpdateCorrelation | None:
+        idx = self._selected_intake_index()
+        if idx < 0 or idx >= len(self._intake_correlations):
+            return None
+        return self._intake_correlations[idx]
+
+    def _recompute_intake_correlations(self) -> None:
+        self._intake_correlations = self._shell_service.correlate_intakes_with_updates(
+            intakes=self._detected_intakes,
+            update_report=self._current_update_report,
+            guided_update_unique_ids=self._guided_update_unique_ids,
+        )
+        self._refresh_intake_selector()
+
+    @staticmethod
+    def _add_guided_unique_id(existing: tuple[str, ...], new_unique_id: str) -> tuple[str, ...]:
+        items = {canonicalize_unique_id(value): value for value in existing}
+        items[canonicalize_unique_id(new_unique_id)] = new_unique_id
+        return tuple(sorted(items.values(), key=str.casefold))
 
     @staticmethod
     def _scan_target_label(target: str) -> str:

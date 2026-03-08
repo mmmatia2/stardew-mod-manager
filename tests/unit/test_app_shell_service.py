@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from zipfile import ZipFile
+from typing import Literal
 
 import pytest
 
@@ -11,7 +12,8 @@ from sdvmm.app.shell_service import (
     AppShellError,
     AppShellService,
 )
-from sdvmm.domain.models import AppConfig
+from sdvmm.domain.models import AppConfig, ModUpdateReport, ModUpdateStatus
+from sdvmm.domain.update_codes import UpdateState
 from sdvmm.services.app_state_store import save_app_config
 
 
@@ -548,6 +550,70 @@ def test_build_sandbox_install_plan_from_intake_rejects_unusable_package(tmp_pat
         )
 
 
+def test_correlate_intake_with_updates_marks_update_available_match(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    intake = _intake_result(
+        package_path=tmp_path / "update.zip",
+        classification="update_replace_candidate",
+        matched_installed_unique_ids=("Sample.Exists",),
+    )
+    report = _update_report(
+        _update_status(unique_id="Sample.Exists", state="update_available"),
+    )
+
+    correlation = service.correlate_intake_with_updates(
+        intake=intake,
+        update_report=report,
+        guided_update_unique_ids=tuple(),
+    )
+
+    assert correlation.actionable is True
+    assert correlation.matched_update_available_unique_ids == ("Sample.Exists",)
+    assert "update available" in correlation.summary.casefold()
+    assert "plan selected intake" in correlation.next_step.casefold()
+
+
+def test_correlate_intake_with_updates_prefers_guided_update_match(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    intake = _intake_result(
+        package_path=tmp_path / "guided_update.zip",
+        classification="update_replace_candidate",
+        matched_installed_unique_ids=("Sample.Exists",),
+    )
+    report = _update_report(
+        _update_status(unique_id="Sample.Exists", state="update_available"),
+    )
+
+    correlation = service.correlate_intake_with_updates(
+        intake=intake,
+        update_report=report,
+        guided_update_unique_ids=("Sample.Exists",),
+    )
+
+    assert correlation.matched_guided_update_unique_ids == ("Sample.Exists",)
+    assert "guided update target" in correlation.summary.casefold()
+    assert correlation.actionable is True
+
+
+def test_correlate_intake_with_updates_keeps_unusable_non_actionable(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    intake = _intake_result(
+        package_path=tmp_path / "broken.zip",
+        classification="unusable_package",
+        matched_installed_unique_ids=("Sample.Exists",),
+    )
+
+    correlation = service.correlate_intake_with_updates(
+        intake=intake,
+        update_report=None,
+        guided_update_unique_ids=tuple(),
+    )
+
+    assert correlation.actionable is False
+    assert correlation.matched_update_available_unique_ids == ()
+    assert "unusable" in correlation.summary.casefold()
+
+
 def _empty_inventory():
     from sdvmm.domain.models import ModsInventory
 
@@ -581,6 +647,47 @@ def _inventory_with_mod(unique_id: str):
         scan_entry_findings=tuple(),
         ignored_entries=tuple(),
     )
+
+
+def _intake_result(
+    *,
+    package_path: Path,
+    classification: Literal[
+        "new_install_candidate",
+        "update_replace_candidate",
+        "multi_mod_package",
+        "unusable_package",
+    ],
+    matched_installed_unique_ids: tuple[str, ...],
+):
+    from sdvmm.domain.models import DownloadsIntakeResult
+
+    return DownloadsIntakeResult(
+        package_path=package_path,
+        classification=classification,
+        message="test",
+        mods=tuple(),
+        matched_installed_unique_ids=matched_installed_unique_ids,
+        warnings=tuple(),
+        findings=tuple(),
+    )
+
+
+def _update_status(*, unique_id: str, state: UpdateState) -> ModUpdateStatus:
+    return ModUpdateStatus(
+        unique_id=unique_id,
+        name=unique_id,
+        folder_path=Path("/tmp") / unique_id,
+        installed_version="1.0.0",
+        remote_version="2.0.0",
+        state=state,
+        remote_link=None,
+        message=None,
+    )
+
+
+def _update_report(*statuses: ModUpdateStatus) -> ModUpdateReport:
+    return ModUpdateReport(statuses=tuple(statuses))
 
 
 def _create_mod(mods_root: Path, folder_name: str, unique_id: str) -> None:

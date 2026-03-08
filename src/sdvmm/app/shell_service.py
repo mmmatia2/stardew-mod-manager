@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from collections.abc import Iterable
 from typing import Literal
 import zipfile
 
@@ -16,6 +17,7 @@ from sdvmm.domain.models import (
     SandboxInstallPlan,
     SandboxInstallResult,
 )
+from sdvmm.domain.unique_id import canonicalize_unique_id
 from sdvmm.services.app_state_store import (
     AppStateStoreError,
     load_app_config,
@@ -58,6 +60,16 @@ class ScanResult:
 class InstallTargetSafetyDecision:
     allowed: bool
     message: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class IntakeUpdateCorrelation:
+    intake: DownloadsIntakeResult
+    actionable: bool
+    matched_update_available_unique_ids: tuple[str, ...]
+    matched_guided_update_unique_ids: tuple[str, ...]
+    summary: str
+    next_step: str
 
 
 _ACTIONABLE_INTAKE_CLASSIFICATIONS = {
@@ -270,6 +282,90 @@ class AppShellService:
             configured_real_mods_path=configured_real_mods_path,
         )
 
+    def correlate_intakes_with_updates(
+        self,
+        *,
+        intakes: tuple[DownloadsIntakeResult, ...],
+        update_report: ModUpdateReport | None,
+        guided_update_unique_ids: tuple[str, ...] = tuple(),
+    ) -> tuple[IntakeUpdateCorrelation, ...]:
+        return tuple(
+            self.correlate_intake_with_updates(
+                intake=intake,
+                update_report=update_report,
+                guided_update_unique_ids=guided_update_unique_ids,
+            )
+            for intake in intakes
+        )
+
+    def correlate_intake_with_updates(
+        self,
+        *,
+        intake: DownloadsIntakeResult,
+        update_report: ModUpdateReport | None,
+        guided_update_unique_ids: tuple[str, ...] = tuple(),
+    ) -> IntakeUpdateCorrelation:
+        actionable = self.is_actionable_intake_result(intake)
+
+        update_available_keys: dict[str, str] = {}
+        if update_report is not None:
+            for status in update_report.statuses:
+                if status.state != "update_available":
+                    continue
+                key = canonicalize_unique_id(status.unique_id)
+                if key not in update_available_keys:
+                    update_available_keys[key] = status.unique_id
+
+        matched_update_available = _sorted_unique_ids(
+            unique_id
+            for unique_id in intake.matched_installed_unique_ids
+            if canonicalize_unique_id(unique_id) in update_available_keys
+        )
+        guided_keys = {canonicalize_unique_id(value) for value in guided_update_unique_ids}
+        matched_guided = _sorted_unique_ids(
+            unique_id
+            for unique_id in intake.matched_installed_unique_ids
+            if canonicalize_unique_id(unique_id) in guided_keys
+        )
+
+        summary, next_step = _build_intake_flow_messages(
+            intake=intake,
+            actionable=actionable,
+            matched_update_available=matched_update_available,
+            matched_guided=matched_guided,
+        )
+
+        return IntakeUpdateCorrelation(
+            intake=intake,
+            actionable=actionable,
+            matched_update_available_unique_ids=matched_update_available,
+            matched_guided_update_unique_ids=matched_guided,
+            summary=summary,
+            next_step=next_step,
+        )
+
+    @staticmethod
+    def build_manual_update_flow_hint(
+        *,
+        unique_id: str,
+        watched_downloads_path_text: str,
+        watcher_running: bool,
+    ) -> str:
+        watched_path = watched_downloads_path_text.strip() or "<set watched downloads path first>"
+        watch_step = (
+            "Watcher is running; it will detect new zip files added now."
+            if watcher_running
+            else "Start watch before downloading, so new zip files are detected."
+        )
+        return (
+            f"Manual update flow for {unique_id}:\n"
+            "1. Open the mod page and download the package manually.\n"
+            f"2. Save the zip into watched downloads path: {watched_path}\n"
+            f"3. {watch_step}\n"
+            "4. Select the detected package and click 'Plan selected intake'.\n"
+            "5. Review sandbox preflight plan and execute explicitly."
+        )
+
     def build_sandbox_install_plan(
         self,
         package_path_text: str,
@@ -474,3 +570,53 @@ def _paths_deterministically_match(path_a: Path, path_b: Path) -> bool:
         return left_text.casefold() == right_text.casefold()
 
     return left_text == right_text
+
+
+def _sorted_unique_ids(values: Iterable[str]) -> tuple[str, ...]:
+    unique = {str(value) for value in values if str(value).strip()}
+    return tuple(sorted(unique, key=str.casefold))
+
+
+def _build_intake_flow_messages(
+    *,
+    intake: DownloadsIntakeResult,
+    actionable: bool,
+    matched_update_available: tuple[str, ...],
+    matched_guided: tuple[str, ...],
+) -> tuple[str, str]:
+    if not actionable:
+        return (
+            "Detected package is unusable for install planning.",
+            "Fix or replace this package before planning.",
+        )
+
+    if matched_guided:
+        joined = ", ".join(matched_guided)
+        return (
+            f"Detected package likely matches guided update target(s): {joined}.",
+            "Select this package and click 'Plan selected intake'.",
+        )
+
+    if matched_update_available:
+        joined = ", ".join(matched_update_available)
+        return (
+            f"Detected package likely matches mod(s) with update available: {joined}.",
+            "Select this package and click 'Plan selected intake'.",
+        )
+
+    if intake.classification == "update_replace_candidate":
+        return (
+            "Detected package matches an installed mod by UniqueID.",
+            "Select package and plan update in sandbox after reviewing overwrite/archive actions.",
+        )
+
+    if intake.classification == "multi_mod_package":
+        return (
+            "Detected package contains multiple mods.",
+            "Select package and review all sandbox plan entries before execution.",
+        )
+
+    return (
+        "Detected package appears to be a new install candidate.",
+        "Select package and plan sandbox install.",
+    )
