@@ -110,6 +110,17 @@ class IntakeUpdateCorrelation:
     next_step: str
 
 
+@dataclass(frozen=True, slots=True)
+class DiscoveryContextCorrelation:
+    entry: ModDiscoveryEntry
+    installed_match_unique_id: str | None
+    update_state: str | None
+    provider_relation: str
+    provider_relation_note: str | None
+    context_summary: str
+    next_step: str
+
+
 _ACTIONABLE_INTAKE_CLASSIFICATIONS = {
     "new_install_candidate",
     "update_replace_candidate",
@@ -357,6 +368,89 @@ class AppShellService:
             return entry.source_page_url
         raise AppShellError(
             f"No source page URL is available for discovered mod: {entry.unique_id}"
+        )
+
+    def correlate_discovery_results(
+        self,
+        *,
+        discovery_result: ModDiscoveryResult,
+        inventory: ModsInventory | None,
+        update_report: ModUpdateReport | None,
+    ) -> tuple[DiscoveryContextCorrelation, ...]:
+        installed_keys: dict[str, str] = {}
+        if inventory is not None:
+            for mod in inventory.mods:
+                key = canonicalize_unique_id(mod.unique_id)
+                installed_keys.setdefault(key, mod.unique_id)
+
+        update_status_by_key: dict[str, object] = {}
+        if update_report is not None:
+            for status in update_report.statuses:
+                key = canonicalize_unique_id(status.unique_id)
+                update_status_by_key.setdefault(key, status)
+
+        correlations: list[DiscoveryContextCorrelation] = []
+        for entry in discovery_result.results:
+            key_candidates = _discovery_entry_unique_id_keys(entry)
+            installed_match_unique_id = _first_present(installed_keys, key_candidates)
+            update_status = _first_present(update_status_by_key, key_candidates)
+
+            update_state = None
+            tracked_provider = None
+            if update_status is not None:
+                update_state = str(update_status.state)
+                if update_status.remote_link is not None:
+                    tracked_provider = str(update_status.remote_link.provider)
+
+            provider_relation, provider_relation_note = _build_discovery_provider_relation(
+                discovery_source_provider=entry.source_provider,
+                tracked_provider=tracked_provider,
+            )
+            context_summary, next_step = _build_discovery_context_messages(
+                installed_match_unique_id=installed_match_unique_id,
+                update_state=update_state,
+            )
+
+            correlations.append(
+                DiscoveryContextCorrelation(
+                    entry=entry,
+                    installed_match_unique_id=installed_match_unique_id,
+                    update_state=update_state,
+                    provider_relation=provider_relation,
+                    provider_relation_note=provider_relation_note,
+                    context_summary=context_summary,
+                    next_step=next_step,
+                )
+            )
+
+        return tuple(correlations)
+
+    @staticmethod
+    def build_manual_discovery_flow_hint(
+        *,
+        correlation: DiscoveryContextCorrelation,
+        watched_downloads_path_text: str,
+        watcher_running: bool,
+    ) -> str:
+        watched_path = watched_downloads_path_text.strip() or "<set watched downloads path first>"
+        watch_step = (
+            "Watcher is running; it will detect new zip files added now."
+            if watcher_running
+            else "Start watch before downloading, so new zip files are detected."
+        )
+        relation = (
+            f"\nProvider relation: {correlation.provider_relation_note}"
+            if correlation.provider_relation_note
+            else ""
+        )
+        return (
+            f"Manual discovery flow for {correlation.entry.unique_id}:\n"
+            f"Context: {correlation.context_summary}.{relation}\n"
+            "1. Open source page and download the zip manually.\n"
+            f"2. Save the zip into watched downloads path: {watched_path}\n"
+            f"3. {watch_step}\n"
+            "4. In detected packages, select that zip and click 'Plan selected intake'.\n"
+            "5. Review dependency + archive/overwrite warnings, then run install explicitly."
         )
 
     def get_nexus_integration_status(
@@ -1067,6 +1161,118 @@ def _paths_deterministically_match(path_a: Path, path_b: Path) -> bool:
 def _sorted_unique_ids(values: Iterable[str]) -> tuple[str, ...]:
     unique = {str(value) for value in values if str(value).strip()}
     return tuple(sorted(unique, key=str.casefold))
+
+
+def _discovery_entry_unique_id_keys(entry: ModDiscoveryEntry) -> tuple[str, ...]:
+    candidates = [entry.unique_id, *entry.alternate_unique_ids]
+    keys: dict[str, str] = {}
+    for candidate in candidates:
+        normalized = str(candidate).strip()
+        if not normalized:
+            continue
+        key = canonicalize_unique_id(normalized)
+        keys.setdefault(key, normalized)
+    return tuple(keys.keys())
+
+
+def _first_present(values_by_key: dict[str, object], keys: tuple[str, ...]) -> object | None:
+    for key in keys:
+        if key in values_by_key:
+            return values_by_key[key]
+    return None
+
+
+def _build_discovery_provider_relation(
+    *,
+    discovery_source_provider: str,
+    tracked_provider: str | None,
+) -> tuple[str, str | None]:
+    if tracked_provider is None:
+        return ("no_update_provider_context", None)
+
+    if discovery_source_provider not in {"nexus", "github"}:
+        return (
+            "provider_not_comparable",
+            "Tracked update provider exists, but discovery source is custom/other.",
+        )
+
+    if discovery_source_provider == tracked_provider:
+        return (
+            "provider_aligned",
+            f"Discovery source matches tracked update provider ({_provider_label(tracked_provider)}).",
+        )
+
+    return (
+        "provider_mismatch",
+        "Discovery source differs from tracked update provider "
+        f"({_provider_label(discovery_source_provider)} vs {_provider_label(tracked_provider)}).",
+    )
+
+
+def _build_discovery_context_messages(
+    *,
+    installed_match_unique_id: str | None,
+    update_state: str | None,
+) -> tuple[str, str]:
+    if installed_match_unique_id is None:
+        return (
+            "Not currently installed in the scanned inventory",
+            (
+                "Open source page, download manually, let watcher detect the zip, "
+                "then plan a safe install."
+            ),
+        )
+
+    if update_state == "update_available":
+        return (
+            f"Already installed ({installed_match_unique_id}); update is available in current metadata report",
+            (
+                "Open source page, download manually, let watcher detect the zip, "
+                "then plan a safe update/replace."
+            ),
+        )
+
+    if update_state == "up_to_date":
+        return (
+            f"Already installed ({installed_match_unique_id}); currently marked up to date",
+            (
+                "Open source page only if you intentionally want a manual reinstall or alternate build. "
+                "If downloaded, continue via watcher -> intake -> plan."
+            ),
+        )
+
+    if update_state == "metadata_unavailable":
+        return (
+            f"Already installed ({installed_match_unique_id}); update metadata currently unavailable",
+            (
+                "Open source page and continue manual flow if needed. You can also run Check updates again "
+                "after fixing metadata/provider issues."
+            ),
+        )
+
+    if update_state == "no_remote_link":
+        return (
+            f"Already installed ({installed_match_unique_id}); no tracked remote link in update report",
+            (
+                "Use discovery source page as manual source. Download manually, then continue via watcher "
+                "-> intake -> plan."
+            ),
+        )
+
+    return (
+        f"Already installed ({installed_match_unique_id}); update state not checked yet",
+        "Run Check updates for richer context, or continue manual watcher -> intake -> plan flow.",
+    )
+
+
+def _provider_label(provider: str) -> str:
+    labels = {
+        "nexus": "Nexus",
+        "github": "GitHub",
+        "json": "JSON",
+        "custom_url": "Custom URL",
+    }
+    return labels.get(provider, provider)
 
 
 def _build_intake_flow_messages(

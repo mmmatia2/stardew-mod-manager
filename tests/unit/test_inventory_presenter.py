@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from sdvmm.app.shell_service import DiscoveryContextCorrelation
 from sdvmm.app.inventory_presenter import (
     build_discovery_search_text,
     build_downloads_intake_text,
@@ -112,12 +113,25 @@ def test_discovery_search_text_shows_compatibility_and_next_step() -> None:
         ),
     )
 
-    text = build_discovery_search_text(result)
+    correlation = DiscoveryContextCorrelation(
+        entry=result.results[0],
+        installed_match_unique_id="spacechase0.SpaceCore",
+        update_state="update_available",
+        provider_relation="provider_aligned",
+        provider_relation_note="Discovery source matches tracked update provider (Nexus).",
+        context_summary="Already installed (spacechase0.SpaceCore); update is available in current metadata report",
+        next_step="Open source page, download manually, let watcher detect the zip, then plan a safe update/replace.",
+    )
+
+    text = build_discovery_search_text(result, (correlation,))
 
     assert "Mod Discovery" in text
     assert "SMAPI compatibility index" in text
     assert "SpaceCore" in text
     assert "Compatible" in text
+    assert "source context" in text
+    assert "provider relation" in text
+    assert "app context" in text
     assert "Open discovered page" in text
 
 

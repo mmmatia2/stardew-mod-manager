@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sdvmm.app.shell_service import IntakeUpdateCorrelation
+from sdvmm.app.shell_service import DiscoveryContextCorrelation, IntakeUpdateCorrelation
 from sdvmm.domain.dependency_codes import (
     MISSING_REQUIRED_DEPENDENCY,
     OPTIONAL_DEPENDENCY_MISSING,
@@ -19,6 +19,7 @@ from sdvmm.domain.models import (
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
     GameEnvironmentStatus,
+    ModDiscoveryEntry,
     ModDiscoveryResult,
     ModUpdateReport,
     ModsInventory,
@@ -408,7 +409,10 @@ def build_update_report_text(report: ModUpdateReport) -> str:
     return "\n".join(lines)
 
 
-def build_discovery_search_text(result: ModDiscoveryResult) -> str:
+def build_discovery_search_text(
+    result: ModDiscoveryResult,
+    correlations: tuple[DiscoveryContextCorrelation, ...] = tuple(),
+) -> str:
     lines: list[str] = []
     lines.append("Mod Discovery")
     lines.append("- Source: SMAPI compatibility index")
@@ -429,6 +433,7 @@ def build_discovery_search_text(result: ModDiscoveryResult) -> str:
 
     lines.append("Search results:")
     for entry in result.results:
+        correlation = _match_discovery_correlation(correlations, entry.unique_id)
         lines.append(
             "- "
             f"{entry.name} | UniqueID: {entry.unique_id} | "
@@ -437,8 +442,14 @@ def build_discovery_search_text(result: ModDiscoveryResult) -> str:
             f"(code: {entry.compatibility_state})"
         )
         lines.append(f"  author: {entry.author}")
+        lines.append(f"  source context: {_discovery_source_context_text(entry)}")
         if entry.compatibility_summary:
             lines.append(f"  compatibility note: {entry.compatibility_summary}")
+        if correlation is not None:
+            lines.append(f"  app context: {correlation.context_summary}")
+            if correlation.provider_relation_note:
+                lines.append(f"  provider relation: {correlation.provider_relation_note}")
+            lines.append(f"  next-step hint: {correlation.next_step}")
         if entry.source_page_url:
             lines.append(f"  page: {entry.source_page_url}")
         else:
@@ -447,7 +458,7 @@ def build_discovery_search_text(result: ModDiscoveryResult) -> str:
     lines.append("")
     lines.append("Recommended next step:")
     lines.append("- Select a discovery result row and click Open discovered page.")
-    lines.append("- If the package is downloaded manually, use existing intake + plan-install flow.")
+    lines.append("- Follow manual flow: open page -> download zip -> watcher detects -> review intake -> plan/apply safely.")
     return "\n".join(lines)
 
 
@@ -763,6 +774,27 @@ def _discovery_source_provider_label(provider: str) -> str:
         "none": "No source link",
     }
     return labels.get(provider, provider.replace("_", " ").title())
+
+
+def _discovery_source_context_text(entry: ModDiscoveryEntry) -> str:
+    if entry.source_provider == "nexus":
+        return "Nexus listing from compatibility index"
+    if entry.source_provider == "github":
+        return "GitHub repository from compatibility index"
+    if entry.source_provider == "custom_url":
+        return "Custom source URL from compatibility index"
+    return "No source link listed in compatibility index"
+
+
+def _match_discovery_correlation(
+    correlations: tuple[DiscoveryContextCorrelation, ...],
+    unique_id: str,
+) -> DiscoveryContextCorrelation | None:
+    lookup = unique_id.casefold()
+    for item in correlations:
+        if item.entry.unique_id.casefold() == lookup:
+            return item
+    return None
 
 
 def _install_action_label(action: str) -> str:

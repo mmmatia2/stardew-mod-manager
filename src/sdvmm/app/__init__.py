@@ -12,6 +12,7 @@ from .inventory_presenter import (
 )
 from .paths import default_app_state_file
 from .shell_service import (
+    DiscoveryContextCorrelation,
     SCAN_TARGET_CONFIGURED_REAL_MODS,
     SCAN_TARGET_SANDBOX_MODS,
     AppShellError,
@@ -26,6 +27,7 @@ from .shell_service import (
 __all__ = [
     "AppShellError",
     "AppShellService",
+    "DiscoveryContextCorrelation",
     "IntakeUpdateCorrelation",
     "InstallTargetSafetyDecision",
     "ScanResult",

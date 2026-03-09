@@ -37,6 +37,7 @@ from sdvmm.app.inventory_presenter import (
     build_update_report_text,
 )
 from sdvmm.app.shell_service import (
+    DiscoveryContextCorrelation,
     INSTALL_TARGET_CONFIGURED_REAL_MODS,
     INSTALL_TARGET_SANDBOX_MODS,
     SCAN_TARGET_CONFIGURED_REAL_MODS,
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
         self._current_inventory: ModsInventory | None = None
         self._current_update_report: ModUpdateReport | None = None
         self._current_discovery_result: ModDiscoveryResult | None = None
+        self._discovery_correlations: tuple[DiscoveryContextCorrelation, ...] = tuple()
         self._row_remote_links: dict[int, str] = {}
         self._row_update_statuses: dict[int, ModUpdateStatus] = {}
         self._discovery_row_links: dict[int, str] = {}
@@ -124,9 +126,9 @@ class MainWindow(QMainWindow):
         self._mods_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._mods_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
-        self._discovery_table = QTableWidget(0, 6)
+        self._discovery_table = QTableWidget(0, 8)
         self._discovery_table.setHorizontalHeaderLabels(
-            ["Name", "UniqueID", "Author", "Source", "Compatibility", "Page"]
+            ["Name", "UniqueID", "Author", "Source", "Compatibility", "App context", "Provider relation", "Page"]
         )
         self._discovery_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._discovery_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -569,6 +571,7 @@ class MainWindow(QMainWindow):
         self._apply_update_report(report)
         self._findings_box.setPlainText(build_update_report_text(report))
         self._recompute_intake_correlations()
+        self._refresh_discovery_correlations()
         self._set_status(f"Update check complete: {len(report.statuses)} mod(s)")
 
     def _on_search_discovery(self) -> None:
@@ -582,8 +585,15 @@ class MainWindow(QMainWindow):
             return
 
         self._current_discovery_result = discovery_result
-        self._render_discovery_results(discovery_result)
-        self._findings_box.setPlainText(build_discovery_search_text(discovery_result))
+        self._discovery_correlations = self._shell_service.correlate_discovery_results(
+            discovery_result=discovery_result,
+            inventory=self._current_inventory,
+            update_report=self._current_update_report,
+        )
+        self._render_discovery_results(discovery_result, self._discovery_correlations)
+        self._findings_box.setPlainText(
+            build_discovery_search_text(discovery_result, self._discovery_correlations)
+        )
         self._set_status(f"Discovery search complete: {len(discovery_result.results)} result(s)")
 
     def _on_open_discovered_page(self) -> None:
@@ -620,6 +630,29 @@ class MainWindow(QMainWindow):
             message = f"Could not open discovered page: {url}"
             QMessageBox.critical(self, "Open failed", message)
             self._set_status(message)
+            return
+
+        correlation = self._selected_discovery_correlation()
+        if correlation is not None:
+            if (
+                correlation.update_state == "update_available"
+                and correlation.installed_match_unique_id is not None
+            ):
+                self._guided_update_unique_ids = self._add_guided_unique_id(
+                    self._guided_update_unique_ids,
+                    correlation.installed_match_unique_id,
+                )
+                self._recompute_intake_correlations()
+
+            hint = self._shell_service.build_manual_discovery_flow_hint(
+                correlation=correlation,
+                watched_downloads_path_text=self._watched_downloads_path_input.text(),
+                watcher_running=self._watch_timer.isActive(),
+            )
+            self._findings_box.setPlainText(hint)
+            self._set_status(
+                f"Opened discovered page for {correlation.entry.unique_id}. Follow manual flow guidance."
+            )
             return
 
         self._set_status(f"Opened discovered page: {url}")
@@ -775,6 +808,7 @@ class MainWindow(QMainWindow):
                 )
             )
         )
+        self._refresh_discovery_correlations()
 
     def _apply_update_report(self, report: ModUpdateReport) -> None:
         if self._current_inventory is None:
@@ -797,18 +831,33 @@ class MainWindow(QMainWindow):
             if status.remote_link is not None:
                 self._row_remote_links[row] = status.remote_link.page_url
 
-    def _render_discovery_results(self, discovery_result: ModDiscoveryResult) -> None:
+    def _render_discovery_results(
+        self,
+        discovery_result: ModDiscoveryResult,
+        correlations: tuple[DiscoveryContextCorrelation, ...],
+    ) -> None:
         self._discovery_row_links = {}
         self._discovery_table.setRowCount(len(discovery_result.results))
 
         for row, entry in enumerate(discovery_result.results):
+            correlation = correlations[row] if row < len(correlations) else None
+            source_label = _discovery_source_label(entry.source_provider)
+            compatibility_label = _discovery_compatibility_label(entry.compatibility_state)
+            context_text = correlation.context_summary if correlation is not None else "No app context"
+            provider_relation = (
+                correlation.provider_relation_note
+                if correlation is not None and correlation.provider_relation_note
+                else "-"
+            )
             self._discovery_table.setItem(row, 0, QTableWidgetItem(entry.name))
             self._discovery_table.setItem(row, 1, QTableWidgetItem(entry.unique_id))
             self._discovery_table.setItem(row, 2, QTableWidgetItem(entry.author))
-            self._discovery_table.setItem(row, 3, QTableWidgetItem(entry.source_provider))
-            self._discovery_table.setItem(row, 4, QTableWidgetItem(entry.compatibility_state))
+            self._discovery_table.setItem(row, 3, QTableWidgetItem(source_label))
+            self._discovery_table.setItem(row, 4, QTableWidgetItem(compatibility_label))
+            self._discovery_table.setItem(row, 5, QTableWidgetItem(context_text))
+            self._discovery_table.setItem(row, 6, QTableWidgetItem(provider_relation))
             page_text = entry.source_page_url or "-"
-            self._discovery_table.setItem(row, 5, QTableWidgetItem(page_text))
+            self._discovery_table.setItem(row, 7, QTableWidgetItem(page_text))
             if entry.source_page_url:
                 self._discovery_row_links[row] = entry.source_page_url
 
@@ -1019,6 +1068,12 @@ class MainWindow(QMainWindow):
             return None
         return self._intake_correlations[idx]
 
+    def _selected_discovery_correlation(self) -> DiscoveryContextCorrelation | None:
+        row = self._discovery_table.currentRow()
+        if row < 0 or row >= len(self._discovery_correlations):
+            return None
+        return self._discovery_correlations[row]
+
     def _recompute_intake_correlations(self) -> None:
         self._intake_correlations = self._shell_service.correlate_intakes_with_updates(
             intakes=self._detected_intakes,
@@ -1026,6 +1081,20 @@ class MainWindow(QMainWindow):
             guided_update_unique_ids=self._guided_update_unique_ids,
         )
         self._refresh_intake_selector()
+
+    def _refresh_discovery_correlations(self) -> None:
+        if self._current_discovery_result is None:
+            self._discovery_correlations = tuple()
+            self._discovery_row_links = {}
+            self._discovery_table.setRowCount(0)
+            return
+
+        self._discovery_correlations = self._shell_service.correlate_discovery_results(
+            discovery_result=self._current_discovery_result,
+            inventory=self._current_inventory,
+            update_report=self._current_update_report,
+        )
+        self._render_discovery_results(self._current_discovery_result, self._discovery_correlations)
 
     @staticmethod
     def _add_guided_unique_id(existing: tuple[str, ...], new_unique_id: str) -> tuple[str, ...]:
@@ -1038,6 +1107,30 @@ class MainWindow(QMainWindow):
         if target == SCAN_TARGET_CONFIGURED_REAL_MODS:
             return "real Mods directory"
         return "sandbox Mods directory"
+
+
+def _discovery_source_label(provider: str) -> str:
+    labels = {
+        "nexus": "Nexus",
+        "github": "GitHub",
+        "custom_url": "Custom source",
+        "none": "No source link",
+    }
+    return labels.get(provider, provider)
+
+
+def _discovery_compatibility_label(state: str) -> str:
+    labels = {
+        "compatible": "Compatible",
+        "compatible_with_caveat": "Compatible (caveat)",
+        "unofficial_update": "Use unofficial update",
+        "workaround_available": "Use workaround",
+        "incompatible": "Incompatible",
+        "abandoned": "Abandoned",
+        "obsolete": "Obsolete",
+        "compatibility_unknown": "Compatibility unknown",
+    }
+    return labels.get(state, state.replace("_", " ").title())
 
 
 def _environment_summary_label(status: GameEnvironmentStatus) -> str:

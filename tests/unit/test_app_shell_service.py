@@ -22,6 +22,7 @@ from sdvmm.domain.models import (
     ModUpdateReport,
     ModUpdateStatus,
     NexusIntegrationStatus,
+    RemoteModLink,
 )
 from sdvmm.domain.update_codes import UpdateState
 from sdvmm.services.app_state_store import save_app_config
@@ -741,6 +742,144 @@ def test_resolve_discovery_source_page_url_requires_url(tmp_path: Path) -> None:
 
     with pytest.raises(AppShellError, match="No source page URL is available"):
         _ = service.resolve_discovery_source_page_url(entry_without_url)
+
+
+def test_correlate_discovery_results_marks_installed_update_and_provider_alignment(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    discovery_result = ModDiscoveryResult(
+        query="spacecore",
+        provider="smapi_compatibility_list",
+        results=(
+            ModDiscoveryEntry(
+                name="SpaceCore",
+                unique_id="spacechase0.SpaceCore",
+                author="spacechase0",
+                provider="smapi_compatibility_list",
+                source_provider="nexus",
+                source_page_url="https://www.nexusmods.com/stardewvalley/mods/1348",
+                compatibility_state="compatible",
+                compatibility_status="ok",
+            ),
+        ),
+    )
+    inventory = _inventory_with_mod("spacechase0.SpaceCore")
+    update_report = ModUpdateReport(
+        statuses=(
+            ModUpdateStatus(
+                unique_id="spacechase0.SpaceCore",
+                name="SpaceCore",
+                folder_path=Path("/tmp/SpaceCore"),
+                installed_version="1.0.0",
+                remote_version="1.1.0",
+                state="update_available",
+                remote_link=RemoteModLink(
+                    provider="nexus",
+                    key="stardewvalley:1348",
+                    page_url="https://www.nexusmods.com/stardewvalley/mods/1348",
+                    metadata_url="https://api.nexusmods.com/v1/games/stardewvalley/mods/1348.json",
+                ),
+            ),
+        )
+    )
+
+    correlations = service.correlate_discovery_results(
+        discovery_result=discovery_result,
+        inventory=inventory,
+        update_report=update_report,
+    )
+
+    assert len(correlations) == 1
+    item = correlations[0]
+    assert item.installed_match_unique_id == "spacechase0.SpaceCore"
+    assert item.update_state == "update_available"
+    assert item.provider_relation == "provider_aligned"
+    assert "matches tracked update provider" in (item.provider_relation_note or "")
+
+
+def test_correlate_discovery_results_marks_provider_mismatch(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    discovery_result = ModDiscoveryResult(
+        query="sample",
+        provider="smapi_compatibility_list",
+        results=(
+            ModDiscoveryEntry(
+                name="Sample Mod",
+                unique_id="sample.Mod",
+                author="author",
+                provider="smapi_compatibility_list",
+                source_provider="nexus",
+                source_page_url="https://www.nexusmods.com/stardewvalley/mods/100",
+                compatibility_state="compatible",
+                compatibility_status="ok",
+            ),
+        ),
+    )
+    inventory = _inventory_with_mod("sample.Mod")
+    update_report = ModUpdateReport(
+        statuses=(
+            ModUpdateStatus(
+                unique_id="sample.Mod",
+                name="Sample Mod",
+                folder_path=Path("/tmp/SampleMod"),
+                installed_version="1.0.0",
+                remote_version="1.0.1",
+                state="update_available",
+                remote_link=RemoteModLink(
+                    provider="github",
+                    key="owner/repo",
+                    page_url="https://github.com/owner/repo",
+                    metadata_url="https://api.github.com/repos/owner/repo/releases/latest",
+                ),
+            ),
+        )
+    )
+
+    correlations = service.correlate_discovery_results(
+        discovery_result=discovery_result,
+        inventory=inventory,
+        update_report=update_report,
+    )
+
+    assert len(correlations) == 1
+    item = correlations[0]
+    assert item.provider_relation == "provider_mismatch"
+    assert "differs from tracked update provider" in (item.provider_relation_note or "")
+
+
+def test_correlate_discovery_results_marks_installed_without_update_context(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    discovery_result = ModDiscoveryResult(
+        query="sample",
+        provider="smapi_compatibility_list",
+        results=(
+            ModDiscoveryEntry(
+                name="Sample Mod",
+                unique_id="sample.Mod",
+                author="author",
+                provider="smapi_compatibility_list",
+                source_provider="custom_url",
+                source_page_url="https://example.test/mod",
+                compatibility_state="compatible",
+                compatibility_status="ok",
+            ),
+        ),
+    )
+    inventory = _inventory_with_mod("sample.Mod")
+
+    correlations = service.correlate_discovery_results(
+        discovery_result=discovery_result,
+        inventory=inventory,
+        update_report=None,
+    )
+
+    assert len(correlations) == 1
+    item = correlations[0]
+    assert item.installed_match_unique_id == "sample.Mod"
+    assert item.update_state is None
+    assert item.provider_relation == "no_update_provider_context"
+    assert "Run Check updates" in item.next_step
 
 
 def test_get_nexus_status_reports_saved_config_state(tmp_path: Path) -> None:
