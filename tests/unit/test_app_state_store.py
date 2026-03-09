@@ -24,6 +24,7 @@ def test_save_and_load_app_config_round_trip(tmp_path: Path) -> None:
         sandbox_archive_path=Path("/tmp/Sandbox/.archive"),
         real_archive_path=Path("/games/Stardew Valley/Mods/.sdvmm-archive"),
         watched_downloads_path=Path("/tmp/Downloads"),
+        nexus_api_key="test-nexus-key",
         scan_target="sandbox_mods",
         install_target="configured_real_mods",
     )
@@ -38,6 +39,7 @@ def test_save_and_load_app_config_round_trip(tmp_path: Path) -> None:
     assert payload["app_config"]["sandbox_mods_path"] == "/tmp/Sandbox/Mods"
     assert payload["app_config"]["watched_downloads_path"] == "/tmp/Downloads"
     assert payload["app_config"]["real_archive_path"] == "/games/Stardew Valley/Mods/.sdvmm-archive"
+    assert payload["app_config"]["nexus_api_key"] == "test-nexus-key"
     assert payload["app_config"]["install_target"] == "configured_real_mods"
 
 
@@ -98,5 +100,6 @@ def test_load_app_config_defaults_optional_fields_when_missing(tmp_path: Path) -
     assert loaded.sandbox_archive_path is None
     assert loaded.real_archive_path is None
     assert loaded.watched_downloads_path is None
+    assert loaded.nexus_api_key is None
     assert loaded.scan_target == "configured_real_mods"
     assert loaded.install_target == "sandbox_mods"

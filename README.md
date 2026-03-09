@@ -57,7 +57,8 @@ Minimal local-first foundation for scanning a Stardew Valley `Mods` directory.
 ## Metadata notes
 
 - Metadata checks are awareness-only; they do not download or install mods.
-- Nexus version checks require `SDVMM_NEXUS_API_KEY` in the environment.
+- Nexus API key can be configured in the app and persisted in local app-state.
+- `SDVMM_NEXUS_API_KEY` remains supported as fallback.
 - Manifest dependency preflight is local/package truth for blocking decisions.
 - Remote/source-declared requirements are complementary guidance and are non-blocking by default.
 

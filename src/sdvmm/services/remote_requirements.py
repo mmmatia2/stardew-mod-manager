@@ -21,6 +21,7 @@ def evaluate_remote_requirements_for_package_mods(
     source: Literal["package_inspection", "downloads_intake", "sandbox_plan"],
     fetcher: JsonMetadataFetcher | None = None,
     timeout_seconds: float = 8.0,
+    nexus_api_key: str | None = None,
 ) -> tuple[RemoteRequirementGuidance, ...]:
     if not package_mods:
         return tuple()
@@ -39,6 +40,7 @@ def evaluate_remote_requirements_for_package_mods(
         synthetic_inventory,
         fetcher=fetcher,
         timeout_seconds=timeout_seconds,
+        nexus_api_key=nexus_api_key,
     )
     status_by_folder = {status.folder_path: status for status in report.statuses}
 

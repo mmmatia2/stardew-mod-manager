@@ -7,6 +7,7 @@ from typing import Literal
 from sdvmm.domain.dependency_codes import DependencyState
 from sdvmm.domain.environment_codes import EnvironmentState
 from sdvmm.domain.install_codes import SandboxInstallAction
+from sdvmm.domain.nexus_codes import NexusCredentialSource, NexusIntegrationState
 from sdvmm.domain.package_codes import PackageFindingKind
 from sdvmm.domain.remote_requirement_codes import RemoteRequirementState
 from sdvmm.domain.scan_codes import ScanEntryKind
@@ -23,8 +24,17 @@ class AppConfig:
     sandbox_archive_path: Path | None = None
     real_archive_path: Path | None = None
     watched_downloads_path: Path | None = None
+    nexus_api_key: str | None = None
     scan_target: str = "configured_real_mods"
     install_target: str = "sandbox_mods"
+
+
+@dataclass(frozen=True, slots=True)
+class NexusIntegrationStatus:
+    state: NexusIntegrationState
+    source: NexusCredentialSource
+    masked_key: str | None
+    message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -89,6 +89,9 @@ class MainWindow(QMainWindow):
         self._real_archive_path_input.setPlaceholderText("/path/to/Real/Mods/.sdvmm-archive")
         self._watched_downloads_path_input = QLineEdit()
         self._watched_downloads_path_input.setPlaceholderText("/path/to/Downloads")
+        self._nexus_api_key_input = QLineEdit()
+        self._nexus_api_key_input.setPlaceholderText("Nexus API key")
+        self._nexus_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self._overwrite_checkbox = QCheckBox("Allow overwrite with archive")
         self._install_target_combo = QComboBox()
         self._install_target_combo.addItem(
@@ -119,6 +122,7 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel()
         self._scan_context_label = QLabel("Current scan source: not set")
         self._environment_status_label = QLabel("Environment: not checked")
+        self._nexus_status_label = QLabel("Nexus: not configured")
         self._watch_status_label = QLabel("Downloads watch: stopped")
         self._watch_timer = QTimer(self)
         self._watch_timer.setInterval(2000)
@@ -137,6 +141,7 @@ class MainWindow(QMainWindow):
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_scan_context_preview)
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_install_destination_preview)
         self._watched_downloads_path_input.textChanged.connect(self._on_watched_path_changed)
+        self._nexus_api_key_input.textChanged.connect(self._on_nexus_key_changed)
         self._intake_result_combo.currentIndexChanged.connect(self._on_intake_selection_changed)
 
         self._build_layout()
@@ -198,15 +203,19 @@ class MainWindow(QMainWindow):
         browse_downloads_button.clicked.connect(self._on_browse_watched_downloads)
         path_layout.addWidget(browse_downloads_button, 7, 2)
 
-        path_layout.addWidget(QLabel("Install destination"), 8, 0)
-        path_layout.addWidget(self._install_target_combo, 8, 1)
-        path_layout.addWidget(self._install_archive_label, 8, 2)
+        path_layout.addWidget(QLabel("Nexus API key"), 8, 0)
+        path_layout.addWidget(self._nexus_api_key_input, 8, 1)
+        path_layout.addWidget(self._nexus_status_label, 8, 2)
 
-        path_layout.addWidget(QLabel("Scan target"), 9, 0)
-        path_layout.addWidget(self._scan_target_combo, 9, 1)
-        path_layout.addWidget(QLabel("Detected packages (from watcher)"), 10, 0)
-        path_layout.addWidget(self._intake_result_combo, 10, 1)
-        path_layout.addWidget(self._plan_selected_intake_button, 10, 2)
+        path_layout.addWidget(QLabel("Install destination"), 9, 0)
+        path_layout.addWidget(self._install_target_combo, 9, 1)
+        path_layout.addWidget(self._install_archive_label, 9, 2)
+
+        path_layout.addWidget(QLabel("Scan target"), 10, 0)
+        path_layout.addWidget(self._scan_target_combo, 10, 1)
+        path_layout.addWidget(QLabel("Detected packages (from watcher)"), 11, 0)
+        path_layout.addWidget(self._intake_result_combo, 11, 1)
+        path_layout.addWidget(self._plan_selected_intake_button, 11, 2)
 
         actions_row = QHBoxLayout()
         save_button = QPushButton("Save config")
@@ -236,6 +245,10 @@ class MainWindow(QMainWindow):
         check_updates_button = QPushButton("Check updates")
         check_updates_button.clicked.connect(self._on_check_updates)
         actions_row.addWidget(check_updates_button)
+
+        check_nexus_button = QPushButton("Check Nexus")
+        check_nexus_button.clicked.connect(self._on_check_nexus_connection)
+        actions_row.addWidget(check_nexus_button)
 
         open_remote_button = QPushButton("Open remote page")
         open_remote_button.clicked.connect(self._on_open_remote_page)
@@ -279,6 +292,8 @@ class MainWindow(QMainWindow):
                 self._real_archive_path_input.setText(str(state.config.real_archive_path))
             if state.config.watched_downloads_path is not None:
                 self._watched_downloads_path_input.setText(str(state.config.watched_downloads_path))
+            if state.config.nexus_api_key is not None:
+                self._nexus_api_key_input.setText(state.config.nexus_api_key)
             self._set_current_scan_target(state.config.scan_target)
             self._set_current_install_target(state.config.install_target)
             self._set_status(f"Loaded saved config from {self._shell_service.state_file}")
@@ -289,6 +304,7 @@ class MainWindow(QMainWindow):
 
         self._refresh_scan_context_preview()
         self._refresh_install_destination_preview()
+        self._refresh_nexus_status(validated=False)
 
     def _on_browse_game(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -369,6 +385,7 @@ class MainWindow(QMainWindow):
                 sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
                 watched_downloads_path_text=self._watched_downloads_path_input.text(),
                 real_archive_path_text=self._real_archive_path_input.text(),
+                nexus_api_key_text=self._nexus_api_key_input.text(),
                 scan_target=self._current_scan_target(),
                 install_target=self._current_install_target(),
                 existing_config=self._config,
@@ -378,6 +395,7 @@ class MainWindow(QMainWindow):
             self._set_status(str(exc))
             return
 
+        self._refresh_nexus_status(validated=False)
         self._set_status(f"Saved config to {self._shell_service.state_file}")
 
     def _on_detect_environment(self) -> None:
@@ -417,6 +435,8 @@ class MainWindow(QMainWindow):
             inspection = self._shell_service.inspect_zip_with_inventory_context(
                 self._zip_path_input.text(),
                 self._current_inventory,
+                nexus_api_key_text=self._nexus_api_key_input.text(),
+                existing_config=self._config,
             )
         except AppShellError as exc:
             QMessageBox.critical(self, "Zip inspection failed", str(exc))
@@ -438,6 +458,8 @@ class MainWindow(QMainWindow):
                 sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
                 allow_overwrite=self._overwrite_checkbox.isChecked(),
                 configured_real_mods_path=None,
+                nexus_api_key_text=self._nexus_api_key_input.text(),
+                existing_config=self._config,
             )
         except AppShellError as exc:
             self._pending_install_plan = None
@@ -505,7 +527,11 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            report = self._shell_service.check_updates(self._current_inventory)
+            report = self._shell_service.check_updates(
+                self._current_inventory,
+                nexus_api_key_text=self._nexus_api_key_input.text(),
+                existing_config=self._config,
+            )
         except AppShellError as exc:
             QMessageBox.critical(self, "Update check failed", str(exc))
             self._set_status(str(exc))
@@ -516,6 +542,19 @@ class MainWindow(QMainWindow):
         self._findings_box.setPlainText(build_update_report_text(report))
         self._recompute_intake_correlations()
         self._set_status(f"Update check complete: {len(report.statuses)} mod(s)")
+
+    def _on_check_nexus_connection(self) -> None:
+        status = self._shell_service.get_nexus_integration_status(
+            nexus_api_key_text=self._nexus_api_key_input.text(),
+            existing_config=self._config,
+            validate_connection=True,
+        )
+        self._nexus_status_label.setText(_nexus_status_label(status.state, status.masked_key))
+        if status.message:
+            self._findings_box.setPlainText(status.message)
+            self._set_status(status.message)
+        else:
+            self._set_status("Nexus status check complete.")
 
     def _on_open_remote_page(self) -> None:
         if self._current_update_report is None:
@@ -595,6 +634,8 @@ class MainWindow(QMainWindow):
                 watched_downloads_path_text=self._watched_downloads_path_input.text(),
                 known_zip_paths=self._known_watched_zip_paths,
                 inventory=self._current_inventory_or_empty(),
+                nexus_api_key_text=self._nexus_api_key_input.text(),
+                existing_config=self._config,
             )
         except AppShellError as exc:
             self._watch_timer.stop()
@@ -698,6 +739,9 @@ class MainWindow(QMainWindow):
         self._last_environment_status = None
         self._environment_status_label.setText("Environment: not checked")
 
+    def _on_nexus_key_changed(self, *_: object) -> None:
+        self._refresh_nexus_status(validated=False)
+
     def _on_install_target_changed(self, *_: object) -> None:
         self._pending_install_plan = None
         self._refresh_install_destination_preview()
@@ -739,6 +783,8 @@ class MainWindow(QMainWindow):
                 sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
                 allow_overwrite=self._overwrite_checkbox.isChecked(),
                 configured_real_mods_path=None,
+                nexus_api_key_text=self._nexus_api_key_input.text(),
+                existing_config=self._config,
             )
         except AppShellError as exc:
             self._pending_install_plan = None
@@ -788,6 +834,14 @@ class MainWindow(QMainWindow):
         self._scan_context_label.setText(
             f"Selected scan source: {self._scan_target_label(target)} ({path_text})"
         )
+
+    def _refresh_nexus_status(self, *, validated: bool) -> None:
+        status = self._shell_service.get_nexus_integration_status(
+            nexus_api_key_text=self._nexus_api_key_input.text(),
+            existing_config=self._config,
+            validate_connection=validated,
+        )
+        self._nexus_status_label.setText(_nexus_status_label(status.state, status.masked_key))
 
     def _refresh_install_destination_preview(self) -> None:
         target = self._current_install_target()
@@ -895,3 +949,13 @@ def _environment_summary_label(status: GameEnvironmentStatus) -> str:
     mods_state = "mods detected" if "mods_path_detected" in status.state_codes else "mods not detected"
     smapi_state = "SMAPI detected" if "smapi_detected" in status.state_codes else "SMAPI not detected"
     return f"Environment: {mods_state}, {smapi_state}"
+
+
+def _nexus_status_label(state: str, masked_key: str | None) -> str:
+    if state == "not_configured":
+        return "Nexus: not configured"
+    if state == "working_validated":
+        return f"Nexus: working ({masked_key or 'key set'})"
+    if state == "invalid_auth_failure":
+        return f"Nexus: invalid/auth failed ({masked_key or 'key set'})"
+    return f"Nexus: configured ({masked_key or 'key set'})"

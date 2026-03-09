@@ -14,6 +14,7 @@ from .models import (
     MissingDependencyFinding,
     ModManifest,
     ModsInventory,
+    NexusIntegrationStatus,
     PackageFinding,
     PackageInspectionResult,
     PackageModEntry,
@@ -43,6 +44,14 @@ from .environment_codes import (
     SMAPI_NOT_DETECTED,
 )
 from .install_codes import BLOCKED, INSTALL_NEW, OVERWRITE_WITH_ARCHIVE, SandboxInstallAction
+from .nexus_codes import (
+    NEXUS_CONFIGURED,
+    NEXUS_INVALID_AUTH_FAILURE,
+    NEXUS_NOT_CONFIGURED,
+    NEXUS_WORKING_VALIDATED,
+    NexusCredentialSource,
+    NexusIntegrationState,
+)
 from .package_codes import PackageFindingKind
 from .remote_requirement_codes import (
     NO_REMOTE_LINK_FOR_REQUIREMENTS,
@@ -72,6 +81,13 @@ __all__ = [
     "MissingDependencyFinding",
     "ModManifest",
     "ModsInventory",
+    "NexusIntegrationStatus",
+    "NexusIntegrationState",
+    "NexusCredentialSource",
+    "NEXUS_NOT_CONFIGURED",
+    "NEXUS_CONFIGURED",
+    "NEXUS_INVALID_AUTH_FAILURE",
+    "NEXUS_WORKING_VALIDATED",
     "PackageFinding",
     "PackageFindingKind",
     "PackageInspectionResult",

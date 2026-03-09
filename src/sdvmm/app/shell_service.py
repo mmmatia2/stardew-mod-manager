@@ -15,10 +15,15 @@ from sdvmm.domain.models import (
     GameEnvironmentStatus,
     ModUpdateReport,
     ModsInventory,
+    NexusIntegrationStatus,
     PackageInspectionResult,
     PackageModEntry,
     SandboxInstallPlan,
     SandboxInstallResult,
+)
+from sdvmm.domain.nexus_codes import (
+    NEXUS_CONFIGURED,
+    NEXUS_NOT_CONFIGURED,
 )
 from sdvmm.domain.dependency_codes import (
     MISSING_REQUIRED_DEPENDENCY,
@@ -47,7 +52,13 @@ from sdvmm.services.sandbox_installer import (
     build_sandbox_install_plan as build_sandbox_install_plan_service,
     execute_sandbox_install_plan as execute_sandbox_install_plan_service,
 )
-from sdvmm.services.update_metadata import check_updates_for_inventory
+from sdvmm.services.update_metadata import (
+    NEXUS_API_KEY_ENV,
+    check_nexus_connection,
+    check_updates_for_inventory,
+    mask_api_key,
+    normalize_nexus_api_key,
+)
 from sdvmm.services.remote_requirements import evaluate_remote_requirements_for_package_mods
 
 
@@ -158,6 +169,7 @@ class AppShellService:
         sandbox_archive_path_text: str,
         watched_downloads_path_text: str,
         real_archive_path_text: str = "",
+        nexus_api_key_text: str = "",
         scan_target: ScanTargetKind,
         install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
         existing_config: AppConfig | None,
@@ -189,6 +201,11 @@ class AppShellService:
 
         watched_downloads_path = self._parse_optional_directory(watched_downloads_path_text)
         real_archive_path = self._parse_optional_archive_directory(real_archive_path_text)
+        nexus_api_key = self._resolve_nexus_api_key(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+            allow_environment_fallback=False,
+        )
 
         config = self._build_config(
             game_path=game_path,
@@ -203,6 +220,7 @@ class AppShellService:
             sandbox_archive_path=sandbox_archive_path,
             real_archive_path=real_archive_path,
             watched_downloads_path=watched_downloads_path,
+            nexus_api_key=nexus_api_key,
             scan_target=scan_target,
             install_target=install_target,
         )
@@ -261,8 +279,15 @@ class AppShellService:
         self,
         package_path_text: str,
         inventory: ModsInventory | None,
+        *,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
     ) -> PackageInspectionResult:
         base_result = self.inspect_zip(package_path_text)
+        nexus_api_key = self._resolve_nexus_api_key(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+        )
         dependency_findings = evaluate_package_dependencies(
             package_mods=base_result.mods,
             installed_mods=inventory.mods if inventory is not None else None,
@@ -271,6 +296,7 @@ class AppShellService:
         remote_requirements = evaluate_remote_requirements_for_package_mods(
             base_result.mods,
             source="package_inspection",
+            nexus_api_key=nexus_api_key,
         )
         return replace(
             base_result,
@@ -284,11 +310,56 @@ class AppShellService:
     ) -> tuple[DependencyPreflightFinding, ...]:
         return evaluate_installed_dependencies(inventory.mods)
 
-    def check_updates(self, inventory: ModsInventory) -> ModUpdateReport:
+    def check_updates(
+        self,
+        inventory: ModsInventory,
+        *,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
+    ) -> ModUpdateReport:
+        nexus_api_key = self._resolve_nexus_api_key(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+        )
         try:
-            return check_updates_for_inventory(inventory)
+            return check_updates_for_inventory(
+                inventory,
+                nexus_api_key=nexus_api_key,
+            )
         except OSError as exc:
             raise AppShellError(f"Could not check remote metadata: {exc}") from exc
+
+    def get_nexus_integration_status(
+        self,
+        *,
+        nexus_api_key_text: str,
+        existing_config: AppConfig | None,
+        validate_connection: bool,
+    ) -> NexusIntegrationStatus:
+        nexus_api_key, source = self._resolve_nexus_api_key_with_source(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+            allow_environment_fallback=True,
+        )
+
+        if not nexus_api_key:
+            return NexusIntegrationStatus(
+                state=NEXUS_NOT_CONFIGURED,
+                source="none",
+                masked_key=None,
+                message="Nexus API key is not configured.",
+            )
+
+        if not validate_connection:
+            return NexusIntegrationStatus(
+                state=NEXUS_CONFIGURED,
+                source=source,
+                masked_key=mask_api_key(nexus_api_key),
+                message="Nexus key is configured. Run connection check to validate it.",
+            )
+
+        status = check_nexus_connection(nexus_api_key=nexus_api_key)
+        return replace(status, source=source)
 
     def initialize_downloads_watch(self, watched_downloads_path_text: str) -> tuple[Path, ...]:
         watched_path = self._parse_and_validate_watched_downloads_path(watched_downloads_path_text)
@@ -304,8 +375,14 @@ class AppShellService:
         watched_downloads_path_text: str,
         known_zip_paths: tuple[Path, ...],
         inventory: ModsInventory,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
     ) -> DownloadsWatchPollResult:
         watched_path = self._parse_and_validate_watched_downloads_path(watched_downloads_path_text)
+        nexus_api_key = self._resolve_nexus_api_key(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+        )
 
         try:
             result = poll_watched_directory(
@@ -319,6 +396,7 @@ class AppShellService:
                     remote_requirements=evaluate_remote_requirements_for_package_mods(
                         intake.mods,
                         source="downloads_intake",
+                        nexus_api_key=nexus_api_key,
                     ),
                 )
                 for intake in result.intakes
@@ -349,6 +427,8 @@ class AppShellService:
         sandbox_archive_path_text: str,
         allow_overwrite: bool,
         configured_real_mods_path: Path | None = None,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
     ) -> SandboxInstallPlan:
         return self.build_install_plan_from_intake(
             intake=intake,
@@ -359,6 +439,8 @@ class AppShellService:
             sandbox_archive_path_text=sandbox_archive_path_text,
             allow_overwrite=allow_overwrite,
             configured_real_mods_path=configured_real_mods_path,
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
         )
 
     def build_install_plan_from_intake(
@@ -372,6 +454,8 @@ class AppShellService:
         sandbox_archive_path_text: str,
         allow_overwrite: bool,
         configured_real_mods_path: Path | None = None,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
     ) -> SandboxInstallPlan:
         if not self.is_actionable_intake_result(intake):
             raise AppShellError(
@@ -387,6 +471,8 @@ class AppShellService:
             sandbox_archive_path_text=sandbox_archive_path_text,
             allow_overwrite=allow_overwrite,
             configured_real_mods_path=configured_real_mods_path,
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
         )
 
     def correlate_intakes_with_updates(
@@ -481,6 +567,8 @@ class AppShellService:
         *,
         allow_overwrite: bool,
         configured_real_mods_path: Path | None = None,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
     ) -> SandboxInstallPlan:
         return self.build_install_plan(
             package_path_text=package_path_text,
@@ -491,6 +579,8 @@ class AppShellService:
             sandbox_archive_path_text=sandbox_archive_path_text,
             allow_overwrite=allow_overwrite,
             configured_real_mods_path=configured_real_mods_path,
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
         )
 
     def build_install_plan(
@@ -504,8 +594,14 @@ class AppShellService:
         sandbox_archive_path_text: str,
         allow_overwrite: bool,
         configured_real_mods_path: Path | None = None,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
     ) -> SandboxInstallPlan:
         package_path = self._parse_and_validate_zip_path(package_path_text)
+        nexus_api_key = self._resolve_nexus_api_key(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+        )
 
         destination_mods_path, destination_archive_path = self._resolve_install_destination_paths(
             install_target=install_target,
@@ -549,6 +645,7 @@ class AppShellService:
             remote_requirements = evaluate_remote_requirements_for_package_mods(
                 inspected_mods,
                 source="sandbox_plan",
+                nexus_api_key=nexus_api_key,
             )
             return replace(
                 plan_with_dependency_preflight,
@@ -657,6 +754,7 @@ class AppShellService:
                 sandbox_archive_path=existing_config.sandbox_archive_path,
                 real_archive_path=existing_config.real_archive_path,
                 watched_downloads_path=existing_config.watched_downloads_path,
+                nexus_api_key=existing_config.nexus_api_key,
                 scan_target=existing_config.scan_target,
                 install_target=existing_config.install_target,
             )
@@ -668,6 +766,43 @@ class AppShellService:
             scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
             install_target=INSTALL_TARGET_SANDBOX_MODS,
         )
+
+    @staticmethod
+    def _resolve_nexus_api_key(
+        *,
+        nexus_api_key_text: str,
+        existing_config: AppConfig | None,
+        allow_environment_fallback: bool = True,
+    ) -> str | None:
+        api_key, _ = AppShellService._resolve_nexus_api_key_with_source(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+            allow_environment_fallback=allow_environment_fallback,
+        )
+        return api_key
+
+    @staticmethod
+    def _resolve_nexus_api_key_with_source(
+        *,
+        nexus_api_key_text: str,
+        existing_config: AppConfig | None,
+        allow_environment_fallback: bool,
+    ) -> tuple[str | None, str]:
+        entered = normalize_nexus_api_key(nexus_api_key_text)
+        if entered:
+            return entered, "entered"
+
+        if existing_config is not None:
+            saved = normalize_nexus_api_key(existing_config.nexus_api_key)
+            if saved:
+                return saved, "saved_config"
+
+        if allow_environment_fallback:
+            env_value = normalize_nexus_api_key(os.getenv(NEXUS_API_KEY_ENV, ""))
+            if env_value:
+                return env_value, "environment"
+
+        return None, "none"
 
     def _resolve_install_destination_paths(
         self,

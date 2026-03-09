@@ -13,6 +13,7 @@ from sdvmm.services.update_metadata import (
     REQUEST_FAILURE,
     RESPONSE_MISSING_VERSION,
     MetadataFetchError,
+    check_nexus_connection,
     check_updates_for_inventory,
     compare_versions,
     resolve_remote_link,
@@ -69,7 +70,7 @@ def test_real_nexus_updatekey_forms_are_resolved() -> None:
 def test_nexus_provider_reports_up_to_date_when_remote_equals_installed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
 
     mod = _mod(unique_id="Sample.Nexus", version="3.2.1", update_keys=("Nexus:12345",))
     inventory = _inventory((mod,))
@@ -83,7 +84,7 @@ def test_nexus_provider_reports_up_to_date_when_remote_equals_installed(
         }
     )
 
-    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+    report = check_updates_for_inventory(inventory, fetcher=fetcher, nexus_api_key="test-api-key")
 
     status = report.statuses[0]
     assert status.state == "up_to_date"
@@ -97,7 +98,7 @@ def test_nexus_provider_reports_up_to_date_when_remote_equals_installed(
 def test_nexus_provider_reports_update_available_when_remote_is_newer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
 
     mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
     inventory = _inventory((mod,))
@@ -110,7 +111,7 @@ def test_nexus_provider_reports_update_available_when_remote_is_newer(
         }
     )
 
-    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+    report = check_updates_for_inventory(inventory, fetcher=fetcher, nexus_api_key="test-api-key")
 
     status = report.statuses[0]
     assert status.state == "update_available"
@@ -150,7 +151,7 @@ def test_malformed_nexus_updatekey_is_reported_explicitly() -> None:
 
 
 def test_nexus_auth_or_request_failure_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
 
     mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
     inventory = _inventory((mod,))
@@ -163,6 +164,7 @@ def test_nexus_auth_or_request_failure_is_reported(monkeypatch: pytest.MonkeyPat
                 url: MetadataFetchError(AUTH_FAILURE, "HTTP 401: Please provide a valid API Key")
             }
         ),
+        nexus_api_key="test-api-key",
     )
 
     status = report.statuses[0]
@@ -172,7 +174,7 @@ def test_nexus_auth_or_request_failure_is_reported(monkeypatch: pytest.MonkeyPat
 
 
 def test_nexus_response_missing_version_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
 
     mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
     inventory = _inventory((mod,))
@@ -186,6 +188,7 @@ def test_nexus_response_missing_version_is_reported(monkeypatch: pytest.MonkeyPa
                 }
             }
         ),
+        nexus_api_key="test-api-key",
     )
 
     status = report.statuses[0]
@@ -205,7 +208,7 @@ def test_no_regression_for_json_provider() -> None:
         payloads={"https://example.test/mod-a.json": {"version": "1.1.0"}}
     )
 
-    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+    report = check_updates_for_inventory(inventory, fetcher=fetcher, nexus_api_key="test-api-key")
 
     assert report.statuses[0].state == "update_available"
 
@@ -225,7 +228,11 @@ def test_no_regression_for_github_provider() -> None:
         }
     )
 
-    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=fetcher,
+        nexus_api_key="test-api-key",
+    )
 
     assert report.statuses[0].state == "up_to_date"
 
@@ -244,7 +251,7 @@ def test_no_regression_for_no_remote_link_behavior() -> None:
 def test_provider_fallback_uses_nexus_when_github_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
 
     mod = _mod(
         unique_id="Sample.Mixed",
@@ -266,7 +273,11 @@ def test_provider_fallback_uses_nexus_when_github_fails(
         },
     )
 
-    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=fetcher,
+        nexus_api_key="test-api-key",
+    )
 
     status = report.statuses[0]
     assert status.state == "update_available"
@@ -278,7 +289,7 @@ def test_provider_fallback_uses_nexus_when_github_fails(
 def test_remote_requirements_are_exposed_when_provider_payload_includes_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(NEXUS_API_KEY_ENV, "test-api-key")
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
 
     mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
     inventory = _inventory((mod,))
@@ -291,12 +302,67 @@ def test_remote_requirements_are_exposed_when_provider_payload_includes_them(
         }
     )
 
-    report = check_updates_for_inventory(inventory, fetcher=fetcher)
+    report = check_updates_for_inventory(inventory, fetcher=fetcher, nexus_api_key="test-api-key")
 
     status = report.statuses[0]
     assert status.state == "up_to_date"
     assert status.remote_requirements_state == "requirements_present"
     assert status.remote_requirements == ("Content Patcher", "SMAPI")
+
+
+def test_nexus_explicit_key_overrides_environment_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(NEXUS_API_KEY_ENV, "env-key")
+    mod = _mod(unique_id="Sample.Nexus", version="1.0.0", update_keys=("Nexus:12345",))
+    inventory = _inventory((mod,))
+    fetcher = StubFetcher(
+        payloads={
+            "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json": {
+                "version": "1.0.0",
+            }
+        }
+    )
+
+    _ = check_updates_for_inventory(inventory, fetcher=fetcher, nexus_api_key="persisted-key")
+
+    assert fetcher.calls
+    assert fetcher.calls[0][1].get("apikey") == "persisted-key"
+
+
+def test_nexus_connection_status_not_configured_when_key_missing() -> None:
+    status = check_nexus_connection(nexus_api_key=None, fetcher=StubFetcher())
+
+    assert status.state == "not_configured"
+
+
+def test_nexus_connection_status_reports_invalid_auth() -> None:
+    status = check_nexus_connection(
+        nexus_api_key="test-api-key",
+        fetcher=StubFetcher(
+            error_by_url={
+                "https://api.nexusmods.com/v1/users/validate.json": MetadataFetchError(
+                    AUTH_FAILURE,
+                    "HTTP 401",
+                )
+            }
+        ),
+    )
+
+    assert status.state == "invalid_auth_failure"
+
+
+def test_nexus_connection_status_reports_working_when_validate_endpoint_succeeds() -> None:
+    status = check_nexus_connection(
+        nexus_api_key="test-api-key",
+        fetcher=StubFetcher(
+            payloads={
+                "https://api.nexusmods.com/v1/users/validate.json": {"name": "tester"},
+            }
+        ),
+    )
+
+    assert status.state == "working_validated"
 
 
 

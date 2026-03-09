@@ -22,8 +22,11 @@ from .dependency_preflight import (
 )
 from .update_metadata import (
     MetadataFetchError,
+    check_nexus_connection,
     check_updates_for_inventory,
     compare_versions,
+    mask_api_key,
+    normalize_nexus_api_key,
     resolve_remote_link,
 )
 from .remote_requirements import evaluate_remote_requirements_for_package_mods
@@ -48,8 +51,11 @@ __all__ = [
     "save_app_config",
     "scan_mods_directory",
     "check_updates_for_inventory",
+    "check_nexus_connection",
     "evaluate_remote_requirements_for_package_mods",
     "compare_versions",
+    "mask_api_key",
+    "normalize_nexus_api_key",
     "resolve_remote_link",
     "MetadataFetchError",
     "SandboxInstallError",

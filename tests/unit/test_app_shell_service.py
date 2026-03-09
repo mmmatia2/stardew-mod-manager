@@ -6,6 +6,7 @@ from typing import Literal
 
 import pytest
 
+import sdvmm.app.shell_service as shell_service_module
 from sdvmm.app.shell_service import (
     INSTALL_TARGET_CONFIGURED_REAL_MODS,
     INSTALL_TARGET_SANDBOX_MODS,
@@ -14,7 +15,7 @@ from sdvmm.app.shell_service import (
     AppShellError,
     AppShellService,
 )
-from sdvmm.domain.models import AppConfig, ModUpdateReport, ModUpdateStatus
+from sdvmm.domain.models import AppConfig, ModUpdateReport, ModUpdateStatus, NexusIntegrationStatus
 from sdvmm.domain.update_codes import UpdateState
 from sdvmm.services.app_state_store import save_app_config
 
@@ -634,6 +635,106 @@ def test_check_updates_marks_metadata_unavailable_for_nexus_link(
     assert "[missing_api_key]" in (report.statuses[0].message or "")
 
 
+def test_check_updates_passes_resolved_nexus_key_to_metadata_service(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    inventory = _empty_inventory()
+    captured: dict[str, object] = {}
+
+    def _fake_check_updates_for_inventory(
+        incoming_inventory,
+        *,
+        fetcher=None,
+        timeout_seconds: float = 8.0,
+        nexus_api_key: str | None = None,
+    ) -> ModUpdateReport:
+        captured["inventory"] = incoming_inventory
+        captured["nexus_api_key"] = nexus_api_key
+        return ModUpdateReport(statuses=tuple())
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(shell_service_module, "check_updates_for_inventory", _fake_check_updates_for_inventory)
+    try:
+        config = AppConfig(
+            game_path=tmp_path,
+            mods_path=tmp_path,
+            app_data_path=tmp_path,
+            nexus_api_key="persisted-nexus-key",
+        )
+        _ = service.check_updates(
+            inventory,
+            nexus_api_key_text="",
+            existing_config=config,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert captured["inventory"] is inventory
+    assert captured["nexus_api_key"] == "persisted-nexus-key"
+
+
+def test_get_nexus_status_reports_saved_config_state(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    config = AppConfig(
+        game_path=tmp_path,
+        mods_path=tmp_path,
+        app_data_path=tmp_path,
+        nexus_api_key="saved-key",
+    )
+
+    status = service.get_nexus_integration_status(
+        nexus_api_key_text="",
+        existing_config=config,
+        validate_connection=False,
+    )
+
+    assert status.state == "configured"
+    assert status.source == "saved_config"
+    assert status.masked_key is not None
+    assert "saved-key" not in (status.masked_key or "")
+
+
+def test_get_nexus_status_uses_environment_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SDVMM_NEXUS_API_KEY", "env-key-123456")
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+
+    status = service.get_nexus_integration_status(
+        nexus_api_key_text="",
+        existing_config=None,
+        validate_connection=False,
+    )
+
+    assert status.state == "configured"
+    assert status.source == "environment"
+
+
+def test_get_nexus_status_validation_reports_auth_failure(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        shell_service_module,
+        "check_nexus_connection",
+        lambda *, nexus_api_key: NexusIntegrationStatus(
+            state="invalid_auth_failure",
+            source="entered",
+            masked_key="abcd...1234",
+            message="[auth_failure] HTTP 401",
+        ),
+    )
+    try:
+        status = service.get_nexus_integration_status(
+            nexus_api_key_text="abcd-1234",
+            existing_config=None,
+            validate_connection=True,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert status.state == "invalid_auth_failure"
+
+
 def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     mods = tmp_path / "Mods"
@@ -654,6 +755,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
         sandbox_archive_path_text=str(archive),
         watched_downloads_path_text=str(downloads),
         real_archive_path_text=str(real_archive),
+        nexus_api_key_text="persisted-key",
         scan_target="sandbox_mods",
         install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
         existing_config=None,
@@ -664,6 +766,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     assert saved.sandbox_archive_path == archive
     assert saved.real_archive_path == real_archive
     assert saved.watched_downloads_path == downloads
+    assert saved.nexus_api_key == "persisted-key"
     assert saved.scan_target == "sandbox_mods"
     assert saved.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
 
@@ -673,6 +776,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     assert reloaded.config.sandbox_archive_path == archive
     assert reloaded.config.real_archive_path == real_archive
     assert reloaded.config.watched_downloads_path == downloads
+    assert reloaded.config.nexus_api_key == "persisted-key"
     assert reloaded.config.scan_target == "sandbox_mods"
     assert reloaded.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
 
@@ -696,6 +800,7 @@ def test_save_operational_config_can_derive_mods_path_from_game_path(tmp_path: P
         sandbox_mods_path_text=str(sandbox),
         sandbox_archive_path_text=str(archive),
         watched_downloads_path_text=str(downloads),
+        nexus_api_key_text="",
         scan_target="configured_real_mods",
         existing_config=None,
     )

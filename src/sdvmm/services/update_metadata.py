@@ -14,7 +14,14 @@ from sdvmm.domain.models import (
     ModUpdateReport,
     ModUpdateStatus,
     ModsInventory,
+    NexusIntegrationStatus,
     RemoteModLink,
+)
+from sdvmm.domain.nexus_codes import (
+    NEXUS_CONFIGURED,
+    NEXUS_INVALID_AUTH_FAILURE,
+    NEXUS_NOT_CONFIGURED,
+    NEXUS_WORKING_VALIDATED,
 )
 from sdvmm.domain.remote_requirement_codes import (
     NO_REMOTE_LINK_FOR_REQUIREMENTS,
@@ -33,6 +40,7 @@ from sdvmm.domain.update_codes import (
 )
 
 NEXUS_API_KEY_ENV = "SDVMM_NEXUS_API_KEY"
+NEXUS_VALIDATE_URL = "https://api.nexusmods.com/v1/users/validate.json"
 
 MALFORMED_UPDATE_KEY = "malformed_update_key"
 MISSING_API_KEY = "missing_api_key"
@@ -118,6 +126,7 @@ class MetadataProviderAdapter(Protocol):
         *,
         fetcher: JsonMetadataFetcher,
         timeout_seconds: float,
+        nexus_api_key: str | None = None,
     ) -> dict[str, Any]:
         """Load provider metadata payload for a resolved link."""
 
@@ -152,7 +161,9 @@ class JsonProviderAdapter:
         *,
         fetcher: JsonMetadataFetcher,
         timeout_seconds: float,
+        nexus_api_key: str | None = None,
     ) -> dict[str, Any]:
+        _ = nexus_api_key
         if not link.metadata_url:
             raise MetadataFetchError(UNEXPECTED_PROVIDER_RESPONSE, "JSON provider has no metadata URL")
         return fetcher.fetch_json(link.metadata_url, timeout_seconds)
@@ -188,7 +199,9 @@ class GithubProviderAdapter:
         *,
         fetcher: JsonMetadataFetcher,
         timeout_seconds: float,
+        nexus_api_key: str | None = None,
     ) -> dict[str, Any]:
+        _ = nexus_api_key
         if not link.metadata_url:
             raise MetadataFetchError(UNEXPECTED_PROVIDER_RESPONSE, "GitHub provider has no metadata URL")
         return fetcher.fetch_json(link.metadata_url, timeout_seconds)
@@ -232,16 +245,19 @@ class NexusProviderAdapter:
         *,
         fetcher: JsonMetadataFetcher,
         timeout_seconds: float,
+        nexus_api_key: str | None = None,
     ) -> dict[str, Any]:
         if not link.metadata_url:
             raise MetadataFetchError(UNEXPECTED_PROVIDER_RESPONSE, "Nexus provider has no metadata URL")
 
-        api_key = os.getenv(NEXUS_API_KEY_ENV, "").strip()
+        api_key = normalize_nexus_api_key(nexus_api_key)
+        if not api_key:
+            api_key = normalize_nexus_api_key(os.getenv(NEXUS_API_KEY_ENV, ""))
         if not api_key:
             raise MetadataFetchError(
                 MISSING_API_KEY,
                 (
-                    f"Nexus metadata requires {NEXUS_API_KEY_ENV} in the current process environment."
+                    f"Nexus metadata requires a configured API key (saved key preferred; env fallback: {NEXUS_API_KEY_ENV})."
                 ),
             )
 
@@ -304,6 +320,7 @@ def check_updates_for_inventory(
     *,
     fetcher: JsonMetadataFetcher | None = None,
     timeout_seconds: float = 8.0,
+    nexus_api_key: str | None = None,
 ) -> ModUpdateReport:
     active_fetcher = fetcher or UrllibJsonMetadataFetcher()
 
@@ -314,11 +331,59 @@ def check_updates_for_inventory(
                 mod=mod,
                 fetcher=active_fetcher,
                 timeout_seconds=timeout_seconds,
+                nexus_api_key=nexus_api_key,
             )
         )
 
     statuses.sort(key=lambda status: (status.name.casefold(), status.folder_path.name.casefold()))
     return ModUpdateReport(statuses=tuple(statuses))
+
+
+def check_nexus_connection(
+    *,
+    nexus_api_key: str | None,
+    fetcher: JsonMetadataFetcher | None = None,
+    timeout_seconds: float = 8.0,
+) -> NexusIntegrationStatus:
+    normalized = normalize_nexus_api_key(nexus_api_key)
+    if not normalized:
+        return NexusIntegrationStatus(
+            state=NEXUS_NOT_CONFIGURED,
+            source="none",
+            masked_key=None,
+            message="Nexus API key is not configured.",
+        )
+
+    active_fetcher = fetcher or UrllibJsonMetadataFetcher()
+    try:
+        payload = active_fetcher.fetch_json(
+            NEXUS_VALIDATE_URL,
+            timeout_seconds,
+            headers={"apikey": normalized},
+        )
+    except MetadataFetchError as exc:
+        if exc.reason == AUTH_FAILURE:
+            return NexusIntegrationStatus(
+                state=NEXUS_INVALID_AUTH_FAILURE,
+                source="entered",
+                masked_key=mask_api_key(normalized),
+                message=f"[{AUTH_FAILURE}] {exc.message}",
+            )
+        return NexusIntegrationStatus(
+            state=NEXUS_CONFIGURED,
+            source="entered",
+            masked_key=mask_api_key(normalized),
+            message=f"[{exc.reason}] Could not validate Nexus key right now: {exc.message}",
+        )
+
+    user_name = payload.get("name")
+    user_suffix = f" (user: {user_name})" if isinstance(user_name, str) and user_name.strip() else ""
+    return NexusIntegrationStatus(
+        state=NEXUS_WORKING_VALIDATED,
+        source="entered",
+        masked_key=mask_api_key(normalized),
+        message=f"Nexus key validated successfully{user_suffix}.",
+    )
 
 
 def compare_versions(installed_version: str, remote_version: str) -> int | None:
@@ -392,6 +457,7 @@ def _check_single_mod(
     *,
     fetcher: JsonMetadataFetcher,
     timeout_seconds: float,
+    nexus_api_key: str | None,
 ) -> ModUpdateStatus:
     links, resolution_issues = resolve_remote_link_candidates(mod.update_keys)
     base_status = ModUpdateStatus(
@@ -443,6 +509,7 @@ def _check_single_mod(
                 link,
                 fetcher=fetcher,
                 timeout_seconds=timeout_seconds,
+                nexus_api_key=nexus_api_key,
             )
         except MetadataFetchError as exc:
             failures.append(
@@ -684,6 +751,24 @@ def _extract_http_error_message(exc: HTTPError) -> str | None:
             return message.strip()
 
     return body.strip()[:240]
+
+
+def normalize_nexus_api_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized
+
+
+def mask_api_key(value: str | None) -> str | None:
+    normalized = normalize_nexus_api_key(value)
+    if not normalized:
+        return None
+    if len(normalized) <= 8:
+        return "*" * len(normalized)
+    return f"{normalized[:4]}...{normalized[-4:]}"
 
 
 def _summarize_failures(failures: list[ProviderFailure]) -> str:
