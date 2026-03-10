@@ -142,14 +142,24 @@ class MainWindow(QMainWindow):
         self._status_label = QLabel()
         self._blocking_issues_label = QLabel("No blocking issues detected.")
         self._next_step_label = QLabel("Run Scan to refresh installed inventory.")
-        self._scan_context_label = QLabel("Current scan source: not set")
-        self._install_context_label = QLabel("Current install destination: not set")
-        self._environment_status_label = QLabel("Environment: not checked")
-        self._nexus_status_label = QLabel("Nexus: not configured")
-        self._watch_status_label = QLabel("Downloads watch: stopped")
+        self._scan_context_label = QLabel("Not set")
+        self._install_context_label = QLabel("Not set")
+        self._environment_status_label = QLabel("Not checked")
+        self._nexus_status_label = QLabel("Not configured")
+        self._watch_status_label = QLabel("Stopped")
         self._status_label.setWordWrap(True)
         self._blocking_issues_label.setWordWrap(True)
         self._next_step_label.setWordWrap(True)
+        self._next_step_label.setStyleSheet(
+            "font-weight: 600; padding: 6px; border: 1px solid #b8c8e8; background: #eef4ff;"
+        )
+        self._blocking_issues_label.setStyleSheet(
+            "padding: 4px; border: 1px solid #e0d1a5; background: #fff8e6;"
+        )
+        self._status_label.setStyleSheet(
+            "padding: 4px; border: 1px solid #d9d9d9; background: #f6f6f6;"
+        )
+        self._details_toggle = QCheckBox("Show detailed output")
         self._watch_timer = QTimer(self)
         self._watch_timer.setInterval(2000)
         self._watch_timer.timeout.connect(self._on_watch_tick)
@@ -170,6 +180,7 @@ class MainWindow(QMainWindow):
         self._nexus_api_key_input.textChanged.connect(self._on_nexus_key_changed)
         self._intake_result_combo.currentIndexChanged.connect(self._on_intake_selection_changed)
         self._discovery_query_input.returnPressed.connect(self._on_search_discovery)
+        self._details_toggle.toggled.connect(self._on_toggle_details_panel)
 
         self._build_layout()
         self._refresh_intake_selector()
@@ -185,12 +196,15 @@ class MainWindow(QMainWindow):
         context_layout.addWidget(self._environment_status_label, 0, 1)
         context_layout.addWidget(QLabel("Nexus"), 0, 2)
         context_layout.addWidget(self._nexus_status_label, 0, 3)
+        context_layout.addWidget(QLabel("Watcher"), 0, 4)
+        context_layout.addWidget(self._watch_status_label, 0, 5)
         context_layout.addWidget(QLabel("Scan source"), 1, 0)
-        context_layout.addWidget(self._scan_context_label, 1, 1)
-        context_layout.addWidget(QLabel("Install destination"), 1, 2)
-        context_layout.addWidget(self._install_context_label, 1, 3)
-        context_layout.addWidget(QLabel("Watcher"), 2, 0)
-        context_layout.addWidget(self._watch_status_label, 2, 1)
+        context_layout.addWidget(self._scan_context_label, 1, 1, 1, 2)
+        context_layout.addWidget(QLabel("Install destination"), 1, 3)
+        context_layout.addWidget(self._install_context_label, 1, 4, 1, 2)
+        context_layout.setColumnStretch(1, 1)
+        context_layout.setColumnStretch(3, 1)
+        context_layout.setColumnStretch(5, 1)
         root_layout.addWidget(context_group)
 
         self._setup_toggle = QCheckBox("Show setup and path configuration")
@@ -267,6 +281,12 @@ class MainWindow(QMainWindow):
         inventory_controls.addWidget(open_remote_button)
         inventory_controls.addStretch(1)
         inventory_layout.addLayout(inventory_controls)
+        flow_hint_label = QLabel(
+            "Workflow: Scan -> Check updates -> Open remote page -> manual download -> watcher intake -> plan/install"
+        )
+        flow_hint_label.setWordWrap(True)
+        flow_hint_label.setStyleSheet("color: #4b5563;")
+        inventory_layout.addWidget(flow_hint_label)
         inventory_layout.addWidget(self._mods_table)
         workspace_splitter.addWidget(inventory_group)
 
@@ -274,35 +294,44 @@ class MainWindow(QMainWindow):
 
         discovery_tab = QWidget()
         discovery_layout = QVBoxLayout(discovery_tab)
-        discovery_controls = QHBoxLayout()
-        discovery_controls.addWidget(QLabel("Search query"))
-        discovery_controls.addWidget(self._discovery_query_input)
+        discovery_search_group = QGroupBox("Search and Source Action")
+        discovery_search_layout = QHBoxLayout(discovery_search_group)
+        discovery_search_layout.addWidget(QLabel("Search query"))
+        discovery_search_layout.addWidget(self._discovery_query_input)
         search_mods_button = QPushButton("Search mods")
         search_mods_button.clicked.connect(self._on_search_discovery)
-        discovery_controls.addWidget(search_mods_button)
+        discovery_search_layout.addWidget(search_mods_button)
         open_discovered_button = QPushButton("Open discovered page")
         open_discovered_button.clicked.connect(self._on_open_discovered_page)
-        discovery_controls.addWidget(open_discovered_button)
-        discovery_layout.addLayout(discovery_controls)
-        discovery_layout.addWidget(self._discovery_table)
+        discovery_search_layout.addWidget(open_discovered_button)
+        discovery_layout.addWidget(discovery_search_group)
+        discovery_results_group = QGroupBox("Results and Context Correlation")
+        discovery_results_layout = QVBoxLayout(discovery_results_group)
+        discovery_results_layout.addWidget(self._discovery_table)
+        discovery_layout.addWidget(discovery_results_group)
         context_tabs.addTab(discovery_tab, "Discovery")
 
         intake_tab = QWidget()
-        intake_layout = QGridLayout(intake_tab)
-        intake_layout.addWidget(QLabel("Zip package"), 0, 0)
-        intake_layout.addWidget(self._zip_path_input, 0, 1)
+        intake_layout = QVBoxLayout(intake_tab)
+        inspect_group = QGroupBox("Package Review")
+        inspect_layout = QGridLayout(inspect_group)
+        inspect_layout.addWidget(QLabel("Zip package"), 0, 0)
+        inspect_layout.addWidget(self._zip_path_input, 0, 1)
         browse_zip_button = QPushButton("Browse zip")
         browse_zip_button.clicked.connect(self._on_browse_zip)
-        intake_layout.addWidget(browse_zip_button, 0, 2)
+        inspect_layout.addWidget(browse_zip_button, 0, 2)
         inspect_button = QPushButton("Inspect zip")
         inspect_button.clicked.connect(self._on_inspect_zip)
-        intake_layout.addWidget(inspect_button, 0, 3)
+        inspect_layout.addWidget(inspect_button, 0, 3)
+        intake_layout.addWidget(inspect_group)
 
-        intake_layout.addWidget(QLabel("Watched downloads path"), 1, 0)
-        intake_layout.addWidget(self._watched_downloads_path_input, 1, 1)
+        watcher_group = QGroupBox("Watcher Control")
+        watcher_layout = QGridLayout(watcher_group)
+        watcher_layout.addWidget(QLabel("Watched downloads path"), 0, 0)
+        watcher_layout.addWidget(self._watched_downloads_path_input, 0, 1)
         browse_downloads_button = QPushButton("Browse downloads")
         browse_downloads_button.clicked.connect(self._on_browse_watched_downloads)
-        intake_layout.addWidget(browse_downloads_button, 1, 2)
+        watcher_layout.addWidget(browse_downloads_button, 0, 2)
         watch_actions = QHBoxLayout()
         start_watch_button = QPushButton("Start watch")
         start_watch_button.clicked.connect(self._on_start_watch)
@@ -310,20 +339,31 @@ class MainWindow(QMainWindow):
         stop_watch_button = QPushButton("Stop watch")
         stop_watch_button.clicked.connect(self._on_stop_watch)
         watch_actions.addWidget(stop_watch_button)
-        intake_layout.addLayout(watch_actions, 1, 3)
+        watch_actions.addStretch(1)
+        watcher_layout.addLayout(watch_actions, 0, 3)
+        intake_layout.addWidget(watcher_group)
 
-        intake_layout.addWidget(QLabel("Detected packages"), 2, 0)
-        intake_layout.addWidget(self._intake_result_combo, 2, 1, 1, 2)
+        detected_group = QGroupBox("Detected Packages and Planning Handoff")
+        detected_layout = QGridLayout(detected_group)
+        detected_layout.addWidget(QLabel("Detected packages"), 0, 0)
+        detected_layout.addWidget(self._intake_result_combo, 0, 1, 1, 2)
         self._plan_selected_intake_button.clicked.connect(self._on_plan_selected_intake)
-        intake_layout.addWidget(self._plan_selected_intake_button, 2, 3)
+        detected_layout.addWidget(self._plan_selected_intake_button, 0, 3)
+        intake_layout.addWidget(detected_group)
         context_tabs.addTab(intake_tab, "Packages & Intake")
 
         plan_tab = QWidget()
-        plan_layout = QGridLayout(plan_tab)
-        plan_layout.addWidget(QLabel("Install destination"), 0, 0)
-        plan_layout.addWidget(self._install_target_combo, 0, 1)
-        plan_layout.addWidget(self._overwrite_checkbox, 0, 2)
-        plan_layout.addWidget(self._install_archive_label, 1, 0, 1, 3)
+        plan_tab_layout = QVBoxLayout(plan_tab)
+        destination_group = QGroupBox("Destination and Safety Context")
+        destination_layout = QGridLayout(destination_group)
+        destination_layout.addWidget(QLabel("Install destination"), 0, 0)
+        destination_layout.addWidget(self._install_target_combo, 0, 1)
+        destination_layout.addWidget(self._overwrite_checkbox, 0, 2)
+        destination_layout.addWidget(self._install_archive_label, 1, 0, 1, 3)
+        plan_tab_layout.addWidget(destination_group)
+
+        execute_group = QGroupBox("Plan and Execute")
+        execute_layout = QVBoxLayout(execute_group)
         plan_actions = QHBoxLayout()
         plan_install_button = QPushButton("Plan install")
         plan_install_button.clicked.connect(self._on_plan_install)
@@ -332,7 +372,14 @@ class MainWindow(QMainWindow):
         run_install_button.clicked.connect(self._on_run_install)
         plan_actions.addWidget(run_install_button)
         plan_actions.addStretch(1)
-        plan_layout.addLayout(plan_actions, 2, 0, 1, 3)
+        execute_layout.addLayout(plan_actions)
+        caution_label = QLabel(
+            "No automatic install: review plan details and warnings before running install."
+        )
+        caution_label.setWordWrap(True)
+        caution_label.setStyleSheet("color: #4b5563;")
+        execute_layout.addWidget(caution_label)
+        plan_tab_layout.addWidget(execute_group)
         context_tabs.addTab(plan_tab, "Plan & Install")
 
         workspace_splitter.addWidget(context_tabs)
@@ -350,8 +397,13 @@ class MainWindow(QMainWindow):
         summary_layout.addWidget(QLabel("Recommended next step"), 2, 0)
         summary_layout.addWidget(self._next_step_label, 2, 1)
         guidance_layout.addLayout(summary_layout)
-        guidance_layout.addWidget(QLabel("Detailed output"))
-        guidance_layout.addWidget(self._findings_box)
+        guidance_layout.addWidget(self._details_toggle)
+        details_group = QGroupBox("Detailed output")
+        details_layout = QVBoxLayout(details_group)
+        details_layout.addWidget(self._findings_box)
+        details_group.setVisible(False)
+        self._details_group = details_group
+        guidance_layout.addWidget(details_group)
         root_layout.addWidget(guidance_group)
 
         self.setCentralWidget(container)
@@ -397,6 +449,13 @@ class MainWindow(QMainWindow):
 
     def _on_toggle_setup_panel(self, checked: bool) -> None:
         self._setup_group.setVisible(checked)
+
+    def _on_toggle_details_panel(self, checked: bool) -> None:
+        self._details_group.setVisible(checked)
+        if checked:
+            self._details_toggle.setText("Hide detailed output")
+        else:
+            self._details_toggle.setText("Show detailed output")
 
     def _on_browse(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -784,7 +843,7 @@ class MainWindow(QMainWindow):
         baseline_count = len(self._known_watched_zip_paths)
         watched_path = self._watched_downloads_path_input.text().strip()
         self._watch_status_label.setText(
-            f"Downloads watch: running ({watched_path}) baseline={baseline_count} existing zip(s)"
+            f"Running | {watched_path} | baseline={baseline_count} zip(s)"
         )
         self._set_status(
             "Downloads watcher started. Only zip files added after start are detected."
@@ -792,7 +851,7 @@ class MainWindow(QMainWindow):
 
     def _on_stop_watch(self) -> None:
         self._watch_timer.stop()
-        self._watch_status_label.setText("Downloads watch: stopped")
+        self._watch_status_label.setText("Stopped")
         self._set_status("Downloads watcher stopped.")
 
     def _on_watch_tick(self) -> None:
@@ -806,7 +865,7 @@ class MainWindow(QMainWindow):
             )
         except AppShellError as exc:
             self._watch_timer.stop()
-            self._watch_status_label.setText("Downloads watch: stopped (error)")
+            self._watch_status_label.setText("Stopped (error)")
             self._set_status(str(exc))
             self._set_details_text(str(exc))
             return
@@ -926,7 +985,9 @@ class MainWindow(QMainWindow):
         self._next_step_label.setText(next_step)
 
     def _set_scan_context(self, path: Path, label: str) -> None:
-        self._scan_context_label.setText(f"Current scan source: {label} ({path})")
+        path_text = str(path)
+        self._scan_context_label.setText(f"{label}: {_compact_path_text(path_text)}")
+        self._scan_context_label.setToolTip(path_text)
 
     def _invalidate_pending_plan(self, *_: object) -> None:
         self._pending_install_plan = None
@@ -938,12 +999,12 @@ class MainWindow(QMainWindow):
         self._refresh_intake_selector()
         if self._watch_timer.isActive():
             self._watch_timer.stop()
-            self._watch_status_label.setText("Downloads watch: stopped (path changed)")
+            self._watch_status_label.setText("Stopped (path changed)")
             self._set_status("Watcher stopped because watched path changed.")
 
     def _on_game_path_changed(self, *_: object) -> None:
         self._last_environment_status = None
-        self._environment_status_label.setText("Environment: not checked")
+        self._environment_status_label.setText("Not checked")
 
     def _on_nexus_key_changed(self, *_: object) -> None:
         self._refresh_nexus_status(validated=False)
@@ -1039,9 +1100,9 @@ class MainWindow(QMainWindow):
         else:
             path_text = self._sandbox_mods_path_input.text().strip() or "<unset>"
             target_label = "Sandbox Mods"
-        self._scan_context_label.setText(
-            f"{target_label} ({path_text})"
-        )
+        compact = _compact_path_text(path_text)
+        self._scan_context_label.setText(f"{target_label}: {compact}")
+        self._scan_context_label.setToolTip(path_text)
 
     def _refresh_nexus_status(self, *, validated: bool) -> None:
         status = self._shell_service.get_nexus_integration_status(
@@ -1057,8 +1118,9 @@ class MainWindow(QMainWindow):
             self._install_archive_label.setText("Archive path for real Game Mods destination")
             path_text = self._mods_path_input.text().strip() or "<unset>"
             self._install_context_label.setText(
-                f"REAL game Mods ({path_text}) - explicit confirmation required"
+                f"REAL game Mods: {_compact_path_text(path_text)} (explicit confirmation required)"
             )
+            self._install_context_label.setToolTip(path_text)
             if not self._real_archive_path_input.text().strip() and self._mods_path_input.text().strip():
                 self._real_archive_path_input.setText(
                     str(Path(self._mods_path_input.text().strip()) / ".sdvmm-archive")
@@ -1067,7 +1129,8 @@ class MainWindow(QMainWindow):
 
         self._install_archive_label.setText("Archive path for sandbox destination")
         path_text = self._sandbox_mods_path_input.text().strip() or "<unset>"
-        self._install_context_label.setText(f"Sandbox Mods ({path_text})")
+        self._install_context_label.setText(f"Sandbox Mods: {_compact_path_text(path_text)}")
+        self._install_context_label.setToolTip(path_text)
         if (
             not self._sandbox_archive_path_input.text().strip()
             and self._sandbox_mods_path_input.text().strip()
@@ -1202,21 +1265,21 @@ def _discovery_compatibility_label(state: str) -> str:
 
 def _environment_summary_label(status: GameEnvironmentStatus) -> str:
     if "invalid_game_path" in status.state_codes:
-        return "Environment: invalid game path"
+        return "Invalid game path"
 
     mods_state = "mods detected" if "mods_path_detected" in status.state_codes else "mods not detected"
     smapi_state = "SMAPI detected" if "smapi_detected" in status.state_codes else "SMAPI not detected"
-    return f"Environment: {mods_state}, {smapi_state}"
+    return f"{mods_state}, {smapi_state}"
 
 
 def _nexus_status_label(state: str, masked_key: str | None) -> str:
     if state == "not_configured":
-        return "Nexus: not configured"
+        return "Not configured"
     if state == "working_validated":
-        return f"Nexus: working ({masked_key or 'key set'})"
+        return f"Working ({masked_key or 'key set'})"
     if state == "invalid_auth_failure":
-        return f"Nexus: invalid/auth failed ({masked_key or 'key set'})"
-    return f"Nexus: configured ({masked_key or 'key set'})"
+        return f"Invalid/auth failed ({masked_key or 'key set'})"
+    return f"Configured ({masked_key or 'key set'})"
 
 
 def _summarize_details_text(text: str) -> tuple[str, str]:
@@ -1254,3 +1317,9 @@ def _extract_recommended_next_step(text: str) -> str:
             if normalized:
                 return normalized
     return ""
+
+
+def _compact_path_text(path_text: str, *, max_length: int = 56) -> str:
+    if len(path_text) <= max_length:
+        return path_text
+    return f"...{path_text[-(max_length - 3):]}"
