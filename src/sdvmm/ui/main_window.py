@@ -111,12 +111,24 @@ class MainWindow(QMainWindow):
         self._mods_filter_input = QLineEdit()
         self._mods_filter_input.setPlaceholderText("Filter installed mods")
         self._mods_filter_input.setClearButtonEnabled(True)
+        self._mods_filter_input.setMinimumWidth(240)
         self._discovery_filter_input = QLineEdit()
         self._discovery_filter_input.setPlaceholderText("Filter discovery results")
         self._discovery_filter_input.setClearButtonEnabled(True)
+        self._discovery_filter_input.setMinimumWidth(240)
         self._intake_filter_input = QLineEdit()
         self._intake_filter_input.setPlaceholderText("Filter detected packages")
         self._intake_filter_input.setClearButtonEnabled(True)
+        self._intake_filter_input.setMinimumWidth(240)
+        self._mods_filter_stats_label = QLabel("0/0 shown")
+        self._discovery_filter_stats_label = QLabel("0/0 shown")
+        self._intake_filter_stats_label = QLabel("0/0 shown")
+        for stats_label in (
+            self._mods_filter_stats_label,
+            self._discovery_filter_stats_label,
+            self._intake_filter_stats_label,
+        ):
+            stats_label.setStyleSheet("color: #4b5563;")
         self._nexus_api_key_input = QLineEdit()
         self._nexus_api_key_input.setPlaceholderText("Nexus API key")
         self._nexus_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -321,6 +333,7 @@ class MainWindow(QMainWindow):
         inventory_controls.addWidget(open_remote_button)
         inventory_controls.addWidget(QLabel("Filter"))
         inventory_controls.addWidget(self._mods_filter_input, 1)
+        inventory_controls.addWidget(self._mods_filter_stats_label)
         inventory_controls.addStretch(1)
         inventory_layout.addLayout(inventory_controls)
         flow_hint_label = QLabel(
@@ -364,6 +377,7 @@ class MainWindow(QMainWindow):
         discovery_filter_layout.setSpacing(6)
         discovery_filter_layout.addWidget(QLabel("Filter"))
         discovery_filter_layout.addWidget(self._discovery_filter_input, 1)
+        discovery_filter_layout.addWidget(self._discovery_filter_stats_label)
         discovery_results_layout.addLayout(discovery_filter_layout)
         discovery_results_layout.addWidget(self._discovery_table)
         discovery_layout.addWidget(discovery_results_group)
@@ -419,7 +433,8 @@ class MainWindow(QMainWindow):
         detected_layout.setHorizontalSpacing(8)
         detected_layout.setVerticalSpacing(4)
         detected_layout.addWidget(QLabel("Filter"), 0, 0)
-        detected_layout.addWidget(self._intake_filter_input, 0, 1, 1, 3)
+        detected_layout.addWidget(self._intake_filter_input, 0, 1, 1, 2)
+        detected_layout.addWidget(self._intake_filter_stats_label, 0, 3)
         detected_layout.addWidget(QLabel("Detected packages"), 1, 0)
         detected_layout.addWidget(self._intake_result_combo, 1, 1, 1, 2)
         self._plan_selected_intake_button.clicked.connect(self._on_plan_selected_intake)
@@ -655,6 +670,7 @@ class MainWindow(QMainWindow):
         self._set_status("Environment detection complete.")
 
     def _on_scan(self) -> None:
+        self._set_status("Scanning selected Mods directory...")
         try:
             result = self._shell_service.scan_with_target(
                 scan_target=self._current_scan_target(),
@@ -766,6 +782,7 @@ class MainWindow(QMainWindow):
             self._set_status(message)
             return
 
+        self._set_status("Checking remote metadata/update states...")
         try:
             report = self._shell_service.check_updates(
                 self._current_inventory,
@@ -785,6 +802,7 @@ class MainWindow(QMainWindow):
         self._set_status(f"Update check complete: {len(report.statuses)} mod(s)")
 
     def _on_search_discovery(self) -> None:
+        self._set_status("Searching discovery index...")
         try:
             discovery_result = self._shell_service.search_mod_discovery(
                 query_text=self._discovery_query_input.text(),
@@ -1235,27 +1253,39 @@ class MainWindow(QMainWindow):
 
     def _apply_mods_filter(self, *_: object) -> None:
         filter_text = self._mods_filter_input.text()
+        visible_count = 0
         for row in range(self._mods_table.rowCount()):
             row_values = []
             for col in range(self._mods_table.columnCount()):
                 item = self._mods_table.item(row, col)
                 row_values.append(item.text() if item is not None else "")
-            self._mods_table.setRowHidden(
-                row,
-                not row_matches_filter(row_values, filter_text),
-            )
+            matches = row_matches_filter(row_values, filter_text)
+            self._mods_table.setRowHidden(row, not matches)
+            if matches:
+                visible_count += 1
+        self._set_filter_stats(
+            self._mods_filter_stats_label,
+            shown_count=visible_count,
+            total_count=self._mods_table.rowCount(),
+        )
 
     def _apply_discovery_filter(self, *_: object) -> None:
         filter_text = self._discovery_filter_input.text()
+        visible_count = 0
         for row in range(self._discovery_table.rowCount()):
             row_values = []
             for col in range(self._discovery_table.columnCount()):
                 item = self._discovery_table.item(row, col)
                 row_values.append(item.text() if item is not None else "")
-            self._discovery_table.setRowHidden(
-                row,
-                not row_matches_filter(row_values, filter_text),
-            )
+            matches = row_matches_filter(row_values, filter_text)
+            self._discovery_table.setRowHidden(row, not matches)
+            if matches:
+                visible_count += 1
+        self._set_filter_stats(
+            self._discovery_filter_stats_label,
+            shown_count=visible_count,
+            total_count=self._discovery_table.rowCount(),
+        )
 
     def _current_inventory_or_empty(self) -> ModsInventory:
         if self._current_inventory is not None:
@@ -1341,6 +1371,11 @@ class MainWindow(QMainWindow):
             self._intake_result_combo.addItem("<no detected packages>", -1)
             self._intake_result_combo.setEnabled(False)
             self._plan_selected_intake_button.setEnabled(False)
+            self._set_filter_stats(
+                self._intake_filter_stats_label,
+                shown_count=0,
+                total_count=0,
+            )
             return
 
         filter_text = self._intake_filter_input.text()
@@ -1379,6 +1414,11 @@ class MainWindow(QMainWindow):
             self._intake_result_combo.addItem("<no detected packages match filter>", -1)
             self._intake_result_combo.setEnabled(False)
             self._plan_selected_intake_button.setEnabled(False)
+            self._set_filter_stats(
+                self._intake_filter_stats_label,
+                shown_count=0,
+                total_count=len(self._detected_intakes),
+            )
             return
 
         selected_after = self._intake_result_combo.findData(selected_before)
@@ -1387,6 +1427,11 @@ class MainWindow(QMainWindow):
         else:
             self._intake_result_combo.setCurrentIndex(self._intake_result_combo.count() - 1)
         self._plan_selected_intake_button.setEnabled(self._selected_intake_index() >= 0)
+        self._set_filter_stats(
+            self._intake_filter_stats_label,
+            shown_count=visible_count,
+            total_count=len(self._detected_intakes),
+        )
 
     def _selected_intake_index(self) -> int:
         value = self._intake_result_combo.currentData()
@@ -1452,6 +1497,10 @@ class MainWindow(QMainWindow):
             self._guidance_group.setMaximumHeight(16777215)
             return
         self._guidance_group.setMaximumHeight(210)
+
+    @staticmethod
+    def _set_filter_stats(label: QLabel, *, shown_count: int, total_count: int) -> None:
+        label.setText(f"{shown_count}/{total_count} shown")
 
 
 def _discovery_source_label(provider: str) -> str:
