@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import QTimer
@@ -128,6 +129,9 @@ class MainWindow(QMainWindow):
         )
         self._mods_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._mods_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._mods_table.verticalHeader().setDefaultSectionSize(20)
+        self._mods_table.verticalHeader().setVisible(False)
+        self._mods_table.setAlternatingRowColors(True)
 
         self._discovery_table = QTableWidget(0, 8)
         self._discovery_table.setHorizontalHeaderLabels(
@@ -135,9 +139,13 @@ class MainWindow(QMainWindow):
         )
         self._discovery_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._discovery_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._discovery_table.verticalHeader().setDefaultSectionSize(20)
+        self._discovery_table.verticalHeader().setVisible(False)
+        self._discovery_table.setAlternatingRowColors(True)
 
         self._findings_box = QPlainTextEdit()
         self._findings_box.setReadOnly(True)
+        self._findings_box.setMinimumHeight(140)
 
         self._status_label = QLabel()
         self._blocking_issues_label = QLabel("No blocking issues detected.")
@@ -147,17 +155,17 @@ class MainWindow(QMainWindow):
         self._environment_status_label = QLabel("Not checked")
         self._nexus_status_label = QLabel("Not configured")
         self._watch_status_label = QLabel("Stopped")
-        self._status_label.setWordWrap(True)
-        self._blocking_issues_label.setWordWrap(True)
-        self._next_step_label.setWordWrap(True)
+        self._status_label.setWordWrap(False)
+        self._blocking_issues_label.setWordWrap(False)
+        self._next_step_label.setWordWrap(False)
         self._next_step_label.setStyleSheet(
-            "font-weight: 600; padding: 6px; border: 1px solid #b8c8e8; background: #eef4ff;"
+            "font-weight: 600; padding: 3px 5px; border: 1px solid #b8c8e8; background: #eef4ff;"
         )
         self._blocking_issues_label.setStyleSheet(
-            "padding: 4px; border: 1px solid #e0d1a5; background: #fff8e6;"
+            "padding: 3px 5px; border: 1px solid #e0d1a5; background: #fff8e6;"
         )
         self._status_label.setStyleSheet(
-            "padding: 4px; border: 1px solid #d9d9d9; background: #f6f6f6;"
+            "padding: 3px 5px; border: 1px solid #d9d9d9; background: #f6f6f6;"
         )
         self._details_toggle = QCheckBox("Show detailed output")
         self._watch_timer = QTimer(self)
@@ -189,9 +197,14 @@ class MainWindow(QMainWindow):
     def _build_layout(self) -> None:
         container = QWidget()
         root_layout = QVBoxLayout(container)
+        root_layout.setContentsMargins(8, 6, 8, 6)
+        root_layout.setSpacing(6)
 
-        context_group = QGroupBox("Current Context")
+        context_group = QGroupBox("Context")
         context_layout = QGridLayout(context_group)
+        context_layout.setContentsMargins(8, 6, 8, 6)
+        context_layout.setHorizontalSpacing(10)
+        context_layout.setVerticalSpacing(4)
         context_layout.addWidget(QLabel("Environment"), 0, 0)
         context_layout.addWidget(self._environment_status_label, 0, 1)
         context_layout.addWidget(QLabel("Nexus"), 0, 2)
@@ -213,6 +226,9 @@ class MainWindow(QMainWindow):
 
         setup_group = QGroupBox("Setup and Configuration")
         setup_layout = QGridLayout(setup_group)
+        setup_layout.setContentsMargins(8, 6, 8, 6)
+        setup_layout.setHorizontalSpacing(8)
+        setup_layout.setVerticalSpacing(4)
         setup_layout.addWidget(QLabel("Game directory (real install)"), 0, 0)
         setup_layout.addWidget(self._game_path_input, 0, 1)
         browse_game_button = QPushButton("Browse game")
@@ -264,10 +280,15 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(setup_group)
 
         workspace_splitter = QSplitter()
+        workspace_splitter.setChildrenCollapsible(False)
+        workspace_splitter.setHandleWidth(6)
 
         inventory_group = QGroupBox("Installed Mods Workspace")
         inventory_layout = QVBoxLayout(inventory_group)
+        inventory_layout.setContentsMargins(8, 6, 8, 6)
+        inventory_layout.setSpacing(5)
         inventory_controls = QHBoxLayout()
+        inventory_controls.setSpacing(6)
         inventory_controls.addWidget(QLabel("Scan source"))
         inventory_controls.addWidget(self._scan_target_combo)
         scan_button = QPushButton("Scan")
@@ -282,10 +303,13 @@ class MainWindow(QMainWindow):
         inventory_controls.addStretch(1)
         inventory_layout.addLayout(inventory_controls)
         flow_hint_label = QLabel(
-            "Workflow: Scan -> Check updates -> Open remote page -> manual download -> watcher intake -> plan/install"
+            "Flow: Scan -> Check updates -> Open remote page -> manual download -> watcher intake -> plan/install."
         )
-        flow_hint_label.setWordWrap(True)
+        flow_hint_label.setWordWrap(False)
         flow_hint_label.setStyleSheet("color: #4b5563;")
+        flow_hint_label.setToolTip(
+            "Workflow: Scan -> Check updates -> Open remote page -> manual download -> watcher intake -> plan/install."
+        )
         inventory_layout.addWidget(flow_hint_label)
         inventory_layout.addWidget(self._mods_table)
         workspace_splitter.addWidget(inventory_group)
@@ -294,8 +318,15 @@ class MainWindow(QMainWindow):
 
         discovery_tab = QWidget()
         discovery_layout = QVBoxLayout(discovery_tab)
-        discovery_search_group = QGroupBox("Search and Source Action")
+        discovery_layout.setContentsMargins(6, 6, 6, 6)
+        discovery_layout.setSpacing(6)
+        discovery_search_group = QGroupBox("Search and Source")
+        discovery_search_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
         discovery_search_layout = QHBoxLayout(discovery_search_group)
+        discovery_search_layout.setContentsMargins(8, 6, 8, 6)
+        discovery_search_layout.setSpacing(6)
         discovery_search_layout.addWidget(QLabel("Search query"))
         discovery_search_layout.addWidget(self._discovery_query_input)
         search_mods_button = QPushButton("Search mods")
@@ -305,16 +336,24 @@ class MainWindow(QMainWindow):
         open_discovered_button.clicked.connect(self._on_open_discovered_page)
         discovery_search_layout.addWidget(open_discovered_button)
         discovery_layout.addWidget(discovery_search_group)
-        discovery_results_group = QGroupBox("Results and Context Correlation")
+        discovery_results_group = QGroupBox("Results")
         discovery_results_layout = QVBoxLayout(discovery_results_group)
+        discovery_results_layout.setContentsMargins(8, 6, 8, 6)
         discovery_results_layout.addWidget(self._discovery_table)
         discovery_layout.addWidget(discovery_results_group)
+        discovery_layout.setStretch(1, 1)
         context_tabs.addTab(discovery_tab, "Discovery")
 
         intake_tab = QWidget()
         intake_layout = QVBoxLayout(intake_tab)
+        intake_layout.setContentsMargins(6, 6, 6, 6)
+        intake_layout.setSpacing(6)
         inspect_group = QGroupBox("Package Review")
+        inspect_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         inspect_layout = QGridLayout(inspect_group)
+        inspect_layout.setContentsMargins(8, 6, 8, 6)
+        inspect_layout.setHorizontalSpacing(8)
+        inspect_layout.setVerticalSpacing(4)
         inspect_layout.addWidget(QLabel("Zip package"), 0, 0)
         inspect_layout.addWidget(self._zip_path_input, 0, 1)
         browse_zip_button = QPushButton("Browse zip")
@@ -325,8 +364,12 @@ class MainWindow(QMainWindow):
         inspect_layout.addWidget(inspect_button, 0, 3)
         intake_layout.addWidget(inspect_group)
 
-        watcher_group = QGroupBox("Watcher Control")
+        watcher_group = QGroupBox("Watcher")
+        watcher_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         watcher_layout = QGridLayout(watcher_group)
+        watcher_layout.setContentsMargins(8, 6, 8, 6)
+        watcher_layout.setHorizontalSpacing(8)
+        watcher_layout.setVerticalSpacing(4)
         watcher_layout.addWidget(QLabel("Watched downloads path"), 0, 0)
         watcher_layout.addWidget(self._watched_downloads_path_input, 0, 1)
         browse_downloads_button = QPushButton("Browse downloads")
@@ -343,19 +386,32 @@ class MainWindow(QMainWindow):
         watcher_layout.addLayout(watch_actions, 0, 3)
         intake_layout.addWidget(watcher_group)
 
-        detected_group = QGroupBox("Detected Packages and Planning Handoff")
+        detected_group = QGroupBox("Detected Packages")
+        detected_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         detected_layout = QGridLayout(detected_group)
+        detected_layout.setContentsMargins(8, 6, 8, 6)
+        detected_layout.setHorizontalSpacing(8)
+        detected_layout.setVerticalSpacing(4)
         detected_layout.addWidget(QLabel("Detected packages"), 0, 0)
         detected_layout.addWidget(self._intake_result_combo, 0, 1, 1, 2)
         self._plan_selected_intake_button.clicked.connect(self._on_plan_selected_intake)
         detected_layout.addWidget(self._plan_selected_intake_button, 0, 3)
         intake_layout.addWidget(detected_group)
+        intake_layout.addStretch(1)
         context_tabs.addTab(intake_tab, "Packages & Intake")
 
         plan_tab = QWidget()
         plan_tab_layout = QVBoxLayout(plan_tab)
+        plan_tab_layout.setContentsMargins(6, 6, 6, 6)
+        plan_tab_layout.setSpacing(6)
         destination_group = QGroupBox("Destination and Safety Context")
+        destination_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
         destination_layout = QGridLayout(destination_group)
+        destination_layout.setContentsMargins(8, 6, 8, 6)
+        destination_layout.setHorizontalSpacing(8)
+        destination_layout.setVerticalSpacing(4)
         destination_layout.addWidget(QLabel("Install destination"), 0, 0)
         destination_layout.addWidget(self._install_target_combo, 0, 1)
         destination_layout.addWidget(self._overwrite_checkbox, 0, 2)
@@ -363,8 +419,12 @@ class MainWindow(QMainWindow):
         plan_tab_layout.addWidget(destination_group)
 
         execute_group = QGroupBox("Plan and Execute")
+        execute_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         execute_layout = QVBoxLayout(execute_group)
+        execute_layout.setContentsMargins(8, 6, 8, 6)
+        execute_layout.setSpacing(5)
         plan_actions = QHBoxLayout()
+        plan_actions.setSpacing(6)
         plan_install_button = QPushButton("Plan install")
         plan_install_button.clicked.connect(self._on_plan_install)
         plan_actions.addWidget(plan_install_button)
@@ -380,31 +440,40 @@ class MainWindow(QMainWindow):
         caution_label.setStyleSheet("color: #4b5563;")
         execute_layout.addWidget(caution_label)
         plan_tab_layout.addWidget(execute_group)
+        plan_tab_layout.addStretch(1)
         context_tabs.addTab(plan_tab, "Plan & Install")
 
         workspace_splitter.addWidget(context_tabs)
         workspace_splitter.setStretchFactor(0, 3)
         workspace_splitter.setStretchFactor(1, 4)
-        root_layout.addWidget(workspace_splitter)
+        root_layout.addWidget(workspace_splitter, 1)
 
         guidance_group = QGroupBox("Guidance and Status")
         guidance_layout = QVBoxLayout(guidance_group)
+        guidance_layout.setContentsMargins(8, 6, 8, 6)
+        guidance_layout.setSpacing(4)
         summary_layout = QGridLayout()
+        summary_layout.setHorizontalSpacing(8)
+        summary_layout.setVerticalSpacing(4)
         summary_layout.addWidget(QLabel("Current status"), 0, 0)
         summary_layout.addWidget(self._status_label, 0, 1)
         summary_layout.addWidget(QLabel("Blocking issues"), 1, 0)
         summary_layout.addWidget(self._blocking_issues_label, 1, 1)
         summary_layout.addWidget(QLabel("Recommended next step"), 2, 0)
         summary_layout.addWidget(self._next_step_label, 2, 1)
+        summary_layout.setColumnStretch(1, 1)
         guidance_layout.addLayout(summary_layout)
         guidance_layout.addWidget(self._details_toggle)
         details_group = QGroupBox("Detailed output")
         details_layout = QVBoxLayout(details_group)
+        details_layout.setContentsMargins(8, 6, 8, 6)
         details_layout.addWidget(self._findings_box)
         details_group.setVisible(False)
         self._details_group = details_group
+        self._guidance_group = guidance_group
         guidance_layout.addWidget(details_group)
         root_layout.addWidget(guidance_group)
+        self._apply_guidance_compact_mode(details_visible=False)
 
         self.setCentralWidget(container)
 
@@ -452,6 +521,7 @@ class MainWindow(QMainWindow):
 
     def _on_toggle_details_panel(self, checked: bool) -> None:
         self._details_group.setVisible(checked)
+        self._apply_guidance_compact_mode(details_visible=checked)
         if checked:
             self._details_toggle.setText("Hide detailed output")
         else:
@@ -977,12 +1047,15 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str) -> None:
         self._status_label.setText(text)
+        self._status_label.setToolTip(text)
 
     def _set_details_text(self, text: str) -> None:
         self._findings_box.setPlainText(text)
         blocking_issue, next_step = _summarize_details_text(text)
         self._blocking_issues_label.setText(blocking_issue)
         self._next_step_label.setText(next_step)
+        self._blocking_issues_label.setToolTip(blocking_issue)
+        self._next_step_label.setToolTip(next_step)
 
     def _set_scan_context(self, path: Path, label: str) -> None:
         path_text = str(path)
@@ -1237,6 +1310,12 @@ class MainWindow(QMainWindow):
         if target == SCAN_TARGET_CONFIGURED_REAL_MODS:
             return "real Mods directory"
         return "sandbox Mods directory"
+
+    def _apply_guidance_compact_mode(self, *, details_visible: bool) -> None:
+        if details_visible:
+            self._guidance_group.setMaximumHeight(16777215)
+            return
+        self._guidance_group.setMaximumHeight(210)
 
 
 def _discovery_source_label(provider: str) -> str:
