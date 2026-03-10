@@ -8,6 +8,8 @@ import pytest
 
 import sdvmm.app.shell_service as shell_service_module
 from sdvmm.app.shell_service import (
+    ARCHIVE_SOURCE_REAL,
+    ARCHIVE_SOURCE_SANDBOX,
     INSTALL_TARGET_CONFIGURED_REAL_MODS,
     INSTALL_TARGET_SANDBOX_MODS,
     SCAN_TARGET_CONFIGURED_REAL_MODS,
@@ -568,6 +570,279 @@ def test_execute_mod_removal_moves_real_mod_to_archive_and_rescans(tmp_path: Pat
     assert result.archived_target.exists()
     assert result.scan_context_path == real_mods
     assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Keep"}
+
+
+def test_list_archived_entries_includes_real_archive_entries(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    archived = real_archive / "RealMod__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Real Mod","UniqueID":"Sample.RealArchived","Version":"2.1.0"}',
+        encoding="utf-8",
+    )
+
+    entries = service.list_archived_entries(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+    )
+
+    real_entries = [item for item in entries if item.source_kind == ARCHIVE_SOURCE_REAL]
+    assert len(real_entries) == 1
+    item = real_entries[0]
+    assert item.archived_folder_name == "RealMod__sdvmm_archive_001"
+    assert item.target_folder_name == "RealMod"
+    assert item.mod_name == "Real Mod"
+    assert item.unique_id == "Sample.RealArchived"
+    assert item.version == "2.1.0"
+
+
+def test_list_archived_entries_includes_sandbox_archive_entries(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    archived = sandbox_archive / "SandboxMod__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Sandbox Mod","UniqueID":"Sample.SandboxArchived","Version":"1.2.3"}',
+        encoding="utf-8",
+    )
+
+    entries = service.list_archived_entries(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+    )
+
+    sandbox_entries = [item for item in entries if item.source_kind == ARCHIVE_SOURCE_SANDBOX]
+    assert len(sandbox_entries) == 1
+    item = sandbox_entries[0]
+    assert item.archived_folder_name == "SandboxMod__sdvmm_archive_001"
+    assert item.target_folder_name == "SandboxMod"
+    assert item.mod_name == "Sandbox Mod"
+    assert item.unique_id == "Sample.SandboxArchived"
+    assert item.version == "1.2.3"
+
+
+def test_execute_archive_restore_requires_explicit_confirmation(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    archived = sandbox_archive / "RestoreMe__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Restore Me","UniqueID":"Sample.RestoreMe","Version":"1.0.0"}',
+        encoding="utf-8",
+    )
+
+    plan = service.build_archive_restore_plan(
+        source_kind=ARCHIVE_SOURCE_SANDBOX,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+    )
+
+    with pytest.raises(AppShellError, match="Explicit confirmation is required"):
+        service.execute_archive_restore(plan, confirm_restore=False)
+
+
+def test_execute_archive_restore_to_sandbox_moves_entry_and_rescans(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    _create_mod(sandbox_mods, "Keep", "Sample.Keep")
+    archived = sandbox_archive / "RestoreMe__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Restore Me","UniqueID":"Sample.RestoreMe","Version":"1.0.0"}',
+        encoding="utf-8",
+    )
+
+    plan = service.build_archive_restore_plan(
+        source_kind=ARCHIVE_SOURCE_SANDBOX,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+    )
+    result = service.execute_archive_restore(plan, confirm_restore=True)
+
+    assert result.destination_kind == INSTALL_TARGET_SANDBOX_MODS
+    assert result.restored_target == sandbox_mods / "RestoreMe"
+    assert result.restored_target.exists()
+    assert not archived.exists()
+    assert result.scan_context_path == sandbox_mods
+    assert {mod.unique_id for mod in result.inventory.mods} == {
+        "Sample.Keep",
+        "Sample.RestoreMe",
+    }
+
+
+def test_execute_archive_restore_to_real_moves_entry_and_rescans(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    _create_mod(real_mods, "Keep", "Sample.Keep")
+    archived = real_archive / "RestoreReal__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Restore Real","UniqueID":"Sample.RestoreReal","Version":"3.0.0"}',
+        encoding="utf-8",
+    )
+
+    plan = service.build_archive_restore_plan(
+        source_kind=ARCHIVE_SOURCE_REAL,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+    )
+    result = service.execute_archive_restore(plan, confirm_restore=True)
+
+    assert result.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert result.restored_target == real_mods / "RestoreReal"
+    assert result.restored_target.exists()
+    assert not archived.exists()
+    assert result.scan_context_path == real_mods
+    assert {mod.unique_id for mod in result.inventory.mods} == {
+        "Sample.Keep",
+        "Sample.RestoreReal",
+    }
+
+
+def test_build_archive_restore_plan_inferrs_real_destination_even_if_saved_install_target_is_sandbox(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    archived = real_archive / "RestoreReal__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Restore Real","UniqueID":"Sample.RestoreReal","Version":"3.0.0"}',
+        encoding="utf-8",
+    )
+    existing_config = AppConfig(
+        game_path=tmp_path / "Game",
+        mods_path=real_mods,
+        app_data_path=tmp_path / "appdata",
+        sandbox_mods_path=sandbox_mods,
+        real_archive_path=real_archive,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+    )
+
+    plan = service.build_archive_restore_plan(
+        source_kind=ARCHIVE_SOURCE_REAL,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+        existing_config=existing_config,
+    )
+
+    assert plan.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert plan.destination_mods_path == real_mods
+    assert plan.destination_target_path == real_mods / "RestoreReal"
+
+
+def test_build_archive_restore_plan_inferrs_sandbox_destination_even_if_saved_install_target_is_real(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    archived = sandbox_archive / "RestoreSandbox__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Restore Sandbox","UniqueID":"Sample.RestoreSandbox","Version":"1.0.0"}',
+        encoding="utf-8",
+    )
+    existing_config = AppConfig(
+        game_path=tmp_path / "Game",
+        mods_path=real_mods,
+        app_data_path=tmp_path / "appdata",
+        sandbox_mods_path=sandbox_mods,
+        sandbox_archive_path=sandbox_archive,
+        install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+    )
+
+    plan = service.build_archive_restore_plan(
+        source_kind=ARCHIVE_SOURCE_SANDBOX,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+        existing_config=existing_config,
+    )
+
+    assert plan.destination_kind == INSTALL_TARGET_SANDBOX_MODS
+    assert plan.destination_mods_path == sandbox_mods
+    assert plan.destination_target_path == sandbox_mods / "RestoreSandbox"
+
+
+def test_build_archive_restore_plan_blocks_when_restore_target_exists(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    archived = real_archive / "RestoreReal__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Restore Real","UniqueID":"Sample.RestoreReal","Version":"3.0.0"}',
+        encoding="utf-8",
+    )
+    _create_mod(real_mods, "RestoreReal", "Sample.Existing")
+
+    with pytest.raises(AppShellError, match="Restore target already exists"):
+        service.build_archive_restore_plan(
+            source_kind=ARCHIVE_SOURCE_REAL,
+            archived_path_text=str(archived),
+            configured_mods_path_text=str(real_mods),
+            sandbox_mods_path_text=str(sandbox_mods),
+            real_archive_path_text=str(real_archive),
+            sandbox_archive_path_text="",
+        )
 
 
 def test_build_install_plan_blocks_real_destination_mismatch(tmp_path: Path) -> None:

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sdvmm.app.shell_service import DiscoveryContextCorrelation
 from sdvmm.app.inventory_presenter import (
+    build_archive_restore_result_text,
     build_discovery_search_text,
     build_downloads_intake_text,
     build_environment_status_text,
@@ -12,11 +13,15 @@ from sdvmm.app.inventory_presenter import (
     build_update_report_text,
 )
 from sdvmm.domain.models import (
+    ArchiveRestorePlan,
+    ArchiveRestoreResult,
+    ArchivedModEntry,
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
     GameEnvironmentStatus,
     ModDiscoveryEntry,
     ModDiscoveryResult,
+    ModsInventory,
     ModUpdateReport,
     ModUpdateStatus,
     PackageFinding,
@@ -218,3 +223,41 @@ def test_real_destination_plan_text_is_explicit() -> None:
     text = build_sandbox_install_plan_text(plan)
 
     assert "Game Mods destination (real)" in text
+
+
+def test_archive_restore_result_text_shows_destination_and_target_path() -> None:
+    restored_mods = ModsInventory(
+        mods=tuple(),
+        parse_warnings=tuple(),
+        duplicate_unique_ids=tuple(),
+        missing_required_dependencies=tuple(),
+        scan_entry_findings=tuple(),
+        ignored_entries=tuple(),
+    )
+    result = ArchiveRestoreResult(
+        plan=ArchiveRestorePlan(
+            entry=ArchivedModEntry(
+                source_kind="real_archive",
+                archive_root=Path("/tmp/RealArchive"),
+                archived_path=Path("/tmp/RealArchive/RestoreReal__sdvmm_archive_001"),
+                archived_folder_name="RestoreReal__sdvmm_archive_001",
+                target_folder_name="RestoreReal",
+                mod_name="Restore Real",
+                unique_id="Sample.RestoreReal",
+                version="3.0.0",
+            ),
+            destination_kind="configured_real_mods",
+            destination_mods_path=Path("/tmp/RealMods"),
+            destination_target_path=Path("/tmp/RealMods/RestoreReal"),
+        ),
+        restored_target=Path("/tmp/RealMods/RestoreReal"),
+        scan_context_path=Path("/tmp/RealMods"),
+        inventory=restored_mods,
+        destination_kind="configured_real_mods",
+    )
+
+    text = build_archive_restore_result_text(result)
+
+    assert "Archive restore completed" in text
+    assert "Game Mods destination (real)" in text
+    assert "/tmp/RealMods/RestoreReal" in text

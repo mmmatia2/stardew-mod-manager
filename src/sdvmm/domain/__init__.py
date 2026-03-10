@@ -1,4 +1,7 @@
 from .models import (
+    ArchivedModEntry,
+    ArchiveRestorePlan,
+    ArchiveRestoreResult,
     AppConfig,
     AppConfigValidationResult,
     ModDiscoveryEntry,
@@ -88,6 +91,9 @@ from .warning_codes import ParseWarningCode
 __all__ = [
     "AppConfig",
     "AppConfigValidationResult",
+    "ArchivedModEntry",
+    "ArchiveRestorePlan",
+    "ArchiveRestoreResult",
     "ModDiscoveryEntry",
     "ModDiscoveryResult",
     "DependencyPreflightFinding",

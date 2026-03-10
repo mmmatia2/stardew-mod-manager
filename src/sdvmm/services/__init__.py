@@ -13,6 +13,11 @@ from .sandbox_installer import (
     build_sandbox_install_plan,
     execute_sandbox_install_plan,
 )
+from .archive_manager import (
+    ArchiveManagerError,
+    list_archived_mod_entries,
+    restore_archived_mod_entry,
+)
 from .downloads_intake import initialize_known_zip_paths, poll_watched_directory
 from .environment_detection import detect_game_environment, derive_mods_path
 from .dependency_preflight import (
@@ -49,6 +54,8 @@ __all__ = [
     "parse_manifest_text",
     "build_sandbox_install_plan",
     "execute_sandbox_install_plan",
+    "list_archived_mod_entries",
+    "restore_archived_mod_entry",
     "initialize_known_zip_paths",
     "poll_watched_directory",
     "detect_game_environment",
@@ -73,5 +80,6 @@ __all__ = [
     "resolve_remote_link",
     "MetadataFetchError",
     "SandboxInstallError",
+    "ArchiveManagerError",
     "validate_app_config_paths",
 ]

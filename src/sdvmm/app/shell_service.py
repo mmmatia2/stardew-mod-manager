@@ -8,6 +8,9 @@ from typing import Literal
 import zipfile
 
 from sdvmm.domain.models import (
+    ArchivedModEntry,
+    ArchiveRestorePlan,
+    ArchiveRestoreResult,
     AppConfig,
     DependencyPreflightFinding,
     DownloadsIntakeResult,
@@ -57,6 +60,11 @@ from sdvmm.services.sandbox_installer import (
     execute_sandbox_install_plan as execute_sandbox_install_plan_service,
     remove_mod_to_archive as remove_mod_to_archive_service,
 )
+from sdvmm.services.archive_manager import (
+    ArchiveManagerError,
+    list_archived_mod_entries,
+    restore_archived_mod_entry,
+)
 from sdvmm.services.update_metadata import (
     NEXUS_API_KEY_ENV,
     check_nexus_connection,
@@ -90,6 +98,9 @@ INSTALL_TARGET_SANDBOX_MODS: InstallTargetKind = SCAN_TARGET_SANDBOX_MODS
 _DEFAULT_REAL_ARCHIVE_DIRNAME = ".sdvmm-real-archive"
 _DEFAULT_SANDBOX_ARCHIVE_DIRNAME = ".sdvmm-sandbox-archive"
 _LEGACY_ARCHIVE_DIRNAME = ".sdvmm-archive"
+ArchiveSourceKind = Literal["real_archive", "sandbox_archive"]
+ARCHIVE_SOURCE_REAL: ArchiveSourceKind = "real_archive"
+ARCHIVE_SOURCE_SANDBOX: ArchiveSourceKind = "sandbox_archive"
 
 
 @dataclass(frozen=True, slots=True)
@@ -921,6 +932,159 @@ class AppShellService:
             destination_kind=plan.destination_kind,
         )
 
+    def list_archived_entries(
+        self,
+        *,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> tuple[ArchivedModEntry, ...]:
+        real_mods_path = self._resolve_real_mods_path(
+            configured_mods_path_text=configured_mods_path_text,
+            existing_config=existing_config,
+        )
+        real_archive_path = self._resolve_archive_path_for_source(
+            source_kind=ARCHIVE_SOURCE_REAL,
+            real_mods_path=real_mods_path,
+            sandbox_mods_path=None,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+            existing_config=existing_config,
+        )
+
+        entries = list(
+            list_archived_mod_entries(
+                archive_root=real_archive_path,
+                source_kind=ARCHIVE_SOURCE_REAL,
+            )
+        )
+
+        sandbox_mods_path = self._resolve_optional_sandbox_mods_path(
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            existing_config=existing_config,
+        )
+        if sandbox_mods_path is not None:
+            sandbox_archive_path = self._resolve_archive_path_for_source(
+                source_kind=ARCHIVE_SOURCE_SANDBOX,
+                real_mods_path=real_mods_path,
+                sandbox_mods_path=sandbox_mods_path,
+                real_archive_path_text=real_archive_path_text,
+                sandbox_archive_path_text=sandbox_archive_path_text,
+                existing_config=existing_config,
+            )
+            entries.extend(
+                list_archived_mod_entries(
+                    archive_root=sandbox_archive_path,
+                    source_kind=ARCHIVE_SOURCE_SANDBOX,
+                )
+            )
+
+        entries.sort(
+            key=lambda entry: (
+                0 if entry.source_kind == ARCHIVE_SOURCE_REAL else 1,
+                entry.target_folder_name.casefold(),
+                entry.archived_folder_name.casefold(),
+            )
+        )
+        return tuple(entries)
+
+    def build_archive_restore_plan(
+        self,
+        *,
+        source_kind: ArchiveSourceKind,
+        archived_path_text: str,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> ArchiveRestorePlan:
+        if source_kind not in {ARCHIVE_SOURCE_REAL, ARCHIVE_SOURCE_SANDBOX}:
+            raise AppShellError(f"Unknown archive source: {source_kind}")
+
+        restore_target = self._infer_restore_target_from_source(source_kind)
+        destination_mods_path, destination_archive_path = self._resolve_install_destination_paths(
+            install_target=restore_target,
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+        )
+
+        configured_real_mods_path = self._resolve_optional_real_mods_path(
+            configured_mods_path_text=configured_mods_path_text,
+            existing_config=existing_config,
+        )
+        safety = self.evaluate_install_target_safety(
+            install_target=restore_target,
+            destination_mods_path=destination_mods_path,
+            configured_real_mods_path=configured_real_mods_path,
+        )
+        if not safety.allowed:
+            assert safety.message is not None
+            raise AppShellError(safety.message)
+
+        archived_entry = self._resolve_archived_entry(
+            source_kind=source_kind,
+            archived_path_text=archived_path_text,
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+            existing_config=existing_config,
+        )
+        destination_target_path = destination_mods_path / archived_entry.target_folder_name
+        if destination_target_path.exists():
+            raise AppShellError(
+                f"Restore target already exists in destination Mods directory: {destination_target_path}"
+            )
+
+        return ArchiveRestorePlan(
+            entry=archived_entry,
+            destination_kind=restore_target,
+            destination_mods_path=destination_mods_path,
+            destination_target_path=destination_target_path,
+            scan_excluded_paths=(
+                destination_archive_path,
+                destination_mods_path / _LEGACY_ARCHIVE_DIRNAME,
+            ),
+        )
+
+    def execute_archive_restore(
+        self,
+        plan: ArchiveRestorePlan,
+        *,
+        confirm_restore: bool = False,
+    ) -> ArchiveRestoreResult:
+        if not confirm_restore:
+            raise AppShellError("Explicit confirmation is required before archive restore.")
+
+        try:
+            restored_target = restore_archived_mod_entry(
+                archive_root=plan.entry.archive_root,
+                archived_path=plan.entry.archived_path,
+                destination_mods_root=plan.destination_mods_path,
+                destination_folder_name=plan.entry.target_folder_name,
+            )
+            inventory = scan_mods_directory(
+                plan.destination_mods_path,
+                excluded_paths=plan.scan_excluded_paths,
+            )
+        except ArchiveManagerError as exc:
+            raise AppShellError(str(exc)) from exc
+        except OSError as exc:
+            raise AppShellError(f"Archive restore failed: {exc}") from exc
+
+        return ArchiveRestoreResult(
+            plan=plan,
+            restored_target=restored_target,
+            scan_context_path=plan.destination_mods_path,
+            inventory=inventory,
+            destination_kind=plan.destination_kind,
+        )
+
     def evaluate_install_target_safety(
         self,
         *,
@@ -1046,6 +1210,137 @@ class AppShellService:
 
         return None, "none"
 
+    def _resolve_real_mods_path(
+        self,
+        *,
+        configured_mods_path_text: str,
+        existing_config: AppConfig | None,
+    ) -> Path:
+        if configured_mods_path_text.strip():
+            return self._parse_and_validate_mods_path(configured_mods_path_text)
+        if existing_config is not None:
+            return self._parse_and_validate_existing_directory(
+                existing_config.mods_path,
+                "Saved configured real Mods path is not accessible",
+            )
+        raise AppShellError("Configured real Mods directory is required.")
+
+    def _resolve_optional_real_mods_path(
+        self,
+        *,
+        configured_mods_path_text: str,
+        existing_config: AppConfig | None,
+    ) -> Path | None:
+        if configured_mods_path_text.strip():
+            return self._parse_and_validate_mods_path(configured_mods_path_text)
+        if existing_config is not None:
+            return self._parse_and_validate_existing_directory(
+                existing_config.mods_path,
+                "Saved configured real Mods path is not accessible",
+            )
+        return None
+
+    def _resolve_optional_sandbox_mods_path(
+        self,
+        *,
+        sandbox_mods_path_text: str,
+        existing_config: AppConfig | None,
+    ) -> Path | None:
+        if sandbox_mods_path_text.strip():
+            return self._parse_and_validate_sandbox_mods_path(sandbox_mods_path_text)
+        if existing_config is not None and existing_config.sandbox_mods_path is not None:
+            return self._parse_and_validate_existing_directory(
+                existing_config.sandbox_mods_path,
+                "Saved sandbox Mods path is not accessible",
+            )
+        return None
+
+    def _resolve_archive_path_for_source(
+        self,
+        *,
+        source_kind: ArchiveSourceKind,
+        real_mods_path: Path | None,
+        sandbox_mods_path: Path | None,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        existing_config: AppConfig | None,
+    ) -> Path:
+        if source_kind == ARCHIVE_SOURCE_REAL:
+            if real_mods_path is None:
+                raise AppShellError("Configured real Mods directory is required for real archive operations.")
+            archive_text = real_archive_path_text
+            if not archive_text.strip() and existing_config is not None and existing_config.real_archive_path:
+                archive_text = str(existing_config.real_archive_path)
+            return self._parse_and_validate_archive_path(
+                archive_path_text=archive_text,
+                destination_mods_path=real_mods_path,
+                field_label="Real Mods archive path",
+                default_archive_dir_name=_DEFAULT_REAL_ARCHIVE_DIRNAME,
+            )
+
+        if source_kind == ARCHIVE_SOURCE_SANDBOX:
+            if sandbox_mods_path is None:
+                raise AppShellError("Sandbox Mods directory is required for sandbox archive operations.")
+            archive_text = sandbox_archive_path_text
+            if (
+                not archive_text.strip()
+                and existing_config is not None
+                and existing_config.sandbox_archive_path is not None
+            ):
+                archive_text = str(existing_config.sandbox_archive_path)
+            return self._parse_and_validate_archive_path(
+                archive_path_text=archive_text,
+                destination_mods_path=sandbox_mods_path,
+                field_label="Sandbox archive path",
+                default_archive_dir_name=_DEFAULT_SANDBOX_ARCHIVE_DIRNAME,
+            )
+
+        raise AppShellError(f"Unknown archive source: {source_kind}")
+
+    def _resolve_archived_entry(
+        self,
+        *,
+        source_kind: ArchiveSourceKind,
+        archived_path_text: str,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        existing_config: AppConfig | None,
+    ) -> ArchivedModEntry:
+        raw_archived_path = archived_path_text.strip()
+        if not raw_archived_path:
+            raise AppShellError("Archived entry path is required.")
+        archived_path = Path(raw_archived_path).expanduser()
+
+        real_mods_path = self._resolve_optional_real_mods_path(
+            configured_mods_path_text=configured_mods_path_text,
+            existing_config=existing_config,
+        )
+        sandbox_mods_path = self._resolve_optional_sandbox_mods_path(
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            existing_config=existing_config,
+        )
+        archive_root = self._resolve_archive_path_for_source(
+            source_kind=source_kind,
+            real_mods_path=real_mods_path,
+            sandbox_mods_path=sandbox_mods_path,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+            existing_config=existing_config,
+        )
+        entries = list_archived_mod_entries(
+            archive_root=archive_root,
+            source_kind=source_kind,
+        )
+        for entry in entries:
+            if _paths_deterministically_match(entry.archived_path, archived_path):
+                return entry
+
+        raise AppShellError(
+            f"Selected archived entry is not available in {source_kind}: {archived_path}"
+        )
+
     def _resolve_install_destination_paths(
         self,
         *,
@@ -1076,6 +1371,16 @@ class AppShellService:
             return sandbox_mods_path, sandbox_archive_path
 
         raise AppShellError(f"Unknown install target: {install_target}")
+
+    @staticmethod
+    def _infer_restore_target_from_source(source_kind: ArchiveSourceKind) -> InstallTargetKind:
+        if source_kind == ARCHIVE_SOURCE_REAL:
+            return INSTALL_TARGET_CONFIGURED_REAL_MODS
+        if source_kind == ARCHIVE_SOURCE_SANDBOX:
+            return INSTALL_TARGET_SANDBOX_MODS
+        raise AppShellError(
+            f"Archive source '{source_kind}' has no reliable restore destination context."
+        )
 
     @staticmethod
     def _resolve_game_path(game_path_text: str, existing_config: AppConfig | None) -> Path:

@@ -4,6 +4,12 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.tox/
+.nox/
 .venv/
 venv/
 
@@ -11,6 +17,7 @@ venv/
 build/
 dist/
 *.egg-info/
+pip-wheel-metadata/
 
 # IDE and OS
 .idea/
@@ -18,9 +25,18 @@ dist/
 *.swp
 .DS_Store
 Thumbs.db
+core
+core.*
 
 # Local app data and fixtures
 .local/
 tmp/
 artifacts/
 *.log
+
+# Local env/secrets
+.env
+.env.*
+
+# Generated project handoff archives
+/stardew-mod-manager-handoff-*.zip

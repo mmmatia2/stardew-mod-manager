@@ -32,6 +32,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QDesktopServices
 
 from sdvmm.app.inventory_presenter import (
+    build_archive_listing_text,
+    build_archive_restore_result_text,
     build_dependency_preflight_text,
     build_discovery_search_text,
     build_downloads_intake_text,
@@ -46,6 +48,8 @@ from sdvmm.app.inventory_presenter import (
 )
 from sdvmm.app.table_filters import row_matches_filter
 from sdvmm.app.shell_service import (
+    ARCHIVE_SOURCE_REAL,
+    ARCHIVE_SOURCE_SANDBOX,
     DiscoveryContextCorrelation,
     INSTALL_TARGET_CONFIGURED_REAL_MODS,
     INSTALL_TARGET_SANDBOX_MODS,
@@ -61,6 +65,8 @@ from sdvmm.domain.models import (
     DownloadsIntakeResult,
     GameEnvironmentStatus,
     ModDiscoveryResult,
+    ArchiveRestoreResult,
+    ArchivedModEntry,
     ModRemovalResult,
     ModUpdateStatus,
     ModUpdateReport,
@@ -75,6 +81,7 @@ _ROLE_REMOTE_LINK = int(Qt.ItemDataRole.UserRole) + 2
 _ROLE_DISCOVERY_INDEX = int(Qt.ItemDataRole.UserRole) + 3
 _ROLE_DISCOVERY_LINK = int(Qt.ItemDataRole.UserRole) + 4
 _ROLE_MOD_FOLDER_PATH = int(Qt.ItemDataRole.UserRole) + 5
+_ROLE_ARCHIVE_INDEX = int(Qt.ItemDataRole.UserRole) + 6
 
 
 class MainWindow(QMainWindow):
@@ -90,6 +97,7 @@ class MainWindow(QMainWindow):
         self._known_watched_zip_paths: tuple[Path, ...] = tuple()
         self._detected_intakes: tuple[DownloadsIntakeResult, ...] = tuple()
         self._intake_correlations: tuple[IntakeUpdateCorrelation, ...] = tuple()
+        self._archived_entries: tuple[ArchivedModEntry, ...] = tuple()
         self._guided_update_unique_ids: tuple[str, ...] = tuple()
         self._last_environment_status: GameEnvironmentStatus | None = None
         self._thread_pool = QThreadPool.globalInstance()
@@ -130,13 +138,19 @@ class MainWindow(QMainWindow):
         self._intake_filter_input.setPlaceholderText("Filter detected packages")
         self._intake_filter_input.setClearButtonEnabled(True)
         self._intake_filter_input.setMinimumWidth(240)
+        self._archive_filter_input = QLineEdit()
+        self._archive_filter_input.setPlaceholderText("Filter archived entries")
+        self._archive_filter_input.setClearButtonEnabled(True)
+        self._archive_filter_input.setMinimumWidth(240)
         self._mods_filter_stats_label = QLabel("0/0 shown")
         self._discovery_filter_stats_label = QLabel("0/0 shown")
         self._intake_filter_stats_label = QLabel("0/0 shown")
+        self._archive_filter_stats_label = QLabel("0/0 shown")
         for stats_label in (
             self._mods_filter_stats_label,
             self._discovery_filter_stats_label,
             self._intake_filter_stats_label,
+            self._archive_filter_stats_label,
         ):
             stats_label.setStyleSheet("color: #4b5563;")
         self._nexus_api_key_input = QLineEdit()
@@ -180,6 +194,17 @@ class MainWindow(QMainWindow):
         self._discovery_table.verticalHeader().setVisible(False)
         self._discovery_table.setAlternatingRowColors(True)
         self._discovery_table.setSortingEnabled(True)
+
+        self._archive_table = QTableWidget(0, 6)
+        self._archive_table.setHorizontalHeaderLabels(
+            ["Archive source", "Archived folder", "Restore target", "Mod name", "UniqueID", "Version"]
+        )
+        self._archive_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._archive_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._archive_table.verticalHeader().setDefaultSectionSize(20)
+        self._archive_table.verticalHeader().setVisible(False)
+        self._archive_table.setAlternatingRowColors(True)
+        self._archive_table.setSortingEnabled(True)
 
         self._findings_box = QPlainTextEdit()
         self._findings_box.setReadOnly(True)
@@ -231,6 +256,7 @@ class MainWindow(QMainWindow):
         self._mods_filter_input.textChanged.connect(self._apply_mods_filter)
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
+        self._archive_filter_input.textChanged.connect(self._apply_archive_filter)
 
         self._build_layout()
         self._refresh_intake_selector()
@@ -460,6 +486,38 @@ class MainWindow(QMainWindow):
         intake_layout.addStretch(1)
         context_tabs.addTab(intake_tab, "Packages & Intake")
 
+        archive_tab = QWidget()
+        archive_layout = QVBoxLayout(archive_tab)
+        archive_layout.setContentsMargins(6, 6, 6, 6)
+        archive_layout.setSpacing(6)
+        archive_controls_group = QGroupBox("Archive Browser")
+        archive_controls_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        archive_controls_layout = QGridLayout(archive_controls_group)
+        archive_controls_layout.setContentsMargins(8, 6, 8, 6)
+        archive_controls_layout.setHorizontalSpacing(8)
+        archive_controls_layout.setVerticalSpacing(4)
+        archive_controls_layout.addWidget(QLabel("Filter"), 0, 0)
+        archive_controls_layout.addWidget(self._archive_filter_input, 0, 1, 1, 2)
+        archive_controls_layout.addWidget(self._archive_filter_stats_label, 0, 3)
+        self._refresh_archives_button = QPushButton("Refresh archives")
+        self._refresh_archives_button.clicked.connect(self._on_refresh_archives)
+        archive_controls_layout.addWidget(self._refresh_archives_button, 1, 1)
+        self._restore_archived_button = QPushButton("Restore selected")
+        self._restore_archived_button.clicked.connect(self._on_restore_selected_archive)
+        self._restore_archived_button.setEnabled(False)
+        archive_controls_layout.addWidget(self._restore_archived_button, 1, 2)
+        archive_layout.addWidget(archive_controls_group)
+        archive_table_group = QGroupBox("Archived Entries (real + sandbox)")
+        archive_table_layout = QVBoxLayout(archive_table_group)
+        archive_table_layout.setContentsMargins(8, 6, 8, 6)
+        archive_table_layout.addWidget(self._archive_table)
+        archive_layout.addWidget(archive_table_group)
+        archive_layout.setStretch(1, 1)
+        self._archive_table.itemSelectionChanged.connect(self._on_archive_selection_changed)
+        context_tabs.addTab(archive_tab, "Archive")
+
         plan_tab = QWidget()
         plan_tab_layout = QVBoxLayout(plan_tab)
         plan_tab_layout.setContentsMargins(6, 6, 6, 6)
@@ -539,6 +597,8 @@ class MainWindow(QMainWindow):
             self._check_updates_button,
             self._search_mods_button,
             self._remove_mod_button,
+            self._refresh_archives_button,
+            self._restore_archived_button,
         )
 
         self.setCentralWidget(container)
@@ -1094,6 +1154,111 @@ class MainWindow(QMainWindow):
         self._set_details_text(build_mod_removal_result_text(result))
         self._set_status(f"Mod removed to archive: {result.archived_target.name}")
 
+    def _on_refresh_archives(self) -> None:
+        self._run_background_operation(
+            operation_name="Archive refresh",
+            running_label="Archive refresh",
+            started_status="Refreshing archive entries...",
+            error_title="Archive refresh failed",
+            task_fn=lambda: self._shell_service.list_archived_entries(
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
+            ),
+            on_success=self._on_refresh_archives_completed,
+        )
+
+    def _on_refresh_archives_completed(self, entries: tuple[ArchivedModEntry, ...]) -> None:
+        self._archived_entries = entries
+        self._render_archive_entries(entries)
+        self._set_details_text(build_archive_listing_text(entries))
+        self._set_status(f"Archive refresh complete: {len(entries)} entr(y/ies)")
+
+    def _on_restore_selected_archive(self) -> None:
+        entry = self._selected_archive_entry()
+        if entry is None:
+            message = "Select an archived entry first."
+            QMessageBox.warning(self, "No archive selection", message)
+            self._set_status(message)
+            return
+
+        try:
+            plan = self._shell_service.build_archive_restore_plan(
+                source_kind=entry.source_kind,
+                archived_path_text=str(entry.archived_path),
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            QMessageBox.critical(self, "Restore plan failed", str(exc))
+            self._set_status(str(exc))
+            return
+
+        destination_label = (
+            "REAL game Mods destination"
+            if plan.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+            else "Sandbox Mods destination"
+        )
+        source_label = _archive_source_summary_label(entry.source_kind)
+        yes = QMessageBox.question(
+            self,
+            "Confirm archive restore",
+            (
+                "Restore selected archived folder to active Mods destination?\n\n"
+                f"Archive source: {source_label}\n"
+                f"Archived folder: {entry.archived_folder_name}\n"
+                f"Archive path: {entry.archived_path}\n"
+                f"Restore destination: {destination_label}\n"
+                f"Restore target path: {plan.destination_target_path}\n\n"
+                "This stage performs restore only (no permanent delete, no rollback selection)."
+            ),
+        )
+        if yes != QMessageBox.StandardButton.Yes:
+            self._set_status("Archive restore cancelled.")
+            return
+
+        self._run_background_operation(
+            operation_name="Archive restore",
+            running_label="Archive restore",
+            started_status=f"Restoring {entry.archived_folder_name}...",
+            error_title="Archive restore failed",
+            task_fn=lambda _plan=plan: self._shell_service.execute_archive_restore(
+                _plan,
+                confirm_restore=True,
+            ),
+            on_success=self._on_restore_selected_archive_completed,
+        )
+
+    def _on_restore_selected_archive_completed(self, result: ArchiveRestoreResult) -> None:
+        self._render_inventory(result.inventory)
+        self._set_current_scan_target(result.destination_kind)
+        self._set_scan_context(
+            result.scan_context_path,
+            self._scan_target_label(result.destination_kind),
+        )
+        self._set_details_text(build_archive_restore_result_text(result))
+        restored_source = result.plan.entry.archived_path
+        self._archived_entries = tuple(
+            entry for entry in self._archived_entries if entry.archived_path != restored_source
+        )
+        self._render_archive_entries(self._archived_entries)
+        destination_label = (
+            "REAL Mods"
+            if result.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+            else "Sandbox Mods"
+        )
+        self._set_status(
+            f"Archive restore complete to {destination_label}: {result.restored_target.name}"
+        )
+
+    def _on_archive_selection_changed(self) -> None:
+        self._restore_archived_button.setEnabled(self._selected_archive_entry() is not None)
+
     def _on_start_watch(self) -> None:
         try:
             self._known_watched_zip_paths = self._shell_service.initialize_downloads_watch(
@@ -1262,6 +1427,26 @@ class MainWindow(QMainWindow):
         self._discovery_table.resizeColumnsToContents()
         self._apply_discovery_filter()
 
+    def _render_archive_entries(self, entries: tuple[ArchivedModEntry, ...]) -> None:
+        was_sorting = self._archive_table.isSortingEnabled()
+        self._archive_table.setSortingEnabled(False)
+        self._archive_table.setRowCount(len(entries))
+
+        for row, entry in enumerate(entries):
+            source_item = QTableWidgetItem(_archive_source_summary_label(entry.source_kind))
+            source_item.setData(_ROLE_ARCHIVE_INDEX, row)
+            self._archive_table.setItem(row, 0, source_item)
+            self._archive_table.setItem(row, 1, QTableWidgetItem(entry.archived_folder_name))
+            self._archive_table.setItem(row, 2, QTableWidgetItem(entry.target_folder_name))
+            self._archive_table.setItem(row, 3, QTableWidgetItem(entry.mod_name or "-"))
+            self._archive_table.setItem(row, 4, QTableWidgetItem(entry.unique_id or "-"))
+            self._archive_table.setItem(row, 5, QTableWidgetItem(entry.version or "-"))
+
+        self._archive_table.setSortingEnabled(was_sorting)
+        self._archive_table.resizeColumnsToContents()
+        self._apply_archive_filter()
+        self._on_archive_selection_changed()
+
     def _set_status(self, text: str) -> None:
         self._status_label.setText(text)
         self._status_label.setToolTip(text)
@@ -1342,6 +1527,7 @@ class MainWindow(QMainWindow):
         self._active_operation_name = None
         self._active_background_task = None
         self._set_background_actions_enabled(True)
+        self._on_archive_selection_changed()
         if success:
             self._operation_state_label.setText(f"Last: {operation_name} finished")
             return
@@ -1490,6 +1676,38 @@ class MainWindow(QMainWindow):
             shown_count=visible_count,
             total_count=self._discovery_table.rowCount(),
         )
+
+    def _apply_archive_filter(self, *_: object) -> None:
+        filter_text = self._archive_filter_input.text()
+        visible_count = 0
+        for row in range(self._archive_table.rowCount()):
+            row_values = []
+            for col in range(self._archive_table.columnCount()):
+                item = self._archive_table.item(row, col)
+                row_values.append(item.text() if item is not None else "")
+            matches = row_matches_filter(row_values, filter_text)
+            self._archive_table.setRowHidden(row, not matches)
+            if matches:
+                visible_count += 1
+        self._set_filter_stats(
+            self._archive_filter_stats_label,
+            shown_count=visible_count,
+            total_count=self._archive_table.rowCount(),
+        )
+
+    def _selected_archive_entry(self) -> ArchivedModEntry | None:
+        row = self._archive_table.currentRow()
+        if row < 0:
+            return None
+        row_item = self._archive_table.item(row, 0)
+        if row_item is None:
+            return None
+        index = row_item.data(_ROLE_ARCHIVE_INDEX)
+        if not isinstance(index, int):
+            return None
+        if index < 0 or index >= len(self._archived_entries):
+            return None
+        return self._archived_entries[index]
 
     def _current_inventory_or_empty(self) -> ModsInventory:
         if self._current_inventory is not None:
@@ -1748,6 +1966,14 @@ def _nexus_status_label(state: str, masked_key: str | None) -> str:
     if state == "invalid_auth_failure":
         return f"Invalid/auth failed ({masked_key or 'key set'})"
     return f"Configured ({masked_key or 'key set'})"
+
+
+def _archive_source_summary_label(source_kind: str) -> str:
+    if source_kind == ARCHIVE_SOURCE_REAL:
+        return "Real archive"
+    if source_kind == ARCHIVE_SOURCE_SANDBOX:
+        return "Sandbox archive"
+    return source_kind.replace("_", " ").title()
 
 
 def _summarize_details_text(text: str) -> tuple[str, str]:

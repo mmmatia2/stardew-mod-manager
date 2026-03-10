@@ -1,4 +1,6 @@
 from .inventory_presenter import (
+    build_archive_listing_text,
+    build_archive_restore_result_text,
     build_dependency_preflight_text,
     build_discovery_search_text,
     build_downloads_intake_text,
@@ -35,6 +37,8 @@ __all__ = [
     "SCAN_TARGET_CONFIGURED_REAL_MODS",
     "SCAN_TARGET_SANDBOX_MODS",
     "StartupConfigState",
+    "build_archive_listing_text",
+    "build_archive_restore_result_text",
     "build_findings_text",
     "build_discovery_search_text",
     "build_environment_status_text",

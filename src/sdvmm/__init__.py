@@ -1,6 +1,9 @@
 """Stage 1 package for Stardew Mod Manager."""
 
 from .domain.models import (
+    ArchivedModEntry,
+    ArchiveRestorePlan,
+    ArchiveRestoreResult,
     AppConfig,
     AppConfigValidationResult,
     ModDiscoveryEntry,
@@ -80,6 +83,9 @@ from .services.app_state_store import (
 __all__ = [
     "AppConfig",
     "AppConfigValidationResult",
+    "ArchivedModEntry",
+    "ArchiveRestorePlan",
+    "ArchiveRestoreResult",
     "ModDiscoveryEntry",
     "ModDiscoveryResult",
     "GameEnvironmentStatus",

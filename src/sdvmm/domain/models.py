@@ -332,6 +332,37 @@ class ModRemovalResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ArchivedModEntry:
+    source_kind: str
+    archive_root: Path
+    archived_path: Path
+    archived_folder_name: str
+    target_folder_name: str
+    mod_name: str | None = None
+    unique_id: str | None = None
+    version: str | None = None
+    note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveRestorePlan:
+    entry: ArchivedModEntry
+    destination_kind: str
+    destination_mods_path: Path
+    destination_target_path: Path
+    scan_excluded_paths: tuple[Path, ...] = tuple()
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveRestoreResult:
+    plan: ArchiveRestorePlan
+    restored_target: Path
+    scan_context_path: Path
+    inventory: ModsInventory
+    destination_kind: str = "sandbox_mods"
+
+
+@dataclass(frozen=True, slots=True)
 class ModsInventory:
     mods: tuple[InstalledMod, ...]
     parse_warnings: tuple[ParseWarning, ...]

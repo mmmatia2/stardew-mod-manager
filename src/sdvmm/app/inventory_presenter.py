@@ -15,6 +15,8 @@ from sdvmm.domain.environment_codes import (
     SMAPI_NOT_DETECTED,
 )
 from sdvmm.domain.models import (
+    ArchivedModEntry,
+    ArchiveRestoreResult,
     DependencyPreflightFinding,
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
@@ -372,6 +374,65 @@ def build_mod_removal_result_text(result: ModRemovalResult) -> str:
     lines.append("")
     lines.append("Recommended next step:")
     lines.append("- Review scan findings and dependencies after removal.")
+    lines.append("")
+    lines.append(build_findings_text(result.inventory))
+    return "\n".join(lines)
+
+
+def build_archive_listing_text(entries: tuple[ArchivedModEntry, ...]) -> str:
+    lines: list[str] = []
+    real_count = sum(1 for entry in entries if entry.source_kind == "real_archive")
+    sandbox_count = sum(1 for entry in entries if entry.source_kind == "sandbox_archive")
+    lines.append("Archive Browser")
+    lines.append(f"- Archived entries: {len(entries)}")
+    lines.append(f"- Real archive entries: {real_count}")
+    lines.append(f"- Sandbox archive entries: {sandbox_count}")
+    lines.append("")
+
+    if not entries:
+        lines.append("No archived entries found.")
+    else:
+        lines.append("Archived entries:")
+        for entry in entries:
+            lines.append(
+                "- "
+                f"[{_archive_source_label(entry.source_kind)}] "
+                f"{entry.archived_folder_name} -> restore target '{entry.target_folder_name}'"
+            )
+            if entry.mod_name or entry.unique_id or entry.version:
+                lines.append(
+                    "  "
+                    f"mod: {entry.mod_name or '<unknown>'} | "
+                    f"UniqueID: {entry.unique_id or '<unknown>'} | "
+                    f"Version: {entry.version or '<unknown>'}"
+                )
+            else:
+                lines.append("  mod: <manifest summary unavailable>")
+            lines.append(f"  path: {entry.archived_path}")
+            if entry.note:
+                lines.append(f"  note: {entry.note}")
+
+    lines.append("")
+    lines.append("Recommended next step:")
+    if entries:
+        lines.append("- Select an archived entry, choose destination context, then restore explicitly.")
+    else:
+        lines.append("- Use remove/update overwrite flows to generate archived entries first.")
+
+    return "\n".join(lines)
+
+
+def build_archive_restore_result_text(result: ArchiveRestoreResult) -> str:
+    lines: list[str] = []
+    destination_label = _install_destination_label(result.destination_kind)
+    lines.append("Archive restore completed.")
+    lines.append(f"- Destination type: {destination_label}")
+    lines.append(f"- Restored from archive: {result.plan.entry.archived_path}")
+    lines.append(f"- Restored to active Mods: {result.restored_target}")
+    lines.append(f"- Scan context: {result.scan_context_path}")
+    lines.append("")
+    lines.append("Recommended next step:")
+    lines.append("- Review scan findings and dependency warnings after restore.")
     lines.append("")
     lines.append(build_findings_text(result.inventory))
     return "\n".join(lines)
@@ -829,6 +890,14 @@ def _install_destination_label(destination_kind: str) -> str:
         "sandbox_mods": "Sandbox Mods destination",
     }
     return labels.get(destination_kind, destination_kind.replace("_", " ").title())
+
+
+def _archive_source_label(source_kind: str) -> str:
+    labels = {
+        "real_archive": "Real archive",
+        "sandbox_archive": "Sandbox archive",
+    }
+    return labels.get(source_kind, source_kind.replace("_", " ").title())
 
 
 def _intake_classification_label(classification: str) -> str:
