@@ -21,6 +21,7 @@ from sdvmm.domain.models import (
     GameEnvironmentStatus,
     ModDiscoveryEntry,
     ModDiscoveryResult,
+    ModRemovalResult,
     ModUpdateReport,
     ModsInventory,
     PackageInspectionResult,
@@ -355,6 +356,22 @@ def build_sandbox_install_result_text(result: SandboxInstallResult) -> str:
     for target in result.archived_targets:
         lines.append(f"- {target}")
 
+    lines.append("")
+    lines.append(build_findings_text(result.inventory))
+    return "\n".join(lines)
+
+
+def build_mod_removal_result_text(result: ModRemovalResult) -> str:
+    lines: list[str] = []
+    destination_label = _install_destination_label(result.destination_kind)
+    lines.append("Mod removal completed.")
+    lines.append(f"- Destination type: {destination_label}")
+    lines.append(f"- Removed from active Mods path: {result.removed_target}")
+    lines.append(f"- Archived to: {result.archived_target}")
+    lines.append(f"- Scan context: {result.scan_context_path}")
+    lines.append("")
+    lines.append("Recommended next step:")
+    lines.append("- Review scan findings and dependencies after removal.")
     lines.append("")
     lines.append(build_findings_text(result.inventory))
     return "\n".join(lines)

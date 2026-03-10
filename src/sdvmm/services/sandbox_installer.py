@@ -177,7 +177,10 @@ def execute_sandbox_install_plan(plan: SandboxInstallPlan) -> SandboxInstallResu
         if staging_root.exists():
             shutil.rmtree(staging_root, ignore_errors=True)
 
-    inventory = scan_mods_directory(plan.sandbox_mods_path)
+    inventory = scan_mods_directory(
+        plan.sandbox_mods_path,
+        excluded_paths=(plan.sandbox_archive_path, plan.sandbox_mods_path / ".sdvmm-archive"),
+    )
     return SandboxInstallResult(
         plan=plan,
         installed_targets=tuple(sorted(installed_targets, key=lambda path: path.name.lower())),
@@ -186,6 +189,41 @@ def execute_sandbox_install_plan(plan: SandboxInstallPlan) -> SandboxInstallResu
         inventory=inventory,
         destination_kind=plan.destination_kind,
     )
+
+
+def remove_mod_to_archive(
+    *,
+    target_mod_path: Path,
+    mods_root: Path,
+    archive_root: Path,
+) -> Path:
+    mods_root_resolved = mods_root.resolve()
+    target_mod_resolved = target_mod_path.resolve()
+
+    if not mods_root.exists() or not mods_root.is_dir():
+        raise SandboxInstallError(f"Mods directory is not accessible: {mods_root}")
+
+    if not target_mod_path.exists() or not target_mod_path.is_dir():
+        raise SandboxInstallError(f"Selected mod folder is not accessible: {target_mod_path}")
+
+    if target_mod_resolved.parent != mods_root_resolved:
+        raise SandboxInstallError(
+            "Selected mod folder must be a direct child of the selected Mods destination."
+        )
+
+    _ensure_archive_root(archive_root)
+    archive_path = _build_archive_destination(
+        archive_root=archive_root,
+        target_folder_name=target_mod_path.name,
+    )
+    try:
+        _move_path(target_mod_path, archive_path)
+    except Exception as exc:
+        raise SandboxInstallError(
+            f"Could not move mod folder to archive: {target_mod_path} -> {archive_path}: {exc}"
+        ) from exc
+
+    return archive_path
 
 
 def _mark_duplicate_targets(entries: list[SandboxInstallPlanEntry]) -> list[SandboxInstallPlanEntry]:

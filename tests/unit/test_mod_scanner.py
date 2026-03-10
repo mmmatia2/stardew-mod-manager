@@ -223,3 +223,29 @@ def test_non_mod_files_are_ignored_safely(mods_case_path) -> None:
     assert inventory.mods[0].unique_id == "Sample.RealMod"
     assert [path.name for path in inventory.ignored_entries] == ["notes.txt"]
     assert inventory.parse_warnings == ()
+
+
+def test_scan_excludes_archive_root_from_active_results(tmp_path) -> None:
+    mods_root = tmp_path / "Mods"
+    mods_root.mkdir()
+    archive_root = mods_root / ".sdvmm-archive"
+    archive_root.mkdir()
+
+    active_mod = mods_root / "ActiveMod"
+    active_mod.mkdir()
+    (active_mod / "manifest.json").write_text(
+        '{"Name":"Active","UniqueID":"Sample.Active","Version":"1.0.0"}',
+        encoding="utf-8",
+    )
+
+    archived_mod = archive_root / "ArchivedMod"
+    archived_mod.mkdir()
+    (archived_mod / "manifest.json").write_text(
+        '{"Name":"Archived","UniqueID":"Sample.Archived","Version":"1.0.0"}',
+        encoding="utf-8",
+    )
+
+    inventory = scan_mods_directory(mods_root, excluded_paths=(archive_root,))
+
+    assert {mod.unique_id for mod in inventory.mods} == {"Sample.Active"}
+    assert any(path.name == ".sdvmm-archive" for path in inventory.ignored_entries)

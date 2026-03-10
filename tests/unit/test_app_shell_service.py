@@ -361,7 +361,7 @@ def test_build_install_plan_supports_configured_real_mods_destination(tmp_path: 
 
     assert plan.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
     assert plan.sandbox_mods_path == real_mods
-    assert plan.sandbox_archive_path == real_mods / ".sdvmm-archive"
+    assert plan.sandbox_archive_path == real_mods.parent / ".sdvmm-real-archive"
     assert len(plan.entries) == 1
     assert plan.entries[0].action == "install_new"
 
@@ -395,7 +395,7 @@ def test_build_install_plan_uses_archive_overwrite_for_real_mods_destination(tmp
     assert len(plan.entries) == 1
     assert plan.entries[0].action == "overwrite_with_archive"
     assert plan.entries[0].archive_path is not None
-    assert plan.entries[0].archive_path.parent == real_mods / ".sdvmm-archive"
+    assert plan.entries[0].archive_path.parent == real_mods.parent / ".sdvmm-real-archive"
 
 
 def test_execute_real_mods_plan_requires_explicit_confirmation(tmp_path: Path) -> None:
@@ -436,6 +436,140 @@ def test_execute_real_mods_plan_requires_explicit_confirmation(tmp_path: Path) -
     assert (real_mods / "Mod" / "file.txt").read_text(encoding="utf-8") == "hello"
 
 
+def test_build_mod_removal_plan_for_sandbox_destination(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    _create_mod(sandbox_mods, "ToRemove", "Sample.Remove")
+
+    plan = service.build_mod_removal_plan(
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+        mod_folder_path_text=str(sandbox_mods / "ToRemove"),
+    )
+
+    assert plan.destination_kind == SCAN_TARGET_SANDBOX_MODS
+    assert plan.mods_path == sandbox_mods
+    assert plan.archive_path == sandbox_archive
+    assert plan.target_mod_path == sandbox_mods / "ToRemove"
+
+
+def test_build_mod_removal_plan_for_real_destination_uses_real_archive_path(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    _create_mod(real_mods, "ToRemove", "Sample.Remove")
+
+    plan = service.build_mod_removal_plan(
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+        mod_folder_path_text=str(real_mods / "ToRemove"),
+    )
+
+    assert plan.destination_kind == SCAN_TARGET_CONFIGURED_REAL_MODS
+    assert plan.mods_path == real_mods
+    assert plan.archive_path == real_archive
+    assert plan.target_mod_path == real_mods / "ToRemove"
+
+
+def test_execute_mod_removal_requires_explicit_confirmation(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    _create_mod(sandbox_mods, "ToRemove", "Sample.Remove")
+
+    plan = service.build_mod_removal_plan(
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+        mod_folder_path_text=str(sandbox_mods / "ToRemove"),
+    )
+
+    with pytest.raises(AppShellError, match="Explicit confirmation is required"):
+        service.execute_mod_removal(plan, confirm_removal=False)
+
+
+def test_execute_mod_removal_moves_sandbox_mod_to_archive_and_rescans(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    _create_mod(sandbox_mods, "ToRemove", "Sample.Remove")
+    _create_mod(sandbox_mods, "Keep", "Sample.Keep")
+
+    plan = service.build_mod_removal_plan(
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+        mod_folder_path_text=str(sandbox_mods / "ToRemove"),
+    )
+    result = service.execute_mod_removal(plan, confirm_removal=True)
+
+    assert result.destination_kind == SCAN_TARGET_SANDBOX_MODS
+    assert result.removed_target == sandbox_mods / "ToRemove"
+    assert not (sandbox_mods / "ToRemove").exists()
+    assert result.archived_target.parent == sandbox_archive
+    assert result.archived_target.exists()
+    assert (result.archived_target / "manifest.json").exists()
+    assert result.scan_context_path == sandbox_mods
+    assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Keep"}
+
+
+def test_execute_mod_removal_moves_real_mod_to_archive_and_rescans(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    _create_mod(real_mods, "ToRemove", "Sample.Remove")
+    _create_mod(real_mods, "Keep", "Sample.Keep")
+
+    plan = service.build_mod_removal_plan(
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+        mod_folder_path_text=str(real_mods / "ToRemove"),
+    )
+    result = service.execute_mod_removal(plan, confirm_removal=True)
+
+    assert result.destination_kind == SCAN_TARGET_CONFIGURED_REAL_MODS
+    assert result.removed_target == real_mods / "ToRemove"
+    assert not (real_mods / "ToRemove").exists()
+    assert result.archived_target.parent == real_archive
+    assert result.archived_target.exists()
+    assert result.scan_context_path == real_mods
+    assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Keep"}
+
+
 def test_build_install_plan_blocks_real_destination_mismatch(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     configured_real_mods = tmp_path / "ConfiguredRealMods"
@@ -463,6 +597,120 @@ def test_build_install_plan_blocks_real_destination_mismatch(tmp_path: Path) -> 
             allow_overwrite=False,
             configured_real_mods_path=configured_real_mods,
         )
+
+
+def test_build_install_plan_blocks_archive_inside_real_mods_tree(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    package = tmp_path / "single.zip"
+    with ZipFile(package, "w") as archive:
+        archive.writestr(
+            "Mod/manifest.json",
+            '{"Name":"Zip Mod","UniqueID":"Pkg.Zip","Version":"1.0.0"}',
+        )
+
+    with pytest.raises(AppShellError, match="must be outside the active Mods directory"):
+        service.build_install_plan(
+            package_path_text=str(package),
+            install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+            configured_mods_path_text=str(real_mods),
+            sandbox_mods_path_text=str(sandbox_mods),
+            real_archive_path_text=str(real_mods / ".sdvmm-archive"),
+            sandbox_archive_path_text="",
+            allow_overwrite=True,
+            configured_real_mods_path=real_mods,
+        )
+
+
+def test_build_install_plan_blocks_archive_inside_sandbox_mods_tree(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    package = tmp_path / "single.zip"
+    with ZipFile(package, "w") as archive:
+        archive.writestr(
+            "Mod/manifest.json",
+            '{"Name":"Zip Mod","UniqueID":"Pkg.Zip","Version":"1.0.0"}',
+        )
+
+    with pytest.raises(AppShellError, match="must be outside the active Mods directory"):
+        service.build_install_plan(
+            package_path_text=str(package),
+            install_target=INSTALL_TARGET_SANDBOX_MODS,
+            configured_mods_path_text=str(real_mods),
+            sandbox_mods_path_text=str(sandbox_mods),
+            real_archive_path_text="",
+            sandbox_archive_path_text=str(sandbox_mods / ".sdvmm-archive"),
+            allow_overwrite=True,
+            configured_real_mods_path=real_mods,
+        )
+
+
+def test_scan_with_target_excludes_configured_archive_path(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    archive_root = real_mods / ".sdvmm-archive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    archive_root.mkdir()
+    _create_mod(real_mods, "Visible", "Sample.Visible")
+    _create_mod(archive_root, "Archived", "Sample.Archived")
+
+    result = service.scan_with_target(
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(archive_root),
+    )
+
+    assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Visible"}
+
+
+def test_scan_with_target_excludes_legacy_archive_path_by_default(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    archive_root = real_mods / ".sdvmm-archive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    archive_root.mkdir()
+    _create_mod(real_mods, "Visible", "Sample.Visible")
+    _create_mod(archive_root, "Archived", "Sample.Archived")
+
+    result = service.scan_with_target(
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+    )
+
+    assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Visible"}
+
+
+def test_scan_with_target_excludes_sandbox_archive_path(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = sandbox_mods / ".sdvmm-archive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    _create_mod(sandbox_mods, "Visible", "Sample.Visible")
+    _create_mod(sandbox_archive, "Archived", "Sample.Archived")
+
+    result = service.scan_with_target(
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        sandbox_archive_path_text=str(sandbox_archive),
+    )
+
+    assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Visible"}
 
 
 def test_build_sandbox_install_plan_includes_dependency_preflight_warnings(
@@ -610,8 +858,10 @@ def test_build_sandbox_plan_defaults_archive_path_when_empty(tmp_path: Path) -> 
         allow_overwrite=True,
     )
 
-    assert plan.sandbox_archive_path == sandbox / ".sdvmm-archive"
-    assert plan.entries[0].archive_path == (sandbox / ".sdvmm-archive" / "Mod__sdvmm_archive_001")
+    assert plan.sandbox_archive_path == sandbox.parent / ".sdvmm-sandbox-archive"
+    assert plan.entries[0].archive_path == (
+        sandbox.parent / ".sdvmm-sandbox-archive" / "Mod__sdvmm_archive_001"
+    )
 
 
 def test_check_updates_returns_no_remote_link_for_unlinked_mod(tmp_path: Path, mods_case_path) -> None:
@@ -1016,6 +1266,60 @@ def test_save_operational_config_can_derive_mods_path_from_game_path(tmp_path: P
     assert saved.game_path == game_path
     assert saved.mods_path == mods
     assert saved.install_target == INSTALL_TARGET_SANDBOX_MODS
+
+
+def test_save_operational_config_defaults_archive_paths_outside_mods_trees(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Stardew Valley"
+    mods = game_path / "Mods"
+    sandbox = tmp_path / "SandboxMods"
+    downloads = tmp_path / "Downloads"
+    game_path.mkdir()
+    mods.mkdir()
+    sandbox.mkdir()
+    downloads.mkdir()
+
+    saved = service.save_operational_config(
+        game_path_text=str(game_path),
+        mods_dir_text=str(mods),
+        sandbox_mods_path_text=str(sandbox),
+        sandbox_archive_path_text="",
+        watched_downloads_path_text=str(downloads),
+        real_archive_path_text="",
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=None,
+    )
+
+    assert saved.real_archive_path == mods.parent / ".sdvmm-real-archive"
+    assert saved.sandbox_archive_path == sandbox.parent / ".sdvmm-sandbox-archive"
+
+
+def test_save_operational_config_blocks_archive_inside_active_mods_tree(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Stardew Valley"
+    mods = game_path / "Mods"
+    sandbox = tmp_path / "SandboxMods"
+    downloads = tmp_path / "Downloads"
+    game_path.mkdir()
+    mods.mkdir()
+    sandbox.mkdir()
+    downloads.mkdir()
+
+    with pytest.raises(AppShellError, match="must be outside the active Mods directory"):
+        service.save_operational_config(
+            game_path_text=str(game_path),
+            mods_dir_text=str(mods),
+            sandbox_mods_path_text=str(sandbox),
+            sandbox_archive_path_text=str(sandbox / ".sdvmm-archive"),
+            watched_downloads_path_text=str(downloads),
+            real_archive_path_text=str(mods / ".sdvmm-archive"),
+            nexus_api_key_text="",
+            scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+            install_target=INSTALL_TARGET_SANDBOX_MODS,
+            existing_config=None,
+        )
 
 
 def test_detect_game_environment_reports_smapi_states(tmp_path: Path) -> None:

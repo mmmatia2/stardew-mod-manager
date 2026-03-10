@@ -15,6 +15,8 @@ from sdvmm.domain.models import (
     GameEnvironmentStatus,
     ModDiscoveryEntry,
     ModDiscoveryResult,
+    ModRemovalPlan,
+    ModRemovalResult,
     ModUpdateReport,
     ModsInventory,
     NexusIntegrationStatus,
@@ -53,6 +55,7 @@ from sdvmm.services.sandbox_installer import (
     SandboxInstallError,
     build_sandbox_install_plan as build_sandbox_install_plan_service,
     execute_sandbox_install_plan as execute_sandbox_install_plan_service,
+    remove_mod_to_archive as remove_mod_to_archive_service,
 )
 from sdvmm.services.update_metadata import (
     NEXUS_API_KEY_ENV,
@@ -84,6 +87,9 @@ SCAN_TARGET_SANDBOX_MODS: ScanTargetKind = "sandbox_mods"
 InstallTargetKind = ScanTargetKind
 INSTALL_TARGET_CONFIGURED_REAL_MODS: InstallTargetKind = SCAN_TARGET_CONFIGURED_REAL_MODS
 INSTALL_TARGET_SANDBOX_MODS: InstallTargetKind = SCAN_TARGET_SANDBOX_MODS
+_DEFAULT_REAL_ARCHIVE_DIRNAME = ".sdvmm-real-archive"
+_DEFAULT_SANDBOX_ARCHIVE_DIRNAME = ".sdvmm-sandbox-archive"
+_LEGACY_ARCHIVE_DIRNAME = ".sdvmm-archive"
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +223,12 @@ class AppShellService:
             sandbox_archive_path = archive_path
 
         watched_downloads_path = self._parse_optional_directory(watched_downloads_path_text)
-        real_archive_path = self._parse_optional_archive_directory(real_archive_path_text)
+        real_archive_path = self._parse_and_validate_archive_path(
+            archive_path_text=real_archive_path_text,
+            destination_mods_path=mods_path,
+            field_label="Real Mods archive path",
+            default_archive_dir_name=_DEFAULT_REAL_ARCHIVE_DIRNAME,
+        )
         nexus_api_key = self._resolve_nexus_api_key(
             nexus_api_key_text=nexus_api_key_text,
             existing_config=existing_config,
@@ -255,9 +266,10 @@ class AppShellService:
 
     def scan(self, mods_dir_text: str) -> ModsInventory:
         mods_path = self._parse_and_validate_mods_path(mods_dir_text)
+        excluded_paths = (mods_path / _LEGACY_ARCHIVE_DIRNAME,)
 
         try:
-            return scan_mods_directory(mods_path)
+            return scan_mods_directory(mods_path, excluded_paths=excluded_paths)
         except OSError as exc:
             raise AppShellError(f"Could not scan Mods directory: {exc}") from exc
 
@@ -267,16 +279,33 @@ class AppShellService:
         scan_target: ScanTargetKind,
         configured_mods_path_text: str,
         sandbox_mods_path_text: str,
+        real_archive_path_text: str = "",
+        sandbox_archive_path_text: str = "",
+        existing_config: AppConfig | None = None,
     ) -> ScanResult:
         if scan_target == SCAN_TARGET_CONFIGURED_REAL_MODS:
             scan_path = self._parse_and_validate_mods_path(configured_mods_path_text)
+            configured_archive_text = real_archive_path_text
+            configured_archive_fallback = (
+                existing_config.real_archive_path if existing_config is not None else None
+            )
         elif scan_target == SCAN_TARGET_SANDBOX_MODS:
             scan_path = self._parse_and_validate_sandbox_mods_path(sandbox_mods_path_text)
+            configured_archive_text = sandbox_archive_path_text
+            configured_archive_fallback = (
+                existing_config.sandbox_archive_path if existing_config is not None else None
+            )
         else:
             raise AppShellError(f"Unknown scan target: {scan_target}")
 
+        excluded_paths = self._resolve_scan_excluded_paths(
+            scan_target=scan_target,
+            scan_path=scan_path,
+            configured_archive_text=configured_archive_text,
+            configured_archive_fallback=configured_archive_fallback,
+        )
         try:
-            inventory = scan_mods_directory(scan_path)
+            inventory = scan_mods_directory(scan_path, excluded_paths=excluded_paths)
         except OSError as exc:
             raise AppShellError(f"Could not scan selected target: {exc}") from exc
 
@@ -755,7 +784,10 @@ class AppShellService:
                 sandbox_archive_path=destination_archive_path,
                 allow_overwrite=allow_overwrite,
             )
-            inventory = scan_mods_directory(destination_mods_path)
+            inventory = scan_mods_directory(
+                destination_mods_path,
+                excluded_paths=(destination_archive_path, destination_mods_path / _LEGACY_ARCHIVE_DIRNAME),
+            )
             dependency_findings = _evaluate_sandbox_plan_dependencies(
                 plan=plan,
                 base_findings=plan.dependency_findings,
@@ -802,6 +834,92 @@ class AppShellService:
             raise AppShellError(str(exc)) from exc
         except OSError as exc:
             raise AppShellError(f"Sandbox install failed: {exc}") from exc
+
+    def build_mod_removal_plan(
+        self,
+        *,
+        scan_target: ScanTargetKind,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        mod_folder_path_text: str,
+    ) -> ModRemovalPlan:
+        destination_mods_path, destination_archive_path = self._resolve_install_destination_paths(
+            install_target=scan_target,
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+        )
+
+        configured_real_mods_path: Path | None = None
+        if configured_mods_path_text.strip():
+            configured_real_mods_path = self._parse_and_validate_mods_path(configured_mods_path_text)
+
+        safety = self.evaluate_install_target_safety(
+            install_target=scan_target,
+            destination_mods_path=destination_mods_path,
+            configured_real_mods_path=configured_real_mods_path,
+        )
+        if not safety.allowed:
+            assert safety.message is not None
+            raise AppShellError(safety.message)
+
+        raw_target = mod_folder_path_text.strip()
+        if not raw_target:
+            raise AppShellError("Select an installed mod row first.")
+
+        target_mod_path = Path(raw_target).expanduser()
+        if not target_mod_path.exists() or not target_mod_path.is_dir():
+            raise AppShellError(f"Selected mod folder is not accessible: {target_mod_path}")
+
+        mods_root_resolved = destination_mods_path.resolve()
+        target_resolved = target_mod_path.resolve()
+        if target_resolved.parent != mods_root_resolved:
+            raise AppShellError(
+                "Selected mod folder must be a direct child of the selected Mods destination."
+            )
+
+        return ModRemovalPlan(
+            destination_kind=scan_target,
+            mods_path=destination_mods_path,
+            archive_path=destination_archive_path,
+            target_mod_path=target_mod_path,
+        )
+
+    def execute_mod_removal(
+        self,
+        plan: ModRemovalPlan,
+        *,
+        confirm_removal: bool = False,
+    ) -> ModRemovalResult:
+        if not confirm_removal:
+            raise AppShellError("Explicit confirmation is required before mod removal.")
+
+        try:
+            archived_target = remove_mod_to_archive_service(
+                target_mod_path=plan.target_mod_path,
+                mods_root=plan.mods_path,
+                archive_root=plan.archive_path,
+            )
+            inventory = scan_mods_directory(
+                plan.mods_path,
+                excluded_paths=(plan.archive_path, plan.mods_path / _LEGACY_ARCHIVE_DIRNAME),
+            )
+        except SandboxInstallError as exc:
+            raise AppShellError(str(exc)) from exc
+        except OSError as exc:
+            raise AppShellError(f"Mod removal failed: {exc}") from exc
+
+        return ModRemovalResult(
+            plan=plan,
+            removed_target=plan.target_mod_path,
+            archived_target=archived_target,
+            scan_context_path=plan.mods_path,
+            inventory=inventory,
+            destination_kind=plan.destination_kind,
+        )
 
     def evaluate_install_target_safety(
         self,
@@ -943,6 +1061,7 @@ class AppShellService:
                 archive_path_text=real_archive_path_text,
                 destination_mods_path=real_mods_path,
                 field_label="Real Mods archive path",
+                default_archive_dir_name=_DEFAULT_REAL_ARCHIVE_DIRNAME,
             )
             return real_mods_path, real_archive_path
 
@@ -952,6 +1071,7 @@ class AppShellService:
                 archive_path_text=sandbox_archive_path_text,
                 destination_mods_path=sandbox_mods_path,
                 field_label="Sandbox archive path",
+                default_archive_dir_name=_DEFAULT_SANDBOX_ARCHIVE_DIRNAME,
             )
             return sandbox_mods_path, sandbox_archive_path
 
@@ -981,6 +1101,56 @@ class AppShellService:
         raise AppShellError(
             f"Mods directory is required and could not be derived from game path: {derived_mods_path}"
         )
+
+    @staticmethod
+    def default_archive_path_for_destination(
+        *,
+        destination_mods_path: Path,
+        default_archive_dir_name: str,
+    ) -> Path:
+        return destination_mods_path.parent / default_archive_dir_name
+
+    @staticmethod
+    def _resolve_scan_excluded_paths(
+        *,
+        scan_target: ScanTargetKind,
+        scan_path: Path,
+        configured_archive_text: str,
+        configured_archive_fallback: Path | None,
+    ) -> tuple[Path, ...]:
+        candidates: list[Path] = []
+
+        raw_archive = configured_archive_text.strip()
+        if raw_archive:
+            candidates.append(Path(raw_archive).expanduser())
+        elif configured_archive_fallback is not None:
+            candidates.append(configured_archive_fallback)
+        else:
+            default_archive_name = (
+                _DEFAULT_REAL_ARCHIVE_DIRNAME
+                if scan_target == SCAN_TARGET_CONFIGURED_REAL_MODS
+                else _DEFAULT_SANDBOX_ARCHIVE_DIRNAME
+            )
+            candidates.append(
+                AppShellService.default_archive_path_for_destination(
+                    destination_mods_path=scan_path,
+                    default_archive_dir_name=default_archive_name,
+                )
+            )
+
+        # Legacy compatibility: previous versions defaulted archives inside Mods root.
+        candidates.append(scan_path / _LEGACY_ARCHIVE_DIRNAME)
+
+        deduped: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            key = str(path.expanduser().resolve(strict=False))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(path)
+
+        return tuple(deduped)
 
     @staticmethod
     def _parse_and_validate_game_path(game_path_text: str) -> Path:
@@ -1062,6 +1232,7 @@ class AppShellService:
             archive_path_text=sandbox_archive_path_text,
             destination_mods_path=sandbox_mods_path,
             field_label="Sandbox archive path",
+            default_archive_dir_name=_DEFAULT_SANDBOX_ARCHIVE_DIRNAME,
         )
 
     @staticmethod
@@ -1070,16 +1241,25 @@ class AppShellService:
         archive_path_text: str,
         destination_mods_path: Path,
         field_label: str,
+        default_archive_dir_name: str,
     ) -> Path:
         raw_value = archive_path_text.strip()
         archive_path = (
-            (destination_mods_path / ".sdvmm-archive")
+            AppShellService.default_archive_path_for_destination(
+                destination_mods_path=destination_mods_path,
+                default_archive_dir_name=default_archive_dir_name,
+            )
             if not raw_value
             else Path(raw_value).expanduser()
         )
 
         if archive_path.exists() and not archive_path.is_dir():
             raise AppShellError(f"{field_label} is not a directory: {archive_path}")
+
+        if _is_path_within_or_equal(archive_path, destination_mods_path):
+            raise AppShellError(
+                f"{field_label} must be outside the active Mods directory: {archive_path}"
+            )
 
         parent = archive_path.parent
         if not parent.exists() or not parent.is_dir():
@@ -1156,6 +1336,19 @@ def _paths_deterministically_match(path_a: Path, path_b: Path) -> bool:
         return left_text.casefold() == right_text.casefold()
 
     return left_text == right_text
+
+
+def _is_path_within_or_equal(candidate: Path, container: Path) -> bool:
+    candidate_resolved = candidate.expanduser().resolve(strict=False)
+    container_resolved = container.expanduser().resolve(strict=False)
+
+    if candidate_resolved == container_resolved:
+        return True
+
+    try:
+        return candidate_resolved.is_relative_to(container_resolved)
+    except ValueError:
+        return False
 
 
 def _sorted_unique_ids(values: Iterable[str]) -> tuple[str, ...]:

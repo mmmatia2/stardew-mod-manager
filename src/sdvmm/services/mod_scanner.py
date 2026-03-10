@@ -26,14 +26,22 @@ from sdvmm.domain.warning_codes import MISSING_MANIFEST
 from sdvmm.services.manifest_parser import parse_manifest_file
 
 
-def scan_mods_directory(mods_dir: Path) -> ModsInventory:
+def scan_mods_directory(
+    mods_dir: Path,
+    *,
+    excluded_paths: tuple[Path, ...] = tuple(),
+) -> ModsInventory:
     installed_mods: list[InstalledMod] = []
     warnings: list[ParseWarning] = []
     scan_entry_findings: list[ScanEntryFinding] = []
     ignored_entries: list[Path] = []
+    excluded_resolved = tuple(_resolve_path_for_match(path) for path in excluded_paths)
 
     for entry in sorted(mods_dir.iterdir(), key=lambda item: item.name.lower()):
         if not entry.is_dir():
+            ignored_entries.append(entry)
+            continue
+        if _is_excluded_entry(entry, excluded_resolved):
             ignored_entries.append(entry)
             continue
 
@@ -289,3 +297,18 @@ def _find_missing_required_dependencies(
         )
     )
     return tuple(findings)
+
+
+def _resolve_path_for_match(path: Path) -> Path:
+    return path.expanduser().resolve(strict=False)
+
+
+def _is_excluded_entry(entry: Path, excluded_resolved: tuple[Path, ...]) -> bool:
+    if not excluded_resolved:
+        return False
+
+    entry_resolved = _resolve_path_for_match(entry)
+    for excluded in excluded_resolved:
+        if entry_resolved == excluded:
+            return True
+    return False

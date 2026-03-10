@@ -314,6 +314,24 @@ class SandboxInstallResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ModRemovalPlan:
+    destination_kind: str
+    mods_path: Path
+    archive_path: Path
+    target_mod_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class ModRemovalResult:
+    plan: ModRemovalPlan
+    removed_target: Path
+    archived_target: Path
+    scan_context_path: Path
+    inventory: ModsInventory
+    destination_kind: str = "sandbox_mods"
+
+
+@dataclass(frozen=True, slots=True)
 class ModsInventory:
     mods: tuple[InstalledMod, ...]
     parse_warnings: tuple[ParseWarning, ...]

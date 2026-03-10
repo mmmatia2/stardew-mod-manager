@@ -38,6 +38,7 @@ from sdvmm.app.inventory_presenter import (
     build_environment_status_text,
     build_findings_text,
     build_intake_correlation_text,
+    build_mod_removal_result_text,
     build_package_inspection_text,
     build_sandbox_install_plan_text,
     build_sandbox_install_result_text,
@@ -60,6 +61,7 @@ from sdvmm.domain.models import (
     DownloadsIntakeResult,
     GameEnvironmentStatus,
     ModDiscoveryResult,
+    ModRemovalResult,
     ModUpdateStatus,
     ModUpdateReport,
     ModsInventory,
@@ -107,9 +109,9 @@ class MainWindow(QMainWindow):
         self._sandbox_mods_path_input = QLineEdit()
         self._sandbox_mods_path_input.setPlaceholderText("/path/to/Sandbox/Mods")
         self._sandbox_archive_path_input = QLineEdit()
-        self._sandbox_archive_path_input.setPlaceholderText("/path/to/Sandbox/.sdvmm-archive")
+        self._sandbox_archive_path_input.setPlaceholderText("/path/to/.sdvmm-sandbox-archive")
         self._real_archive_path_input = QLineEdit()
-        self._real_archive_path_input.setPlaceholderText("/path/to/Real/Mods/.sdvmm-archive")
+        self._real_archive_path_input.setPlaceholderText("/path/to/.sdvmm-real-archive")
         self._watched_downloads_path_input = QLineEdit()
         self._watched_downloads_path_input.setPlaceholderText("/path/to/Downloads")
         self._discovery_query_input = QLineEdit()
@@ -343,6 +345,9 @@ class MainWindow(QMainWindow):
         open_remote_button = QPushButton("Open remote page")
         open_remote_button.clicked.connect(self._on_open_remote_page)
         inventory_controls.addWidget(open_remote_button)
+        self._remove_mod_button = QPushButton("Remove selected (archive)")
+        self._remove_mod_button.clicked.connect(self._on_remove_selected_mod)
+        inventory_controls.addWidget(self._remove_mod_button)
         inventory_controls.addWidget(QLabel("Filter"))
         inventory_controls.addWidget(self._mods_filter_input, 1)
         inventory_controls.addWidget(self._mods_filter_stats_label)
@@ -533,6 +538,7 @@ class MainWindow(QMainWindow):
             self._scan_button,
             self._check_updates_button,
             self._search_mods_button,
+            self._remove_mod_button,
         )
 
         self.setCentralWidget(container)
@@ -617,7 +623,9 @@ class MainWindow(QMainWindow):
             self._pending_install_plan = None
             self._sandbox_mods_path_input.setText(selected)
             if not self._sandbox_archive_path_input.text().strip():
-                self._sandbox_archive_path_input.setText(str(Path(selected) / ".sdvmm-archive"))
+                self._sandbox_archive_path_input.setText(
+                    str(Path(selected).parent / ".sdvmm-sandbox-archive")
+                )
 
     def _on_browse_sandbox_archive(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -696,6 +704,9 @@ class MainWindow(QMainWindow):
                 scan_target=self._current_scan_target(),
                 configured_mods_path_text=self._mods_path_input.text(),
                 sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
             ),
             on_success=self._on_scan_completed,
         )
@@ -1002,6 +1013,86 @@ class MainWindow(QMainWindow):
             return
 
         self._set_status(f"Opened remote page: {url}")
+
+    def _on_remove_selected_mod(self) -> None:
+        row = self._mods_table.currentRow()
+        if row < 0:
+            message = "Select an installed mod row first."
+            QMessageBox.warning(self, "No selection", message)
+            self._set_status(message)
+            return
+
+        row_item = self._mods_table.item(row, 0)
+        if row_item is None:
+            message = "Selected mod row is invalid."
+            QMessageBox.warning(self, "Invalid selection", message)
+            self._set_status(message)
+            return
+
+        mod_name = row_item.text().strip() or "<unknown>"
+        mod_folder_path = row_item.data(_ROLE_MOD_FOLDER_PATH)
+        if not isinstance(mod_folder_path, str) or not mod_folder_path.strip():
+            message = "Selected mod row does not include a valid folder path."
+            QMessageBox.warning(self, "Invalid selection", message)
+            self._set_status(message)
+            return
+
+        try:
+            plan = self._shell_service.build_mod_removal_plan(
+                scan_target=self._current_scan_target(),
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                mod_folder_path_text=mod_folder_path,
+            )
+        except AppShellError as exc:
+            QMessageBox.critical(self, "Removal plan failed", str(exc))
+            self._set_status(str(exc))
+            return
+
+        destination_label = (
+            "REAL game Mods destination"
+            if plan.destination_kind == SCAN_TARGET_CONFIGURED_REAL_MODS
+            else "Sandbox Mods destination"
+        )
+        yes = QMessageBox.question(
+            self,
+            "Confirm removal to archive",
+            (
+                "Move selected mod folder to archive?\n\n"
+                f"Mod: {mod_name}\n"
+                f"Destination: {destination_label}\n"
+                f"Target folder: {plan.target_mod_path}\n"
+                f"Archive root: {plan.archive_path}\n\n"
+                "This stage performs archive move only (no permanent delete)."
+            ),
+        )
+        if yes != QMessageBox.StandardButton.Yes:
+            self._set_status("Mod removal cancelled.")
+            return
+
+        self._run_background_operation(
+            operation_name="Mod removal",
+            running_label="Mod removal",
+            started_status=f"Removing {mod_name} to archive...",
+            error_title="Mod removal failed",
+            task_fn=lambda _plan=plan: self._shell_service.execute_mod_removal(
+                _plan,
+                confirm_removal=True,
+            ),
+            on_success=self._on_remove_selected_mod_completed,
+        )
+
+    def _on_remove_selected_mod_completed(self, result: ModRemovalResult) -> None:
+        self._render_inventory(result.inventory)
+        self._set_current_scan_target(result.destination_kind)
+        self._set_scan_context(
+            result.scan_context_path,
+            self._scan_target_label(result.destination_kind),
+        )
+        self._set_details_text(build_mod_removal_result_text(result))
+        self._set_status(f"Mod removed to archive: {result.archived_target.name}")
 
     def _on_start_watch(self) -> None:
         try:
@@ -1444,7 +1535,7 @@ class MainWindow(QMainWindow):
             self._install_context_label.setToolTip(path_text)
             if not self._real_archive_path_input.text().strip() and self._mods_path_input.text().strip():
                 self._real_archive_path_input.setText(
-                    str(Path(self._mods_path_input.text().strip()) / ".sdvmm-archive")
+                    str(Path(self._mods_path_input.text().strip()).parent / ".sdvmm-real-archive")
                 )
             return
 
@@ -1457,7 +1548,7 @@ class MainWindow(QMainWindow):
             and self._sandbox_mods_path_input.text().strip()
         ):
             self._sandbox_archive_path_input.setText(
-                str(Path(self._sandbox_mods_path_input.text().strip()) / ".sdvmm-archive")
+                str(Path(self._sandbox_mods_path_input.text().strip()).parent / ".sdvmm-sandbox-archive")
             )
 
     def _current_scan_target(self) -> str:
