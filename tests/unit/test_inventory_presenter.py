@@ -11,6 +11,7 @@ from sdvmm.app.inventory_presenter import (
     build_environment_status_text,
     build_package_inspection_text,
     build_sandbox_install_plan_text,
+    build_smapi_log_report_text,
     build_smapi_update_status_text,
     build_update_report_text,
 )
@@ -32,6 +33,8 @@ from sdvmm.domain.models import (
     PackageInspectionResult,
     PackageModEntry,
     PackageWarning,
+    SmapiLogFinding,
+    SmapiLogReport,
     SmapiUpdateStatus,
     SandboxInstallPlan,
     SandboxInstallPlanEntry,
@@ -96,6 +99,30 @@ def test_smapi_update_text_highlights_manual_update_guidance() -> None:
     assert "Status: SMAPI update available" in text
     assert "Recommended next step" in text
     assert "Open the SMAPI page and update SMAPI manually" in text
+
+
+def test_smapi_log_report_text_highlights_missing_dependencies_guidance() -> None:
+    report = SmapiLogReport(
+        state="parsed",
+        source="auto_detected",
+        log_path=Path("/tmp/SMAPI-latest.txt"),
+        game_path=Path("/tmp/Game"),
+        findings=(
+            SmapiLogFinding(
+                kind="missing_dependency",
+                line_number=120,
+                message="Fancy Pack because it needs mods which aren't installed (Pathoschild.ContentPatcher)",
+            ),
+        ),
+        message="Parsed SMAPI log: errors=0, warnings=0, failed_mods=0, missing_dependencies=1, runtime_issues=0.",
+    )
+
+    text = build_smapi_log_report_text(report)
+
+    assert "SMAPI Log Troubleshooting" in text
+    assert "Log parsed" in text
+    assert "missing dependencies=1" in text
+    assert "Install missing dependencies first" in text
 
 
 def test_downloads_intake_text_shows_classification_summary_and_action() -> None:

@@ -16,6 +16,11 @@ from sdvmm.domain.nexus_codes import NexusCredentialSource, NexusIntegrationStat
 from sdvmm.domain.package_codes import PackageFindingKind
 from sdvmm.domain.remote_requirement_codes import RemoteRequirementState
 from sdvmm.domain.scan_codes import ScanEntryKind
+from sdvmm.domain.smapi_log_codes import (
+    SmapiLogFindingKind,
+    SmapiLogSourceKind,
+    SmapiLogStatusState,
+)
 from sdvmm.domain.smapi_codes import SmapiUpdateState
 from sdvmm.domain.update_codes import RemoteLinkProvider, UpdateState
 from sdvmm.domain.warning_codes import ParseWarningCode
@@ -61,6 +66,24 @@ class SmapiUpdateStatus:
     latest_version: str | None
     update_page_url: str
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class SmapiLogFinding:
+    kind: SmapiLogFindingKind
+    line_number: int
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class SmapiLogReport:
+    state: SmapiLogStatusState
+    source: SmapiLogSourceKind
+    log_path: Path | None
+    game_path: Path | None
+    findings: tuple[SmapiLogFinding, ...]
+    notes: tuple[str, ...] = tuple()
+    message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

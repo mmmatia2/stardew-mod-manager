@@ -53,6 +53,12 @@ from .smapi_update import (
     default_smapi_update_page_url,
     detect_installed_smapi_version,
 )
+from .smapi_log import (
+    check_smapi_log_troubleshooting,
+    locate_smapi_log,
+    parse_smapi_log_file,
+    parse_smapi_log_text,
+)
 
 __all__ = [
     "APP_STATE_VERSION",
@@ -96,6 +102,10 @@ __all__ = [
     "default_smapi_update_page_url",
     "SMAPI_RELEASES_LATEST_URL",
     "SMAPI_RELEASES_PAGE_URL",
+    "check_smapi_log_troubleshooting",
+    "locate_smapi_log",
+    "parse_smapi_log_file",
+    "parse_smapi_log_text",
     "mask_api_key",
     "normalize_nexus_api_key",
     "resolve_remote_link",

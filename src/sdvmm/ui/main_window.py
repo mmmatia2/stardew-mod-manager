@@ -47,6 +47,7 @@ from sdvmm.app.inventory_presenter import (
     build_package_inspection_text,
     build_sandbox_install_plan_text,
     build_sandbox_install_result_text,
+    build_smapi_log_report_text,
     build_smapi_update_status_text,
     build_update_report_text,
 )
@@ -73,6 +74,7 @@ from sdvmm.domain.models import (
     ArchivedModEntry,
     ModRemovalResult,
     ModRollbackResult,
+    SmapiLogReport,
     ModUpdateStatus,
     ModUpdateReport,
     ModsInventory,
@@ -86,6 +88,15 @@ from sdvmm.domain.smapi_codes import (
     SMAPI_UNABLE_TO_DETERMINE,
     SMAPI_UP_TO_DATE,
     SMAPI_UPDATE_AVAILABLE,
+)
+from sdvmm.domain.smapi_log_codes import (
+    SMAPI_LOG_ERROR,
+    SMAPI_LOG_FAILED_MOD,
+    SMAPI_LOG_MISSING_DEPENDENCY,
+    SMAPI_LOG_NOT_FOUND,
+    SMAPI_LOG_RUNTIME_ISSUE,
+    SMAPI_LOG_UNABLE_TO_DETERMINE,
+    SMAPI_LOG_WARNING,
 )
 from sdvmm.ui.background_task import BackgroundTask
 
@@ -113,6 +124,7 @@ class MainWindow(QMainWindow):
         self._archived_entries: tuple[ArchivedModEntry, ...] = tuple()
         self._guided_update_unique_ids: tuple[str, ...] = tuple()
         self._last_environment_status: GameEnvironmentStatus | None = None
+        self._last_smapi_log_report: SmapiLogReport | None = None
         self._last_smapi_update_status: SmapiUpdateStatus | None = None
         self._thread_pool = QThreadPool.globalInstance()
         self._active_operation_name: str | None = None
@@ -239,6 +251,7 @@ class MainWindow(QMainWindow):
         self._install_context_label = QLabel("Not set")
         self._environment_status_label = QLabel("Not checked")
         self._smapi_update_status_label = QLabel("Not checked")
+        self._smapi_log_status_label = QLabel("Not checked")
         self._nexus_status_label = QLabel("Not configured")
         self._watch_status_label = QLabel("Stopped")
         self._operation_state_label = QLabel("Idle")
@@ -300,21 +313,23 @@ class MainWindow(QMainWindow):
         context_layout.addWidget(self._environment_status_label, 0, 1)
         context_layout.addWidget(_context_caption("SMAPI update"), 0, 2)
         context_layout.addWidget(self._smapi_update_status_label, 0, 3)
-        context_layout.addWidget(_context_caption("Nexus"), 0, 4)
-        context_layout.addWidget(self._nexus_status_label, 0, 5)
-        context_layout.addWidget(_context_caption("Watcher"), 0, 6)
-        context_layout.addWidget(self._watch_status_label, 0, 7)
+        context_layout.addWidget(_context_caption("SMAPI log"), 0, 4)
+        context_layout.addWidget(self._smapi_log_status_label, 0, 5)
+        context_layout.addWidget(_context_caption("Nexus"), 0, 6)
+        context_layout.addWidget(self._nexus_status_label, 0, 7)
+        context_layout.addWidget(_context_caption("Watcher"), 0, 8)
+        context_layout.addWidget(self._watch_status_label, 0, 9)
         context_layout.addWidget(_context_caption("Scan source"), 1, 0)
         context_layout.addWidget(self._scan_context_label, 1, 1, 1, 3)
         context_layout.addWidget(_context_caption("Install destination"), 1, 4)
-        context_layout.addWidget(self._install_context_label, 1, 5, 1, 2)
-        context_layout.addWidget(_context_caption("Operation"), 1, 7)
-        context_layout.addWidget(self._operation_state_label, 1, 8)
+        context_layout.addWidget(self._install_context_label, 1, 5, 1, 3)
+        context_layout.addWidget(_context_caption("Operation"), 1, 8)
+        context_layout.addWidget(self._operation_state_label, 1, 9)
         context_layout.setColumnStretch(1, 2)
         context_layout.setColumnStretch(3, 2)
         context_layout.setColumnStretch(5, 2)
         context_layout.setColumnStretch(7, 1)
-        context_layout.setColumnStretch(8, 2)
+        context_layout.setColumnStretch(9, 2)
         root_layout.addWidget(context_group)
 
         self._setup_toggle = QCheckBox("Show setup and path configuration")
@@ -399,6 +414,12 @@ class MainWindow(QMainWindow):
         self._check_smapi_update_button = QPushButton("Check SMAPI")
         self._check_smapi_update_button.clicked.connect(self._on_check_smapi_update)
         inventory_primary_controls.addWidget(self._check_smapi_update_button)
+        self._check_smapi_log_button = QPushButton("Check SMAPI log")
+        self._check_smapi_log_button.clicked.connect(self._on_check_smapi_log)
+        inventory_primary_controls.addWidget(self._check_smapi_log_button)
+        self._load_smapi_log_button = QPushButton("Load SMAPI log")
+        self._load_smapi_log_button.clicked.connect(self._on_load_smapi_log)
+        inventory_primary_controls.addWidget(self._load_smapi_log_button)
         self._open_smapi_page_button = QPushButton("Open SMAPI page")
         self._open_smapi_page_button.clicked.connect(self._on_open_smapi_page)
         inventory_primary_controls.addWidget(self._open_smapi_page_button)
@@ -649,6 +670,8 @@ class MainWindow(QMainWindow):
             self._scan_button,
             self._check_updates_button,
             self._check_smapi_update_button,
+            self._check_smapi_log_button,
+            self._load_smapi_log_button,
             self._search_mods_button,
             self._remove_mod_button,
             self._rollback_mod_button,
@@ -812,6 +835,11 @@ class MainWindow(QMainWindow):
             self._smapi_update_status_label.setText("SMAPI not detected")
             self._smapi_update_status_label.setToolTip(
                 "SMAPI entrypoint was not detected for this game path."
+            )
+        if "invalid_game_path" in status.state_codes:
+            self._smapi_log_status_label.setText("Need valid game path")
+            self._smapi_log_status_label.setToolTip(
+                "SMAPI log auto-detection requires a valid game path context."
             )
         self._set_details_text(build_environment_status_text(status))
         self._set_status("Environment detection complete.")
@@ -1007,6 +1035,50 @@ class MainWindow(QMainWindow):
         self._smapi_update_status_label.setToolTip(status.message)
         self._set_details_text(build_smapi_update_status_text(status))
         self._set_status(status.message)
+
+    def _on_check_smapi_log(self) -> None:
+        self._run_background_operation(
+            operation_name="SMAPI log check",
+            running_label="SMAPI log check",
+            started_status="Locating and parsing SMAPI log...",
+            error_title="SMAPI log check failed",
+            task_fn=lambda: self._shell_service.check_smapi_log_troubleshooting(
+                game_path_text=self._game_path_input.text(),
+                existing_config=self._config,
+            ),
+            on_success=self._on_check_smapi_log_completed,
+        )
+
+    def _on_load_smapi_log(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select SMAPI log file",
+            "",
+            "Log files (*.txt *.log);;Text files (*.txt);;All files (*)",
+        )
+        if not selected:
+            return
+
+        self._run_background_operation(
+            operation_name="SMAPI log load",
+            running_label="SMAPI log load",
+            started_status=f"Parsing selected SMAPI log: {Path(selected).name}",
+            error_title="SMAPI log load failed",
+            task_fn=lambda _selected=selected: self._shell_service.check_smapi_log_troubleshooting(
+                game_path_text=self._game_path_input.text(),
+                log_path_text=_selected,
+                existing_config=self._config,
+            ),
+            on_success=self._on_check_smapi_log_completed,
+        )
+
+    def _on_check_smapi_log_completed(self, report: SmapiLogReport) -> None:
+        self._last_smapi_log_report = report
+        summary = _smapi_log_summary_label(report)
+        self._smapi_log_status_label.setText(summary)
+        self._smapi_log_status_label.setToolTip(report.message or summary)
+        self._set_details_text(build_smapi_log_report_text(report))
+        self._set_status(report.message or "SMAPI log check complete.")
 
     def _on_open_smapi_page(self) -> None:
         url = self._shell_service.resolve_smapi_update_page_url(self._last_smapi_update_status)
@@ -1848,8 +1920,10 @@ class MainWindow(QMainWindow):
 
     def _on_game_path_changed(self, *_: object) -> None:
         self._last_environment_status = None
+        self._last_smapi_log_report = None
         self._last_smapi_update_status = None
         self._environment_status_label.setText("Not checked")
+        self._smapi_log_status_label.setText("Not checked")
         self._smapi_update_status_label.setText("Not checked")
 
     def _on_nexus_key_changed(self, *_: object) -> None:
@@ -2240,6 +2314,39 @@ def _smapi_update_summary_label(status: SmapiUpdateStatus) -> str:
     if status.state == SMAPI_UNABLE_TO_DETERMINE:
         return "Unable to determine"
     return status.state.replace("_", " ")
+
+
+def _smapi_log_summary_label(report: SmapiLogReport) -> str:
+    if report.state == SMAPI_LOG_NOT_FOUND:
+        return "Log not found"
+    if report.state == SMAPI_LOG_UNABLE_TO_DETERMINE:
+        return "Unable to determine"
+
+    counts = {
+        SMAPI_LOG_ERROR: 0,
+        SMAPI_LOG_WARNING: 0,
+        SMAPI_LOG_FAILED_MOD: 0,
+        SMAPI_LOG_MISSING_DEPENDENCY: 0,
+        SMAPI_LOG_RUNTIME_ISSUE: 0,
+    }
+    for finding in report.findings:
+        counts[finding.kind] = counts.get(finding.kind, 0) + 1
+
+    issue_count = (
+        counts[SMAPI_LOG_ERROR]
+        + counts[SMAPI_LOG_FAILED_MOD]
+        + counts[SMAPI_LOG_MISSING_DEPENDENCY]
+        + counts[SMAPI_LOG_RUNTIME_ISSUE]
+    )
+    if issue_count == 0 and counts[SMAPI_LOG_WARNING] == 0:
+        return "No obvious issues parsed"
+
+    return (
+        f"Issues: err {counts[SMAPI_LOG_ERROR]}, "
+        f"fail {counts[SMAPI_LOG_FAILED_MOD]}, "
+        f"dep {counts[SMAPI_LOG_MISSING_DEPENDENCY]}, "
+        f"warn {counts[SMAPI_LOG_WARNING]}"
+    )
 
 
 def _discovery_compatibility_label(state: str) -> str:

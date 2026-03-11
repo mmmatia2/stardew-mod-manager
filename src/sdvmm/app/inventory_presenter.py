@@ -30,6 +30,7 @@ from sdvmm.domain.models import (
     ModsInventory,
     PackageInspectionResult,
     RemoteRequirementGuidance,
+    SmapiLogReport,
     SmapiUpdateStatus,
     SandboxInstallPlan,
     SandboxInstallResult,
@@ -46,6 +47,19 @@ from sdvmm.domain.smapi_codes import (
     SMAPI_UNABLE_TO_DETERMINE,
     SMAPI_UP_TO_DATE,
     SMAPI_UPDATE_AVAILABLE,
+)
+from sdvmm.domain.smapi_log_codes import (
+    SMAPI_LOG_ERROR,
+    SMAPI_LOG_FAILED_MOD,
+    SMAPI_LOG_MISSING_DEPENDENCY,
+    SMAPI_LOG_NOT_FOUND,
+    SMAPI_LOG_PARSED,
+    SMAPI_LOG_RUNTIME_ISSUE,
+    SMAPI_LOG_SOURCE_AUTO_DETECTED,
+    SMAPI_LOG_SOURCE_MANUAL,
+    SMAPI_LOG_SOURCE_NONE,
+    SMAPI_LOG_UNABLE_TO_DETERMINE,
+    SMAPI_LOG_WARNING,
 )
 
 
@@ -192,6 +206,65 @@ def build_smapi_update_status_text(status: SmapiUpdateStatus) -> str:
         lines.append("- Fix game path/SMAPI detection, then run SMAPI check again.")
     else:
         lines.append("- Re-run SMAPI check if environment changed.")
+
+    return "\n".join(lines)
+
+
+def build_smapi_log_report_text(report: SmapiLogReport) -> str:
+    lines: list[str] = []
+    lines.append("SMAPI Log Troubleshooting")
+    lines.append(f"- Status: {_smapi_log_state_label(report.state)} (code: {report.state})")
+    lines.append(f"- Source: {_smapi_log_source_label(report.source)}")
+    lines.append(f"- Log path: {report.log_path or '<not loaded>'}")
+    lines.append(f"- Game path context: {report.game_path or '<none>'}")
+
+    if report.message:
+        lines.append(f"- Summary: {report.message}")
+
+    lines.append("")
+    if report.findings:
+        counts = _smapi_log_findings_count(report)
+        lines.append(
+            "- Parsed findings: "
+            f"errors={counts[SMAPI_LOG_ERROR]}, "
+            f"warnings={counts[SMAPI_LOG_WARNING]}, "
+            f"failed mods={counts[SMAPI_LOG_FAILED_MOD]}, "
+            f"missing dependencies={counts[SMAPI_LOG_MISSING_DEPENDENCY]}, "
+            f"runtime issues={counts[SMAPI_LOG_RUNTIME_ISSUE]}"
+        )
+        lines.append("")
+        lines.append("Finding details:")
+        for finding in report.findings:
+            lines.append(
+                f"- line {finding.line_number} | {_smapi_log_finding_kind_label(finding.kind)}: {finding.message}"
+            )
+    else:
+        lines.append("- Parsed findings: none")
+
+    if report.notes:
+        lines.append("")
+        lines.append("Notes:")
+        for note in report.notes:
+            lines.append(f"- {note}")
+
+    lines.append("")
+    lines.append("Recommended next step:")
+    if report.state == SMAPI_LOG_NOT_FOUND:
+        lines.append("- Launch the game with SMAPI once, then run 'Check SMAPI log' again or load a log manually.")
+    elif report.state == SMAPI_LOG_UNABLE_TO_DETERMINE:
+        lines.append("- Load a specific SMAPI log file manually and re-check.")
+    else:
+        counts = _smapi_log_findings_count(report)
+        if counts[SMAPI_LOG_MISSING_DEPENDENCY] > 0:
+            lines.append("- Install missing dependencies first, then launch SMAPI and re-check.")
+        elif counts[SMAPI_LOG_FAILED_MOD] > 0:
+            lines.append("- Review failed-mod entries and update/remove the failing mods.")
+        elif counts[SMAPI_LOG_ERROR] > 0 or counts[SMAPI_LOG_RUNTIME_ISSUE] > 0:
+            lines.append("- Review error/runtime entries and verify mod compatibility with current SMAPI/game versions.")
+        elif counts[SMAPI_LOG_WARNING] > 0:
+            lines.append("- Review warnings and monitor if they repeat after next launch.")
+        else:
+            lines.append("- No obvious issues parsed. Re-check after reproducing a problem if needed.")
 
     return "\n".join(lines)
 
@@ -855,6 +928,48 @@ def _smapi_update_state_label(state: str) -> str:
         SMAPI_UNABLE_TO_DETERMINE: "Unable to determine SMAPI status",
     }
     return labels.get(state, state.replace("_", " ").title())
+
+
+def _smapi_log_state_label(state: str) -> str:
+    labels = {
+        SMAPI_LOG_NOT_FOUND: "Log not found",
+        SMAPI_LOG_PARSED: "Log parsed",
+        SMAPI_LOG_UNABLE_TO_DETERMINE: "Unable to determine",
+    }
+    return labels.get(state, state.replace("_", " ").title())
+
+
+def _smapi_log_source_label(source: str) -> str:
+    labels = {
+        SMAPI_LOG_SOURCE_AUTO_DETECTED: "Auto-detected log path",
+        SMAPI_LOG_SOURCE_MANUAL: "Manually selected log path",
+        SMAPI_LOG_SOURCE_NONE: "No log source",
+    }
+    return labels.get(source, source.replace("_", " ").title())
+
+
+def _smapi_log_finding_kind_label(kind: str) -> str:
+    labels = {
+        SMAPI_LOG_ERROR: "Error",
+        SMAPI_LOG_WARNING: "Warning",
+        SMAPI_LOG_FAILED_MOD: "Failed mod",
+        SMAPI_LOG_MISSING_DEPENDENCY: "Missing dependency",
+        SMAPI_LOG_RUNTIME_ISSUE: "Runtime issue",
+    }
+    return labels.get(kind, kind.replace("_", " ").title())
+
+
+def _smapi_log_findings_count(report: SmapiLogReport) -> dict[str, int]:
+    counts = {
+        SMAPI_LOG_ERROR: 0,
+        SMAPI_LOG_WARNING: 0,
+        SMAPI_LOG_FAILED_MOD: 0,
+        SMAPI_LOG_MISSING_DEPENDENCY: 0,
+        SMAPI_LOG_RUNTIME_ISSUE: 0,
+    }
+    for finding in report.findings:
+        counts[finding.kind] = counts.get(finding.kind, 0) + 1
+    return counts
 
 
 def _scan_entry_kind_label(kind: str) -> str:

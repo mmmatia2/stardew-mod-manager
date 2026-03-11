@@ -27,6 +27,7 @@ from sdvmm.domain.models import (
     NexusIntegrationStatus,
     PackageInspectionResult,
     PackageModEntry,
+    SmapiLogReport,
     SmapiUpdateStatus,
     SandboxInstallPlan,
     SandboxInstallResult,
@@ -90,6 +91,9 @@ from sdvmm.services.game_launcher import (
 from sdvmm.services.smapi_update import (
     check_smapi_update_status as check_smapi_update_status_service,
     default_smapi_update_page_url,
+)
+from sdvmm.services.smapi_log import (
+    check_smapi_log_troubleshooting as check_smapi_log_troubleshooting_service,
 )
 
 
@@ -352,6 +356,40 @@ class AppShellService:
         if status is not None and status.update_page_url.strip():
             return status.update_page_url.strip()
         return default_smapi_update_page_url()
+
+    def check_smapi_log_troubleshooting(
+        self,
+        *,
+        game_path_text: str,
+        log_path_text: str = "",
+        existing_config: AppConfig | None = None,
+    ) -> SmapiLogReport:
+        manual_log_path: Path | None = None
+        raw_log_path = log_path_text.strip()
+        if raw_log_path:
+            manual_log_path = Path(raw_log_path).expanduser()
+            if not manual_log_path.exists():
+                raise AppShellError(f"SMAPI log file does not exist: {manual_log_path}")
+            if not manual_log_path.is_file():
+                raise AppShellError(f"SMAPI log path is not a file: {manual_log_path}")
+            if manual_log_path.suffix.casefold() not in {".txt", ".log"}:
+                raise AppShellError(
+                    f"SMAPI log file must be .txt or .log: {manual_log_path}"
+                )
+
+        resolved_game_path: Path | None = None
+        if not manual_log_path:
+            resolved_game_path = self._resolve_game_path(game_path_text, existing_config)
+        elif game_path_text.strip():
+            resolved_game_path = self._parse_and_validate_game_path(game_path_text)
+
+        try:
+            return check_smapi_log_troubleshooting_service(
+                game_path=resolved_game_path,
+                manual_log_path=manual_log_path,
+            )
+        except OSError as exc:
+            raise AppShellError(f"Could not inspect SMAPI log: {exc}") from exc
 
     def scan(self, mods_dir_text: str) -> ModsInventory:
         mods_path = self._parse_and_validate_mods_path(mods_dir_text)

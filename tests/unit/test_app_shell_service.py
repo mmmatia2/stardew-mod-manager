@@ -25,6 +25,7 @@ from sdvmm.domain.models import (
     ModUpdateStatus,
     NexusIntegrationStatus,
     RemoteModLink,
+    SmapiLogReport,
     SmapiUpdateStatus,
 )
 from sdvmm.domain.update_codes import UpdateState
@@ -242,6 +243,52 @@ def test_resolve_smapi_update_page_url_uses_status_url_when_available(tmp_path: 
     )
 
     assert AppShellService.resolve_smapi_update_page_url(status) == "https://example.test/releases/latest"
+
+
+def test_check_smapi_log_troubleshooting_accepts_manual_log_without_game_path(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    log_path = tmp_path / "SMAPI-latest.txt"
+    log_path.write_text("[SMAPI] test log\n", encoding="utf-8")
+
+    expected = SmapiLogReport(
+        state="parsed",
+        source="manual",
+        log_path=log_path,
+        game_path=None,
+        findings=tuple(),
+        notes=("ok",),
+        message="parsed",
+    )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        shell_service_module,
+        "check_smapi_log_troubleshooting_service",
+        lambda *, game_path, manual_log_path: expected,
+    )
+    try:
+        result = service.check_smapi_log_troubleshooting(
+            game_path_text="",
+            log_path_text=str(log_path),
+            existing_config=None,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert result == expected
+
+
+def test_check_smapi_log_troubleshooting_requires_game_path_for_auto_lookup(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+
+    with pytest.raises(AppShellError, match="Game directory is required"):
+        service.check_smapi_log_troubleshooting(
+            game_path_text="",
+            log_path_text="",
+            existing_config=None,
+        )
 
 
 def test_inspect_zip_rejects_missing_package_path(tmp_path: Path) -> None:
