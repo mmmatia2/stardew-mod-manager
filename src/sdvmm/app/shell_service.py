@@ -20,11 +20,14 @@ from sdvmm.domain.models import (
     ModDiscoveryResult,
     ModRemovalPlan,
     ModRemovalResult,
+    ModRollbackPlan,
+    ModRollbackResult,
     ModUpdateReport,
     ModsInventory,
     NexusIntegrationStatus,
     PackageInspectionResult,
     PackageModEntry,
+    SmapiUpdateStatus,
     SandboxInstallPlan,
     SandboxInstallResult,
 )
@@ -61,8 +64,10 @@ from sdvmm.services.sandbox_installer import (
     remove_mod_to_archive as remove_mod_to_archive_service,
 )
 from sdvmm.services.archive_manager import (
+    allocate_archive_destination,
     ArchiveManagerError,
     list_archived_mod_entries,
+    rollback_installed_mod_from_archive,
     restore_archived_mod_entry,
 )
 from sdvmm.services.update_metadata import (
@@ -76,6 +81,15 @@ from sdvmm.services.remote_requirements import evaluate_remote_requirements_for_
 from sdvmm.services.mod_discovery import (
     DiscoveryServiceError,
     search_discoverable_mods,
+)
+from sdvmm.services.game_launcher import (
+    GameLaunchError,
+    launch_game_process,
+    resolve_launch_command,
+)
+from sdvmm.services.smapi_update import (
+    check_smapi_update_status as check_smapi_update_status_service,
+    default_smapi_update_page_url,
 )
 
 
@@ -108,6 +122,14 @@ class ScanResult:
     target_kind: ScanTargetKind
     scan_path: Path
     inventory: ModsInventory
+
+
+@dataclass(frozen=True, slots=True)
+class LaunchStartResult:
+    mode: str
+    game_path: Path
+    executable_path: Path
+    pid: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +296,62 @@ class AppShellService:
     def detect_game_environment(self, game_path_text: str) -> GameEnvironmentStatus:
         game_path = self._parse_game_path_text(game_path_text)
         return detect_game_environment_service(game_path)
+
+    def launch_game_vanilla(
+        self,
+        *,
+        game_path_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> LaunchStartResult:
+        game_path = self._resolve_game_path(game_path_text, existing_config)
+        try:
+            command = resolve_launch_command(game_path=game_path, mode="vanilla")
+            pid = launch_game_process(command)
+        except GameLaunchError as exc:
+            raise AppShellError(str(exc)) from exc
+        return LaunchStartResult(
+            mode="vanilla",
+            game_path=game_path,
+            executable_path=command.executable_path,
+            pid=pid,
+        )
+
+    def launch_game_smapi(
+        self,
+        *,
+        game_path_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> LaunchStartResult:
+        game_path = self._resolve_game_path(game_path_text, existing_config)
+        try:
+            command = resolve_launch_command(game_path=game_path, mode="smapi")
+            pid = launch_game_process(command)
+        except GameLaunchError as exc:
+            raise AppShellError(str(exc)) from exc
+        return LaunchStartResult(
+            mode="smapi",
+            game_path=game_path,
+            executable_path=command.executable_path,
+            pid=pid,
+        )
+
+    def check_smapi_update_status(
+        self,
+        *,
+        game_path_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> SmapiUpdateStatus:
+        game_path = self._resolve_game_path(game_path_text, existing_config)
+        try:
+            return check_smapi_update_status_service(game_path=game_path)
+        except OSError as exc:
+            raise AppShellError(f"Could not check SMAPI update status: {exc}") from exc
+
+    @staticmethod
+    def resolve_smapi_update_page_url(status: SmapiUpdateStatus | None = None) -> str:
+        if status is not None and status.update_page_url.strip():
+            return status.update_page_url.strip()
+        return default_smapi_update_page_url()
 
     def scan(self, mods_dir_text: str) -> ModsInventory:
         mods_path = self._parse_and_validate_mods_path(mods_dir_text)
@@ -1085,6 +1163,162 @@ class AppShellService:
             destination_kind=plan.destination_kind,
         )
 
+    def list_mod_rollback_candidates(
+        self,
+        *,
+        scan_target: ScanTargetKind,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        mod_folder_path_text: str,
+        mod_unique_id_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> tuple[ArchivedModEntry, ...]:
+        source_kind = self._archive_source_for_scan_target(scan_target)
+        mods_path, archive_path = self._resolve_install_destination_paths(
+            install_target=scan_target,
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+        )
+        target_mod_path = self._parse_and_validate_selected_mod_path(
+            mods_path=mods_path,
+            mod_folder_path_text=mod_folder_path_text,
+        )
+        unique_id = mod_unique_id_text.strip()
+        if not unique_id:
+            raise AppShellError("Selected installed mod does not include a valid UniqueID.")
+
+        all_entries = list_archived_mod_entries(
+            archive_root=archive_path,
+            source_kind=source_kind,
+        )
+        unique_key = canonicalize_unique_id(unique_id)
+        folder_key = target_mod_path.name.casefold()
+        candidates = tuple(
+            entry
+            for entry in all_entries
+            if entry.unique_id is not None
+            and canonicalize_unique_id(entry.unique_id) == unique_key
+            and entry.target_folder_name.casefold() == folder_key
+        )
+        return tuple(
+            sorted(
+                candidates,
+                key=lambda entry: (
+                    _version_sort_key(entry.version),
+                    entry.archived_folder_name.casefold(),
+                ),
+                reverse=True,
+            )
+        )
+
+    def build_mod_rollback_plan(
+        self,
+        *,
+        scan_target: ScanTargetKind,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        mod_folder_path_text: str,
+        mod_unique_id_text: str,
+        mod_version_text: str,
+        archived_candidate_path_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> ModRollbackPlan:
+        _ = existing_config
+        source_kind = self._archive_source_for_scan_target(scan_target)
+        mods_path, archive_path = self._resolve_install_destination_paths(
+            install_target=scan_target,
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+        )
+        target_mod_path = self._parse_and_validate_selected_mod_path(
+            mods_path=mods_path,
+            mod_folder_path_text=mod_folder_path_text,
+        )
+        unique_id = mod_unique_id_text.strip()
+        if not unique_id:
+            raise AppShellError("Selected installed mod does not include a valid UniqueID.")
+
+        candidate_path_text = archived_candidate_path_text.strip()
+        if not candidate_path_text:
+            raise AppShellError("Select an archived rollback candidate first.")
+        candidate_path = Path(candidate_path_text).expanduser()
+
+        candidates = self.list_mod_rollback_candidates(
+            scan_target=scan_target,
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+            mod_folder_path_text=str(target_mod_path),
+            mod_unique_id_text=unique_id,
+        )
+        selected_candidate: ArchivedModEntry | None = None
+        for candidate in candidates:
+            if _paths_deterministically_match(candidate.archived_path, candidate_path):
+                selected_candidate = candidate
+                break
+        if selected_candidate is None:
+            raise AppShellError(
+                f"Selected archived rollback candidate is not a safe match: {candidate_path}"
+            )
+
+        current_archive_path = allocate_archive_destination(
+            archive_root=archive_path,
+            target_folder_name=target_mod_path.name,
+        )
+        return ModRollbackPlan(
+            destination_kind=scan_target,
+            mods_path=mods_path,
+            archive_path=archive_path,
+            current_mod_path=target_mod_path,
+            current_unique_id=unique_id,
+            current_version=mod_version_text.strip() or "<unknown>",
+            rollback_entry=selected_candidate,
+            current_archive_path=current_archive_path,
+        )
+
+    def execute_mod_rollback(
+        self,
+        plan: ModRollbackPlan,
+        *,
+        confirm_rollback: bool = False,
+    ) -> ModRollbackResult:
+        if not confirm_rollback:
+            raise AppShellError("Explicit confirmation is required before rollback.")
+
+        try:
+            archived_current_target, restored_target = rollback_installed_mod_from_archive(
+                current_mod_path=plan.current_mod_path,
+                mods_root=plan.mods_path,
+                archive_root=plan.archive_path,
+                archived_candidate_path=plan.rollback_entry.archived_path,
+            )
+            inventory = scan_mods_directory(
+                plan.mods_path,
+                excluded_paths=(plan.archive_path, plan.mods_path / _LEGACY_ARCHIVE_DIRNAME),
+            )
+        except ArchiveManagerError as exc:
+            raise AppShellError(str(exc)) from exc
+        except OSError as exc:
+            raise AppShellError(f"Mod rollback failed: {exc}") from exc
+
+        return ModRollbackResult(
+            plan=plan,
+            archived_current_target=archived_current_target,
+            restored_target=restored_target,
+            scan_context_path=plan.mods_path,
+            inventory=inventory,
+            destination_kind=plan.destination_kind,
+        )
+
     def evaluate_install_target_safety(
         self,
         *,
@@ -1458,6 +1692,36 @@ class AppShellService:
         return tuple(deduped)
 
     @staticmethod
+    def _archive_source_for_scan_target(scan_target: ScanTargetKind) -> ArchiveSourceKind:
+        if scan_target == SCAN_TARGET_CONFIGURED_REAL_MODS:
+            return ARCHIVE_SOURCE_REAL
+        if scan_target == SCAN_TARGET_SANDBOX_MODS:
+            return ARCHIVE_SOURCE_SANDBOX
+        raise AppShellError(f"Unknown scan target: {scan_target}")
+
+    @staticmethod
+    def _parse_and_validate_selected_mod_path(
+        *,
+        mods_path: Path,
+        mod_folder_path_text: str,
+    ) -> Path:
+        raw_target = mod_folder_path_text.strip()
+        if not raw_target:
+            raise AppShellError("Select an installed mod row first.")
+
+        target_mod_path = Path(raw_target).expanduser()
+        if not target_mod_path.exists() or not target_mod_path.is_dir():
+            raise AppShellError(f"Selected mod folder is not accessible: {target_mod_path}")
+
+        mods_root_resolved = mods_path.resolve()
+        target_resolved = target_mod_path.resolve()
+        if target_resolved.parent != mods_root_resolved:
+            raise AppShellError(
+                "Selected mod folder must be a direct child of the selected Mods destination."
+            )
+        return target_mod_path
+
+    @staticmethod
     def _parse_and_validate_game_path(game_path_text: str) -> Path:
         game_path = AppShellService._parse_game_path_text(game_path_text)
         if not game_path.exists():
@@ -1659,6 +1923,19 @@ def _is_path_within_or_equal(candidate: Path, container: Path) -> bool:
 def _sorted_unique_ids(values: Iterable[str]) -> tuple[str, ...]:
     unique = {str(value) for value in values if str(value).strip()}
     return tuple(sorted(unique, key=str.casefold))
+
+
+def _version_sort_key(version: str | None) -> tuple[int, ...]:
+    if not version:
+        return tuple()
+    numbers: list[int] = []
+    for token in version.split("."):
+        digits = "".join(ch for ch in token if ch.isdigit())
+        if not digits:
+            numbers.append(0)
+            continue
+        numbers.append(int(digits))
+    return tuple(numbers)
 
 
 def _discovery_entry_unique_id_keys(entry: ModDiscoveryEntry) -> tuple[str, ...]:

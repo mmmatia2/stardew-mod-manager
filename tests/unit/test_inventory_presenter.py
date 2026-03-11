@@ -5,11 +5,13 @@ from pathlib import Path
 from sdvmm.app.shell_service import DiscoveryContextCorrelation
 from sdvmm.app.inventory_presenter import (
     build_archive_restore_result_text,
+    build_mod_rollback_result_text,
     build_discovery_search_text,
     build_downloads_intake_text,
     build_environment_status_text,
     build_package_inspection_text,
     build_sandbox_install_plan_text,
+    build_smapi_update_status_text,
     build_update_report_text,
 )
 from sdvmm.domain.models import (
@@ -24,10 +26,13 @@ from sdvmm.domain.models import (
     ModsInventory,
     ModUpdateReport,
     ModUpdateStatus,
+    ModRollbackPlan,
+    ModRollbackResult,
     PackageFinding,
     PackageInspectionResult,
     PackageModEntry,
     PackageWarning,
+    SmapiUpdateStatus,
     SandboxInstallPlan,
     SandboxInstallPlanEntry,
 )
@@ -72,6 +77,25 @@ def test_environment_text_clarifies_invalid_path_next_step() -> None:
     assert "Invalid game path" in text
     assert "Recommended next step" in text
     assert "Pick the Stardew Valley install folder" in text
+
+
+def test_smapi_update_text_highlights_manual_update_guidance() -> None:
+    status = SmapiUpdateStatus(
+        state="update_available",
+        game_path=Path("/tmp/game"),
+        smapi_path=Path("/tmp/game/StardewModdingAPI"),
+        installed_version="4.4.0",
+        latest_version="4.5.1",
+        update_page_url="https://github.com/Pathoschild/SMAPI/releases/tag/4.5.1",
+        message="SMAPI update available: installed 4.4.0, latest 4.5.1.",
+    )
+
+    text = build_smapi_update_status_text(status)
+
+    assert "SMAPI Update Awareness" in text
+    assert "Status: SMAPI update available" in text
+    assert "Recommended next step" in text
+    assert "Open the SMAPI page and update SMAPI manually" in text
 
 
 def test_downloads_intake_text_shows_classification_summary_and_action() -> None:
@@ -261,3 +285,47 @@ def test_archive_restore_result_text_shows_destination_and_target_path() -> None
     assert "Archive restore completed" in text
     assert "Game Mods destination (real)" in text
     assert "/tmp/RealMods/RestoreReal" in text
+
+
+def test_mod_rollback_result_text_shows_destination_and_paths() -> None:
+    inventory = ModsInventory(
+        mods=tuple(),
+        parse_warnings=tuple(),
+        duplicate_unique_ids=tuple(),
+        missing_required_dependencies=tuple(),
+        scan_entry_findings=tuple(),
+        ignored_entries=tuple(),
+    )
+    result = ModRollbackResult(
+        plan=ModRollbackPlan(
+            destination_kind="sandbox_mods",
+            mods_path=Path("/tmp/SandboxMods"),
+            archive_path=Path("/tmp/SandboxArchive"),
+            current_mod_path=Path("/tmp/SandboxMods/SampleMod"),
+            current_unique_id="Sample.Mod",
+            current_version="2.0.0",
+            rollback_entry=ArchivedModEntry(
+                source_kind="sandbox_archive",
+                archive_root=Path("/tmp/SandboxArchive"),
+                archived_path=Path("/tmp/SandboxArchive/SampleMod__sdvmm_archive_001"),
+                archived_folder_name="SampleMod__sdvmm_archive_001",
+                target_folder_name="SampleMod",
+                mod_name="Sample Mod",
+                unique_id="Sample.Mod",
+                version="1.0.0",
+            ),
+            current_archive_path=Path("/tmp/SandboxArchive/SampleMod__sdvmm_archive_002"),
+        ),
+        archived_current_target=Path("/tmp/SandboxArchive/SampleMod__sdvmm_archive_002"),
+        restored_target=Path("/tmp/SandboxMods/SampleMod"),
+        scan_context_path=Path("/tmp/SandboxMods"),
+        inventory=inventory,
+        destination_kind="sandbox_mods",
+    )
+
+    text = build_mod_rollback_result_text(result)
+
+    assert "Mod rollback completed." in text
+    assert "Sandbox Mods destination" in text
+    assert "/tmp/SandboxArchive/SampleMod__sdvmm_archive_002" in text
+    assert "/tmp/SandboxMods/SampleMod" in text

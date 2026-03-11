@@ -14,8 +14,10 @@ from .sandbox_installer import (
     execute_sandbox_install_plan,
 )
 from .archive_manager import (
+    allocate_archive_destination,
     ArchiveManagerError,
     list_archived_mod_entries,
+    rollback_installed_mod_from_archive,
     restore_archived_mod_entry,
 )
 from .downloads_intake import initialize_known_zip_paths, poll_watched_directory
@@ -43,6 +45,14 @@ from .mod_discovery import (
     SMAPI_COMPATIBILITY_INDEX_URL,
     search_discoverable_mods,
 )
+from .game_launcher import GameLaunchError, LaunchCommand, launch_game_process, resolve_launch_command
+from .smapi_update import (
+    SMAPI_RELEASES_LATEST_URL,
+    SMAPI_RELEASES_PAGE_URL,
+    check_smapi_update_status,
+    default_smapi_update_page_url,
+    detect_installed_smapi_version,
+)
 
 __all__ = [
     "APP_STATE_VERSION",
@@ -55,6 +65,8 @@ __all__ = [
     "build_sandbox_install_plan",
     "execute_sandbox_install_plan",
     "list_archived_mod_entries",
+    "allocate_archive_destination",
+    "rollback_installed_mod_from_archive",
     "restore_archived_mod_entry",
     "initialize_known_zip_paths",
     "poll_watched_directory",
@@ -74,7 +86,16 @@ __all__ = [
     "DISCOVERY_INVALID_PAYLOAD",
     "DISCOVERY_REQUEST_FAILURE",
     "DiscoveryServiceError",
+    "GameLaunchError",
+    "LaunchCommand",
     "compare_versions",
+    "resolve_launch_command",
+    "launch_game_process",
+    "check_smapi_update_status",
+    "detect_installed_smapi_version",
+    "default_smapi_update_page_url",
+    "SMAPI_RELEASES_LATEST_URL",
+    "SMAPI_RELEASES_PAGE_URL",
     "mask_api_key",
     "normalize_nexus_api_key",
     "resolve_remote_link",

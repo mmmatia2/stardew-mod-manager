@@ -16,6 +16,7 @@ from sdvmm.domain.nexus_codes import NexusCredentialSource, NexusIntegrationStat
 from sdvmm.domain.package_codes import PackageFindingKind
 from sdvmm.domain.remote_requirement_codes import RemoteRequirementState
 from sdvmm.domain.scan_codes import ScanEntryKind
+from sdvmm.domain.smapi_codes import SmapiUpdateState
 from sdvmm.domain.update_codes import RemoteLinkProvider, UpdateState
 from sdvmm.domain.warning_codes import ParseWarningCode
 
@@ -49,6 +50,17 @@ class GameEnvironmentStatus:
     smapi_path: Path | None
     state_codes: tuple[EnvironmentState, ...]
     notes: tuple[str, ...] = tuple()
+
+
+@dataclass(frozen=True, slots=True)
+class SmapiUpdateStatus:
+    state: SmapiUpdateState
+    game_path: Path
+    smapi_path: Path | None
+    installed_version: str | None
+    latest_version: str | None
+    update_page_url: str
+    message: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +368,28 @@ class ArchiveRestorePlan:
 @dataclass(frozen=True, slots=True)
 class ArchiveRestoreResult:
     plan: ArchiveRestorePlan
+    restored_target: Path
+    scan_context_path: Path
+    inventory: ModsInventory
+    destination_kind: str = "sandbox_mods"
+
+
+@dataclass(frozen=True, slots=True)
+class ModRollbackPlan:
+    destination_kind: str
+    mods_path: Path
+    archive_path: Path
+    current_mod_path: Path
+    current_unique_id: str
+    current_version: str
+    rollback_entry: ArchivedModEntry
+    current_archive_path: Path
+
+
+@dataclass(frozen=True, slots=True)
+class ModRollbackResult:
+    plan: ModRollbackPlan
+    archived_current_target: Path
     restored_target: Path
     scan_context_path: Path
     inventory: ModsInventory

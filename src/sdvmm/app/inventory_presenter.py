@@ -24,10 +24,13 @@ from sdvmm.domain.models import (
     ModDiscoveryEntry,
     ModDiscoveryResult,
     ModRemovalResult,
+    ModRollbackPlan,
+    ModRollbackResult,
     ModUpdateReport,
     ModsInventory,
     PackageInspectionResult,
     RemoteRequirementGuidance,
+    SmapiUpdateStatus,
     SandboxInstallPlan,
     SandboxInstallResult,
 )
@@ -36,6 +39,13 @@ from sdvmm.domain.remote_requirement_codes import (
     REQUIREMENTS_ABSENT,
     REQUIREMENTS_PRESENT,
     REQUIREMENTS_UNAVAILABLE,
+)
+from sdvmm.domain.smapi_codes import (
+    SMAPI_DETECTED_VERSION_KNOWN,
+    SMAPI_NOT_DETECTED_FOR_UPDATE,
+    SMAPI_UNABLE_TO_DETERMINE,
+    SMAPI_UP_TO_DATE,
+    SMAPI_UPDATE_AVAILABLE,
 )
 
 
@@ -153,6 +163,35 @@ def build_environment_status_text(status: GameEnvironmentStatus) -> str:
         lines.append("- SMAPI not detected. Install/verify SMAPI if your mods require it.")
     else:
         lines.append("- Environment looks usable. Save config and run Scan.")
+
+    return "\n".join(lines)
+
+
+def build_smapi_update_status_text(status: SmapiUpdateStatus) -> str:
+    lines: list[str] = []
+    lines.append("SMAPI Update Awareness")
+    lines.append(f"- Game path: {status.game_path}")
+    lines.append(f"- SMAPI entrypoint: {status.smapi_path or '<not detected>'}")
+    lines.append(f"- Installed SMAPI version: {status.installed_version or '<unknown>'}")
+    lines.append(f"- Latest known SMAPI version: {status.latest_version or '<unknown>'}")
+    lines.append(f"- Update source page: {status.update_page_url}")
+    lines.append(f"- Status: {_smapi_update_state_label(status.state)} (code: {status.state})")
+    lines.append(f"- Message: {status.message}")
+
+    lines.append("")
+    lines.append("Recommended next step:")
+    if status.state == SMAPI_NOT_DETECTED_FOR_UPDATE:
+        lines.append("- Install SMAPI first if you plan to launch with SMAPI mods.")
+    elif status.state == SMAPI_UPDATE_AVAILABLE:
+        lines.append("- Open the SMAPI page and update SMAPI manually.")
+    elif status.state == SMAPI_UP_TO_DATE:
+        lines.append("- SMAPI is current. Continue normal mod workflows.")
+    elif status.state == SMAPI_DETECTED_VERSION_KNOWN:
+        lines.append("- SMAPI version is known; retry check later for latest remote version.")
+    elif status.state == SMAPI_UNABLE_TO_DETERMINE:
+        lines.append("- Fix game path/SMAPI detection, then run SMAPI check again.")
+    else:
+        lines.append("- Re-run SMAPI check if environment changed.")
 
     return "\n".join(lines)
 
@@ -374,6 +413,47 @@ def build_mod_removal_result_text(result: ModRemovalResult) -> str:
     lines.append("")
     lines.append("Recommended next step:")
     lines.append("- Review scan findings and dependencies after removal.")
+    lines.append("")
+    lines.append(build_findings_text(result.inventory))
+    return "\n".join(lines)
+
+
+def build_mod_rollback_plan_text(plan: ModRollbackPlan) -> str:
+    lines: list[str] = []
+    destination_label = _install_destination_label(plan.destination_kind)
+    entry = plan.rollback_entry
+    lines.append("Rollback Plan")
+    lines.append(f"- Destination type: {destination_label}")
+    lines.append(f"- Current installed folder: {plan.current_mod_path}")
+    lines.append(f"- Current installed version: {plan.current_version}")
+    lines.append(
+        f"- Current installed UniqueID: {plan.current_unique_id}"
+    )
+    lines.append(
+        "- Archived rollback candidate: "
+        f"{entry.mod_name or '<unknown>'} | "
+        f"UniqueID: {entry.unique_id or '<unknown>'} | "
+        f"Version: {entry.version or '<unknown>'}"
+    )
+    lines.append(f"- Archived candidate folder: {entry.archived_path}")
+    lines.append(f"- Current version will be archived to: {plan.current_archive_path}")
+    lines.append("")
+    lines.append("Recommended next step:")
+    lines.append("- Confirm rollback explicitly to archive current version and restore selected archived version.")
+    return "\n".join(lines)
+
+
+def build_mod_rollback_result_text(result: ModRollbackResult) -> str:
+    lines: list[str] = []
+    destination_label = _install_destination_label(result.destination_kind)
+    lines.append("Mod rollback completed.")
+    lines.append(f"- Destination type: {destination_label}")
+    lines.append(f"- Previous current version archived to: {result.archived_current_target}")
+    lines.append(f"- Restored archived version to active Mods: {result.restored_target}")
+    lines.append(f"- Scan context: {result.scan_context_path}")
+    lines.append("")
+    lines.append("Recommended next step:")
+    lines.append("- Review scan findings and dependency warnings after rollback.")
     lines.append("")
     lines.append(build_findings_text(result.inventory))
     return "\n".join(lines)
@@ -762,6 +842,17 @@ def _environment_state_label(state: str) -> str:
         SMAPI_DETECTED: "SMAPI detected",
         SMAPI_NOT_DETECTED: "SMAPI not detected",
         INVALID_GAME_PATH: "Invalid game path",
+    }
+    return labels.get(state, state.replace("_", " ").title())
+
+
+def _smapi_update_state_label(state: str) -> str:
+    labels = {
+        SMAPI_NOT_DETECTED_FOR_UPDATE: "SMAPI not detected",
+        SMAPI_DETECTED_VERSION_KNOWN: "SMAPI detected (version known)",
+        SMAPI_UPDATE_AVAILABLE: "SMAPI update available",
+        SMAPI_UP_TO_DATE: "SMAPI up to date",
+        SMAPI_UNABLE_TO_DETERMINE: "Unable to determine SMAPI status",
     }
     return labels.get(state, state.replace("_", " ").title())
 

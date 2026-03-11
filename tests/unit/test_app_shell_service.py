@@ -25,6 +25,7 @@ from sdvmm.domain.models import (
     ModUpdateStatus,
     NexusIntegrationStatus,
     RemoteModLink,
+    SmapiUpdateStatus,
 )
 from sdvmm.domain.update_codes import UpdateState
 from sdvmm.services.app_state_store import save_app_config
@@ -143,6 +144,104 @@ def test_scan_with_target_uses_sandbox_mods_path(tmp_path: Path) -> None:
     assert result.scan_path == sandbox_mods
     assert len(result.inventory.mods) == 1
     assert result.inventory.mods[0].unique_id == "Sandbox.Mod"
+
+
+def test_launch_game_vanilla_uses_saved_game_path_when_input_empty(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    game_path.mkdir()
+    executable = game_path / "Stardew Valley"
+    executable.write_text("", encoding="utf-8")
+    config = AppConfig(
+        game_path=game_path,
+        mods_path=tmp_path / "Mods",
+        app_data_path=tmp_path / "AppData",
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_launch(command):
+        captured["command"] = command
+        return 31337
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(shell_service_module, "launch_game_process", _fake_launch)
+    try:
+        result = service.launch_game_vanilla(game_path_text="", existing_config=config)
+    finally:
+        monkeypatch.undo()
+
+    command = captured.get("command")
+    assert command is not None
+    assert result.mode == "vanilla"
+    assert result.game_path == game_path
+    assert result.executable_path == executable
+    assert result.pid == 31337
+
+
+def test_launch_game_smapi_is_blocked_when_not_detected(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    game_path.mkdir()
+    (game_path / "Stardew Valley").write_text("", encoding="utf-8")
+
+    with pytest.raises(AppShellError, match="SMAPI launch is unavailable"):
+        service.launch_game_smapi(game_path_text=str(game_path), existing_config=None)
+
+
+def test_check_smapi_update_status_uses_saved_game_path_when_input_empty(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    game_path.mkdir()
+    config = AppConfig(
+        game_path=game_path,
+        mods_path=tmp_path / "Mods",
+        app_data_path=tmp_path / "AppData",
+    )
+
+    expected = SmapiUpdateStatus(
+        state="up_to_date",
+        game_path=game_path,
+        smapi_path=game_path / "StardewModdingAPI",
+        installed_version="4.5.1",
+        latest_version="4.5.1",
+        update_page_url="https://example.test/smapi",
+        message="SMAPI is up to date.",
+    )
+
+    captured: dict[str, Path] = {}
+
+    def _fake_check_smapi_update_status(*, game_path: Path) -> SmapiUpdateStatus:
+        captured["game_path"] = game_path
+        return expected
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        shell_service_module,
+        "check_smapi_update_status_service",
+        _fake_check_smapi_update_status,
+    )
+    try:
+        result = service.check_smapi_update_status(game_path_text="", existing_config=config)
+    finally:
+        monkeypatch.undo()
+
+    assert captured["game_path"] == game_path
+    assert result == expected
+
+
+def test_resolve_smapi_update_page_url_uses_status_url_when_available(tmp_path: Path) -> None:
+    _ = tmp_path
+    status = SmapiUpdateStatus(
+        state="update_available",
+        game_path=Path("/tmp/game"),
+        smapi_path=Path("/tmp/game/StardewModdingAPI"),
+        installed_version="4.4.0",
+        latest_version="4.5.1",
+        update_page_url="https://example.test/releases/latest",
+        message="Update available",
+    )
+
+    assert AppShellService.resolve_smapi_update_page_url(status) == "https://example.test/releases/latest"
 
 
 def test_inspect_zip_rejects_missing_package_path(tmp_path: Path) -> None:
@@ -843,6 +942,209 @@ def test_build_archive_restore_plan_blocks_when_restore_target_exists(tmp_path: 
             real_archive_path_text=str(real_archive),
             sandbox_archive_path_text="",
         )
+
+
+def test_list_mod_rollback_candidates_matches_real_destination_by_unique_id_and_folder(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+
+    _create_mod(real_mods, "SampleMod", "Sample.Mod")
+    _create_archived_entry(
+        real_archive / "SampleMod__sdvmm_archive_001",
+        unique_id="Sample.Mod",
+        version="1.0.0",
+    )
+    _create_archived_entry(
+        real_archive / "OtherFolder__sdvmm_archive_001",
+        unique_id="Sample.Mod",
+        version="0.9.0",
+    )
+    _create_archived_entry(
+        real_archive / "SampleMod__sdvmm_archive_002",
+        unique_id="Different.Mod",
+        version="1.0.0",
+    )
+    existing_config = AppConfig(
+        game_path=tmp_path / "Game",
+        mods_path=real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=sandbox_mods,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+    )
+
+    candidates = service.list_mod_rollback_candidates(
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+        mod_folder_path_text=str(real_mods / "SampleMod"),
+        mod_unique_id_text="Sample.Mod",
+        existing_config=existing_config,
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].archived_path == real_archive / "SampleMod__sdvmm_archive_001"
+
+
+def test_list_mod_rollback_candidates_matches_sandbox_destination_by_unique_id_and_folder(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+
+    _create_mod(sandbox_mods, "SampleMod", "Sample.Mod")
+    _create_archived_entry(
+        sandbox_archive / "SampleMod__sdvmm_archive_001",
+        unique_id="Sample.Mod",
+        version="1.0.0",
+    )
+    _create_archived_entry(
+        sandbox_archive / "SampleMod__sdvmm_archive_002",
+        unique_id="Different.Mod",
+        version="1.0.0",
+    )
+    existing_config = AppConfig(
+        game_path=tmp_path / "Game",
+        mods_path=real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=sandbox_mods,
+        install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+    )
+
+    candidates = service.list_mod_rollback_candidates(
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+        mod_folder_path_text=str(sandbox_mods / "SampleMod"),
+        mod_unique_id_text="Sample.Mod",
+        existing_config=existing_config,
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].archived_path == sandbox_archive / "SampleMod__sdvmm_archive_001"
+
+
+def test_execute_mod_rollback_requires_explicit_confirmation(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    _create_mod(real_mods, "SampleMod", "Sample.Mod")
+    candidate = _create_archived_entry(
+        real_archive / "SampleMod__sdvmm_archive_001",
+        unique_id="Sample.Mod",
+        version="1.0.0",
+    )
+
+    plan = service.build_mod_rollback_plan(
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+        mod_folder_path_text=str(real_mods / "SampleMod"),
+        mod_unique_id_text="Sample.Mod",
+        mod_version_text="2.0.0",
+        archived_candidate_path_text=str(candidate),
+    )
+
+    with pytest.raises(AppShellError, match="Explicit confirmation is required"):
+        service.execute_mod_rollback(plan, confirm_rollback=False)
+
+
+def test_execute_mod_rollback_archives_current_then_restores_archived_version_and_rescans(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    current = _create_mod(real_mods, "SampleMod", "Sample.Mod")
+    (current / "version-marker.txt").write_text("current-2.0.0", encoding="utf-8")
+    candidate = _create_archived_entry(
+        real_archive / "SampleMod__sdvmm_archive_001",
+        unique_id="Sample.Mod",
+        version="1.0.0",
+    )
+    (candidate / "version-marker.txt").write_text("archived-1.0.0", encoding="utf-8")
+    _create_mod(real_mods, "Keep", "Sample.Keep")
+
+    plan = service.build_mod_rollback_plan(
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+        mod_folder_path_text=str(current),
+        mod_unique_id_text="Sample.Mod",
+        mod_version_text="2.0.0",
+        archived_candidate_path_text=str(candidate),
+    )
+    result = service.execute_mod_rollback(plan, confirm_rollback=True)
+
+    assert result.destination_kind == SCAN_TARGET_CONFIGURED_REAL_MODS
+    assert result.archived_current_target.parent == real_archive
+    assert result.archived_current_target.exists()
+    assert (result.archived_current_target / "version-marker.txt").read_text(encoding="utf-8") == "current-2.0.0"
+    assert result.restored_target == current
+    assert (result.restored_target / "version-marker.txt").read_text(encoding="utf-8") == "archived-1.0.0"
+    assert result.scan_context_path == real_mods
+    assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Mod", "Sample.Keep"}
+
+
+def test_execute_mod_rollback_for_sandbox_destination_rescans_sandbox(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    current = _create_mod(sandbox_mods, "SampleMod", "Sample.Mod")
+    candidate = _create_archived_entry(
+        sandbox_archive / "SampleMod__sdvmm_archive_001",
+        unique_id="Sample.Mod",
+        version="1.0.0",
+    )
+    _create_mod(sandbox_mods, "Keep", "Sample.Keep")
+
+    plan = service.build_mod_rollback_plan(
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+        mod_folder_path_text=str(current),
+        mod_unique_id_text="Sample.Mod",
+        mod_version_text="2.0.0",
+        archived_candidate_path_text=str(candidate),
+    )
+    result = service.execute_mod_rollback(plan, confirm_rollback=True)
+
+    assert result.destination_kind == SCAN_TARGET_SANDBOX_MODS
+    assert result.scan_context_path == sandbox_mods
+    assert {mod.unique_id for mod in result.inventory.mods} == {"Sample.Mod", "Sample.Keep"}
 
 
 def test_build_install_plan_blocks_real_destination_mismatch(tmp_path: Path) -> None:
@@ -1934,7 +2236,7 @@ def _update_report(*statuses: ModUpdateStatus) -> ModUpdateReport:
     return ModUpdateReport(statuses=tuple(statuses))
 
 
-def _create_mod(mods_root: Path, folder_name: str, unique_id: str) -> None:
+def _create_mod(mods_root: Path, folder_name: str, unique_id: str) -> Path:
     mod_path = mods_root / folder_name
     mod_path.mkdir(parents=True, exist_ok=True)
     (mod_path / "manifest.json").write_text(
@@ -1947,3 +2249,19 @@ def _create_mod(mods_root: Path, folder_name: str, unique_id: str) -> None:
         ),
         encoding="utf-8",
     )
+    return mod_path
+
+
+def _create_archived_entry(archived_path: Path, *, unique_id: str, version: str) -> Path:
+    archived_path.mkdir(parents=True, exist_ok=True)
+    (archived_path / "manifest.json").write_text(
+        (
+            "{"
+            f'"Name":"{archived_path.name}",'
+            f'"UniqueID":"{unique_id}",'
+            f'"Version":"{version}"'
+            "}"
+        ),
+        encoding="utf-8",
+    )
+    return archived_path

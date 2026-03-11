@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -35,6 +36,8 @@ from sdvmm.app.inventory_presenter import (
     build_archive_listing_text,
     build_archive_restore_result_text,
     build_dependency_preflight_text,
+    build_mod_rollback_plan_text,
+    build_mod_rollback_result_text,
     build_discovery_search_text,
     build_downloads_intake_text,
     build_environment_status_text,
@@ -44,6 +47,7 @@ from sdvmm.app.inventory_presenter import (
     build_package_inspection_text,
     build_sandbox_install_plan_text,
     build_sandbox_install_result_text,
+    build_smapi_update_status_text,
     build_update_report_text,
 )
 from sdvmm.app.table_filters import row_matches_filter
@@ -68,12 +72,21 @@ from sdvmm.domain.models import (
     ArchiveRestoreResult,
     ArchivedModEntry,
     ModRemovalResult,
+    ModRollbackResult,
     ModUpdateStatus,
     ModUpdateReport,
     ModsInventory,
+    SmapiUpdateStatus,
     SandboxInstallPlan,
 )
 from sdvmm.domain.unique_id import canonicalize_unique_id
+from sdvmm.domain.smapi_codes import (
+    SMAPI_DETECTED_VERSION_KNOWN,
+    SMAPI_NOT_DETECTED_FOR_UPDATE,
+    SMAPI_UNABLE_TO_DETERMINE,
+    SMAPI_UP_TO_DATE,
+    SMAPI_UPDATE_AVAILABLE,
+)
 from sdvmm.ui.background_task import BackgroundTask
 
 _ROLE_MOD_UPDATE_STATUS = int(Qt.ItemDataRole.UserRole) + 1
@@ -100,13 +113,22 @@ class MainWindow(QMainWindow):
         self._archived_entries: tuple[ArchivedModEntry, ...] = tuple()
         self._guided_update_unique_ids: tuple[str, ...] = tuple()
         self._last_environment_status: GameEnvironmentStatus | None = None
+        self._last_smapi_update_status: SmapiUpdateStatus | None = None
         self._thread_pool = QThreadPool.globalInstance()
         self._active_operation_name: str | None = None
         self._active_background_task: BackgroundTask | None = None
         self._background_action_buttons: tuple[QPushButton, ...] = tuple()
 
         self.setWindowTitle("Stardew Mod Manager (Sandbox-first)")
-        self.resize(950, 600)
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowTitleHint
+            | Qt.WindowType.WindowSystemMenuHint
+            | Qt.WindowType.WindowMinMaxButtonsHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
+        self.setMinimumSize(980, 640)
+        self.resize(1360, 860)
 
         self._game_path_input = QLineEdit()
         self._game_path_input.setPlaceholderText("/path/to/Stardew Valley")
@@ -216,6 +238,7 @@ class MainWindow(QMainWindow):
         self._scan_context_label = QLabel("Not set")
         self._install_context_label = QLabel("Not set")
         self._environment_status_label = QLabel("Not checked")
+        self._smapi_update_status_label = QLabel("Not checked")
         self._nexus_status_label = QLabel("Not configured")
         self._watch_status_label = QLabel("Stopped")
         self._operation_state_label = QLabel("Idle")
@@ -271,24 +294,27 @@ class MainWindow(QMainWindow):
         context_group = QGroupBox("Context")
         context_layout = QGridLayout(context_group)
         context_layout.setContentsMargins(8, 6, 8, 6)
-        context_layout.setHorizontalSpacing(10)
-        context_layout.setVerticalSpacing(4)
-        context_layout.addWidget(QLabel("Environment"), 0, 0)
+        context_layout.setHorizontalSpacing(8)
+        context_layout.setVerticalSpacing(3)
+        context_layout.addWidget(_context_caption("Environment"), 0, 0)
         context_layout.addWidget(self._environment_status_label, 0, 1)
-        context_layout.addWidget(QLabel("Nexus"), 0, 2)
-        context_layout.addWidget(self._nexus_status_label, 0, 3)
-        context_layout.addWidget(QLabel("Watcher"), 0, 4)
-        context_layout.addWidget(self._watch_status_label, 0, 5)
-        context_layout.addWidget(QLabel("Operation"), 0, 6)
-        context_layout.addWidget(self._operation_state_label, 0, 7)
-        context_layout.addWidget(QLabel("Scan source"), 1, 0)
-        context_layout.addWidget(self._scan_context_label, 1, 1, 1, 2)
-        context_layout.addWidget(QLabel("Install destination"), 1, 3)
-        context_layout.addWidget(self._install_context_label, 1, 4, 1, 4)
-        context_layout.setColumnStretch(1, 1)
-        context_layout.setColumnStretch(3, 1)
-        context_layout.setColumnStretch(5, 1)
+        context_layout.addWidget(_context_caption("SMAPI update"), 0, 2)
+        context_layout.addWidget(self._smapi_update_status_label, 0, 3)
+        context_layout.addWidget(_context_caption("Nexus"), 0, 4)
+        context_layout.addWidget(self._nexus_status_label, 0, 5)
+        context_layout.addWidget(_context_caption("Watcher"), 0, 6)
+        context_layout.addWidget(self._watch_status_label, 0, 7)
+        context_layout.addWidget(_context_caption("Scan source"), 1, 0)
+        context_layout.addWidget(self._scan_context_label, 1, 1, 1, 3)
+        context_layout.addWidget(_context_caption("Install destination"), 1, 4)
+        context_layout.addWidget(self._install_context_label, 1, 5, 1, 2)
+        context_layout.addWidget(_context_caption("Operation"), 1, 7)
+        context_layout.addWidget(self._operation_state_label, 1, 8)
+        context_layout.setColumnStretch(1, 2)
+        context_layout.setColumnStretch(3, 2)
+        context_layout.setColumnStretch(5, 2)
         context_layout.setColumnStretch(7, 1)
+        context_layout.setColumnStretch(8, 2)
         root_layout.addWidget(context_group)
 
         self._setup_toggle = QCheckBox("Show setup and path configuration")
@@ -353,32 +379,55 @@ class MainWindow(QMainWindow):
         workspace_splitter = QSplitter()
         workspace_splitter.setChildrenCollapsible(False)
         workspace_splitter.setHandleWidth(6)
+        workspace_splitter.setOpaqueResize(False)
 
         inventory_group = QGroupBox("Installed Mods Workspace")
+        inventory_group.setMinimumWidth(560)
         inventory_layout = QVBoxLayout(inventory_group)
         inventory_layout.setContentsMargins(8, 6, 8, 6)
         inventory_layout.setSpacing(5)
-        inventory_controls = QHBoxLayout()
-        inventory_controls.setSpacing(6)
-        inventory_controls.addWidget(QLabel("Scan source"))
-        inventory_controls.addWidget(self._scan_target_combo)
+        inventory_primary_controls = QHBoxLayout()
+        inventory_primary_controls.setSpacing(6)
+        inventory_primary_controls.addWidget(QLabel("Scan source"))
+        inventory_primary_controls.addWidget(self._scan_target_combo)
         self._scan_button = QPushButton("Scan")
         self._scan_button.clicked.connect(self._on_scan)
-        inventory_controls.addWidget(self._scan_button)
+        inventory_primary_controls.addWidget(self._scan_button)
         self._check_updates_button = QPushButton("Check updates")
         self._check_updates_button.clicked.connect(self._on_check_updates)
-        inventory_controls.addWidget(self._check_updates_button)
+        inventory_primary_controls.addWidget(self._check_updates_button)
+        self._check_smapi_update_button = QPushButton("Check SMAPI")
+        self._check_smapi_update_button.clicked.connect(self._on_check_smapi_update)
+        inventory_primary_controls.addWidget(self._check_smapi_update_button)
+        self._open_smapi_page_button = QPushButton("Open SMAPI page")
+        self._open_smapi_page_button.clicked.connect(self._on_open_smapi_page)
+        inventory_primary_controls.addWidget(self._open_smapi_page_button)
+        self._launch_vanilla_button = QPushButton("Launch vanilla")
+        self._launch_vanilla_button.clicked.connect(self._on_launch_vanilla)
+        inventory_primary_controls.addWidget(self._launch_vanilla_button)
+        self._launch_smapi_button = QPushButton("Launch with SMAPI")
+        self._launch_smapi_button.clicked.connect(self._on_launch_smapi)
+        inventory_primary_controls.addWidget(self._launch_smapi_button)
         open_remote_button = QPushButton("Open remote page")
         open_remote_button.clicked.connect(self._on_open_remote_page)
-        inventory_controls.addWidget(open_remote_button)
+        inventory_primary_controls.addWidget(open_remote_button)
+        inventory_primary_controls.addStretch(1)
+
+        inventory_secondary_controls = QHBoxLayout()
+        inventory_secondary_controls.setSpacing(6)
         self._remove_mod_button = QPushButton("Remove selected (archive)")
         self._remove_mod_button.clicked.connect(self._on_remove_selected_mod)
-        inventory_controls.addWidget(self._remove_mod_button)
-        inventory_controls.addWidget(QLabel("Filter"))
-        inventory_controls.addWidget(self._mods_filter_input, 1)
-        inventory_controls.addWidget(self._mods_filter_stats_label)
-        inventory_controls.addStretch(1)
-        inventory_layout.addLayout(inventory_controls)
+        inventory_secondary_controls.addWidget(self._remove_mod_button)
+        self._rollback_mod_button = QPushButton("Rollback selected")
+        self._rollback_mod_button.clicked.connect(self._on_rollback_selected_mod)
+        inventory_secondary_controls.addWidget(self._rollback_mod_button)
+        inventory_secondary_controls.addWidget(QLabel("Filter"))
+        inventory_secondary_controls.addWidget(self._mods_filter_input, 1)
+        inventory_secondary_controls.addWidget(self._mods_filter_stats_label)
+        inventory_secondary_controls.addStretch(1)
+
+        inventory_layout.addLayout(inventory_primary_controls)
+        inventory_layout.addLayout(inventory_secondary_controls)
         flow_hint_label = QLabel(
             "Flow: Scan -> Check updates -> Open remote page -> manual download -> watcher intake -> plan/install."
         )
@@ -392,6 +441,7 @@ class MainWindow(QMainWindow):
         workspace_splitter.addWidget(inventory_group)
 
         context_tabs = QTabWidget()
+        context_tabs.setMinimumWidth(480)
 
         discovery_tab = QWidget()
         discovery_layout = QVBoxLayout(discovery_tab)
@@ -562,6 +612,9 @@ class MainWindow(QMainWindow):
         context_tabs.addTab(plan_tab, "Plan & Install")
 
         workspace_splitter.addWidget(context_tabs)
+        workspace_splitter.setCollapsible(0, False)
+        workspace_splitter.setCollapsible(1, False)
+        workspace_splitter.setSizes([760, 620])
         workspace_splitter.setStretchFactor(0, 3)
         workspace_splitter.setStretchFactor(1, 4)
         root_layout.addWidget(workspace_splitter, 1)
@@ -595,10 +648,14 @@ class MainWindow(QMainWindow):
         self._background_action_buttons = (
             self._scan_button,
             self._check_updates_button,
+            self._check_smapi_update_button,
             self._search_mods_button,
             self._remove_mod_button,
+            self._rollback_mod_button,
             self._refresh_archives_button,
             self._restore_archived_button,
+            self._launch_vanilla_button,
+            self._launch_smapi_button,
         )
 
         self.setCentralWidget(container)
@@ -751,8 +808,43 @@ class MainWindow(QMainWindow):
             self._mods_path_input.setText(str(status.mods_path))
 
         self._environment_status_label.setText(_environment_summary_label(status))
+        if status.smapi_path is None:
+            self._smapi_update_status_label.setText("SMAPI not detected")
+            self._smapi_update_status_label.setToolTip(
+                "SMAPI entrypoint was not detected for this game path."
+            )
         self._set_details_text(build_environment_status_text(status))
         self._set_status("Environment detection complete.")
+
+    def _on_launch_vanilla(self) -> None:
+        try:
+            result = self._shell_service.launch_game_vanilla(
+                game_path_text=self._game_path_input.text(),
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            QMessageBox.critical(self, "Vanilla launch failed", str(exc))
+            self._set_status(str(exc))
+            return
+
+        self._set_status(
+            f"Vanilla launch started (PID {result.pid}): {result.executable_path}"
+        )
+
+    def _on_launch_smapi(self) -> None:
+        try:
+            result = self._shell_service.launch_game_smapi(
+                game_path_text=self._game_path_input.text(),
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            QMessageBox.critical(self, "SMAPI launch failed", str(exc))
+            self._set_status(str(exc))
+            return
+
+        self._set_status(
+            f"SMAPI launch started (PID {result.pid}): {result.executable_path}"
+        )
 
     def _on_scan(self) -> None:
         self._run_background_operation(
@@ -895,6 +987,35 @@ class MainWindow(QMainWindow):
         self._recompute_intake_correlations()
         self._refresh_discovery_correlations()
         self._set_status(f"Update check complete: {len(report.statuses)} mod(s)")
+
+    def _on_check_smapi_update(self) -> None:
+        self._run_background_operation(
+            operation_name="SMAPI check",
+            running_label="SMAPI check",
+            started_status="Checking SMAPI version/update status...",
+            error_title="SMAPI check failed",
+            task_fn=lambda: self._shell_service.check_smapi_update_status(
+                game_path_text=self._game_path_input.text(),
+                existing_config=self._config,
+            ),
+            on_success=self._on_check_smapi_update_completed,
+        )
+
+    def _on_check_smapi_update_completed(self, status: SmapiUpdateStatus) -> None:
+        self._last_smapi_update_status = status
+        self._smapi_update_status_label.setText(_smapi_update_summary_label(status))
+        self._smapi_update_status_label.setToolTip(status.message)
+        self._set_details_text(build_smapi_update_status_text(status))
+        self._set_status(status.message)
+
+    def _on_open_smapi_page(self) -> None:
+        url = self._shell_service.resolve_smapi_update_page_url(self._last_smapi_update_status)
+        if not QDesktopServices.openUrl(QUrl(url)):
+            message = f"Could not open SMAPI page: {url}"
+            QMessageBox.critical(self, "Open failed", message)
+            self._set_status(message)
+            return
+        self._set_status(f"Opened SMAPI page: {url}")
 
     def _on_search_discovery(self) -> None:
         query_text = self._discovery_query_input.text()
@@ -1153,6 +1274,167 @@ class MainWindow(QMainWindow):
         )
         self._set_details_text(build_mod_removal_result_text(result))
         self._set_status(f"Mod removed to archive: {result.archived_target.name}")
+
+    def _on_rollback_selected_mod(self) -> None:
+        row = self._mods_table.currentRow()
+        if row < 0:
+            message = "Select an installed mod row first."
+            QMessageBox.warning(self, "No selection", message)
+            self._set_status(message)
+            return
+
+        name_item = self._mods_table.item(row, 0)
+        unique_id_item = self._mods_table.item(row, 1)
+        version_item = self._mods_table.item(row, 2)
+        if name_item is None or unique_id_item is None or version_item is None:
+            message = "Selected mod row is invalid."
+            QMessageBox.warning(self, "Invalid selection", message)
+            self._set_status(message)
+            return
+
+        mod_name = name_item.text().strip() or "<unknown>"
+        mod_unique_id = unique_id_item.text().strip()
+        mod_version = version_item.text().strip() or "<unknown>"
+        mod_folder_path = name_item.data(_ROLE_MOD_FOLDER_PATH)
+        if not isinstance(mod_folder_path, str) or not mod_folder_path.strip():
+            message = "Selected mod row does not include a valid folder path."
+            QMessageBox.warning(self, "Invalid selection", message)
+            self._set_status(message)
+            return
+
+        try:
+            candidates = self._shell_service.list_mod_rollback_candidates(
+                scan_target=self._current_scan_target(),
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                mod_folder_path_text=mod_folder_path,
+                mod_unique_id_text=mod_unique_id,
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            QMessageBox.critical(self, "Rollback candidates failed", str(exc))
+            self._set_status(str(exc))
+            return
+
+        if not candidates:
+            message = (
+                "No safe rollback candidates found for selected mod. "
+                "Rollback requires matching archived entries by UniqueID and folder."
+            )
+            QMessageBox.information(self, "No rollback candidates", message)
+            self._set_status(message)
+            return
+
+        selected_candidate = candidates[0]
+        if len(candidates) > 1:
+            labels = [
+                (
+                    f"{entry.version or '<unknown version>'} | "
+                    f"{entry.archived_folder_name} | "
+                    f"{entry.archived_path.name}"
+                )
+                for entry in candidates
+            ]
+            selected_label, accepted = QInputDialog.getItem(
+                self,
+                "Select rollback candidate",
+                "Archived version:",
+                labels,
+                0,
+                False,
+            )
+            if not accepted:
+                self._set_status("Rollback cancelled.")
+                return
+            selected_index = labels.index(selected_label)
+            selected_candidate = candidates[selected_index]
+
+        try:
+            plan = self._shell_service.build_mod_rollback_plan(
+                scan_target=self._current_scan_target(),
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                mod_folder_path_text=mod_folder_path,
+                mod_unique_id_text=mod_unique_id,
+                mod_version_text=mod_version,
+                archived_candidate_path_text=str(selected_candidate.archived_path),
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            QMessageBox.critical(self, "Rollback plan failed", str(exc))
+            self._set_status(str(exc))
+            return
+
+        destination_label = (
+            "REAL game Mods destination"
+            if plan.destination_kind == SCAN_TARGET_CONFIGURED_REAL_MODS
+            else "Sandbox Mods destination"
+        )
+        yes = QMessageBox.question(
+            self,
+            "Confirm rollback from archive",
+            (
+                "Rollback selected installed mod to archived version?\n\n"
+                f"Installed mod: {mod_name}\n"
+                f"Installed UniqueID: {mod_unique_id}\n"
+                f"Installed version: {mod_version}\n"
+                f"Installed folder: {plan.current_mod_path}\n\n"
+                f"Archive source: {_archive_source_summary_label(plan.rollback_entry.source_kind)}\n"
+                f"Rollback target version: {plan.rollback_entry.version or '<unknown>'}\n"
+                f"Rollback target folder: {plan.rollback_entry.archived_path}\n"
+                f"Restore destination: {destination_label}\n"
+                f"Current version will be archived to: {plan.current_archive_path}\n\n"
+                "This stage performs archive-based rollback only (no permanent delete)."
+            ),
+        )
+        if yes != QMessageBox.StandardButton.Yes:
+            self._set_status("Rollback cancelled.")
+            return
+
+        self._set_details_text(build_mod_rollback_plan_text(plan))
+        self._run_background_operation(
+            operation_name="Mod rollback",
+            running_label="Mod rollback",
+            started_status=f"Rolling back {mod_name} from archive...",
+            error_title="Mod rollback failed",
+            task_fn=lambda _plan=plan: self._shell_service.execute_mod_rollback(
+                _plan,
+                confirm_rollback=True,
+            ),
+            on_success=self._on_rollback_selected_mod_completed,
+        )
+
+    def _on_rollback_selected_mod_completed(self, result: ModRollbackResult) -> None:
+        self._render_inventory(result.inventory)
+        self._set_current_scan_target(result.destination_kind)
+        self._set_scan_context(
+            result.scan_context_path,
+            self._scan_target_label(result.destination_kind),
+        )
+        self._set_details_text(build_mod_rollback_result_text(result))
+        destination_label = (
+            "REAL Mods" if result.destination_kind == SCAN_TARGET_CONFIGURED_REAL_MODS else "Sandbox Mods"
+        )
+        self._set_status(
+            f"Rollback complete to {destination_label}: {result.restored_target.name}"
+        )
+
+        try:
+            entries = self._shell_service.list_archived_entries(
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
+            )
+        except AppShellError:
+            return
+        self._archived_entries = entries
+        self._render_archive_entries(entries)
 
     def _on_refresh_archives(self) -> None:
         self._run_background_operation(
@@ -1566,7 +1848,9 @@ class MainWindow(QMainWindow):
 
     def _on_game_path_changed(self, *_: object) -> None:
         self._last_environment_status = None
+        self._last_smapi_update_status = None
         self._environment_status_label.setText("Not checked")
+        self._smapi_update_status_label.setText("Not checked")
 
     def _on_nexus_key_changed(self, *_: object) -> None:
         self._refresh_nexus_status(validated=False)
@@ -1933,6 +2217,29 @@ def _discovery_source_label(provider: str) -> str:
         "none": "No source link",
     }
     return labels.get(provider, provider)
+
+
+def _context_caption(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    label.setStyleSheet("color: #4b5563;")
+    return label
+
+
+def _smapi_update_summary_label(status: SmapiUpdateStatus) -> str:
+    installed = status.installed_version or "unknown"
+    latest = status.latest_version or "unknown"
+    if status.state == SMAPI_NOT_DETECTED_FOR_UPDATE:
+        return "SMAPI not detected"
+    if status.state == SMAPI_UPDATE_AVAILABLE:
+        return f"Update available ({installed} -> {latest})"
+    if status.state == SMAPI_UP_TO_DATE:
+        return f"Up to date ({installed})"
+    if status.state == SMAPI_DETECTED_VERSION_KNOWN:
+        return f"Detected ({installed})"
+    if status.state == SMAPI_UNABLE_TO_DETERMINE:
+        return "Unable to determine"
+    return status.state.replace("_", " ")
 
 
 def _discovery_compatibility_label(state: str) -> str:

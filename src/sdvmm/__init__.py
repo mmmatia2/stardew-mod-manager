@@ -9,6 +9,7 @@ from .domain.models import (
     ModDiscoveryEntry,
     ModDiscoveryResult,
     GameEnvironmentStatus,
+    SmapiUpdateStatus,
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
     DuplicateUniqueIdFinding,
@@ -17,6 +18,8 @@ from .domain.models import (
     ManifestParseResult,
     ModUpdateReport,
     ModUpdateStatus,
+    ModRollbackPlan,
+    ModRollbackResult,
     MissingDependencyFinding,
     ModManifest,
     ModsInventory,
@@ -71,6 +74,14 @@ from .domain.remote_requirement_codes import (
 )
 from .domain.unique_id import canonicalize_unique_id
 from .domain.scan_codes import ScanEntryKind
+from .domain.smapi_codes import (
+    SMAPI_DETECTED_VERSION_KNOWN,
+    SMAPI_NOT_DETECTED_FOR_UPDATE,
+    SMAPI_UNABLE_TO_DETERMINE,
+    SMAPI_UP_TO_DATE,
+    SMAPI_UPDATE_AVAILABLE,
+    SmapiUpdateState,
+)
 from .domain.update_codes import RemoteLinkProvider, UpdateState
 from .domain.warning_codes import ParseWarningCode
 from .services.app_state_store import (
@@ -89,6 +100,7 @@ __all__ = [
     "ModDiscoveryEntry",
     "ModDiscoveryResult",
     "GameEnvironmentStatus",
+    "SmapiUpdateStatus",
     "DownloadsIntakeResult",
     "DownloadsWatchPollResult",
     "DuplicateUniqueIdFinding",
@@ -97,6 +109,8 @@ __all__ = [
     "ManifestParseResult",
     "ModUpdateReport",
     "ModUpdateStatus",
+    "ModRollbackPlan",
+    "ModRollbackResult",
     "MissingDependencyFinding",
     "ModManifest",
     "ModsInventory",
@@ -148,6 +162,12 @@ __all__ = [
     "SandboxInstallResult",
     "ScanEntryFinding",
     "ScanEntryKind",
+    "SmapiUpdateState",
+    "SMAPI_NOT_DETECTED_FOR_UPDATE",
+    "SMAPI_DETECTED_VERSION_KNOWN",
+    "SMAPI_UPDATE_AVAILABLE",
+    "SMAPI_UP_TO_DATE",
+    "SMAPI_UNABLE_TO_DETERMINE",
     "UpdateState",
     "APP_STATE_VERSION",
     "AppStateStoreError",

@@ -8,6 +8,7 @@ from .models import (
     ModDiscoveryResult,
     DependencyPreflightFinding,
     GameEnvironmentStatus,
+    SmapiUpdateStatus,
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
     DuplicateUniqueIdFinding,
@@ -17,6 +18,8 @@ from .models import (
     ModUpdateReport,
     ModUpdateStatus,
     MissingDependencyFinding,
+    ModRollbackPlan,
+    ModRollbackResult,
     ModManifest,
     ModsInventory,
     NexusIntegrationStatus,
@@ -85,6 +88,14 @@ from .remote_requirement_codes import (
 )
 from .unique_id import canonicalize_unique_id
 from .scan_codes import ScanEntryKind
+from .smapi_codes import (
+    SMAPI_DETECTED_VERSION_KNOWN,
+    SMAPI_NOT_DETECTED_FOR_UPDATE,
+    SMAPI_UNABLE_TO_DETERMINE,
+    SMAPI_UP_TO_DATE,
+    SMAPI_UPDATE_AVAILABLE,
+    SmapiUpdateState,
+)
 from .update_codes import RemoteLinkProvider, UpdateState
 from .warning_codes import ParseWarningCode
 
@@ -98,6 +109,7 @@ __all__ = [
     "ModDiscoveryResult",
     "DependencyPreflightFinding",
     "GameEnvironmentStatus",
+    "SmapiUpdateStatus",
     "DownloadsIntakeResult",
     "DownloadsWatchPollResult",
     "DuplicateUniqueIdFinding",
@@ -107,6 +119,8 @@ __all__ = [
     "ModUpdateReport",
     "ModUpdateStatus",
     "MissingDependencyFinding",
+    "ModRollbackPlan",
+    "ModRollbackResult",
     "ModManifest",
     "ModsInventory",
     "NexusIntegrationStatus",
@@ -168,6 +182,12 @@ __all__ = [
     "SMAPI_DETECTED",
     "SMAPI_NOT_DETECTED",
     "INVALID_GAME_PATH",
+    "SmapiUpdateState",
+    "SMAPI_NOT_DETECTED_FOR_UPDATE",
+    "SMAPI_DETECTED_VERSION_KNOWN",
+    "SMAPI_UPDATE_AVAILABLE",
+    "SMAPI_UP_TO_DATE",
+    "SMAPI_UNABLE_TO_DETERMINE",
     "UpdateState",
     "canonicalize_unique_id",
 ]
