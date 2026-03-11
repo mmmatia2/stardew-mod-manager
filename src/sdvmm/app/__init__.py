@@ -1,5 +1,6 @@
 from .inventory_presenter import (
     build_archive_listing_text,
+    build_archive_delete_result_text,
     build_archive_restore_result_text,
     build_dependency_preflight_text,
     build_mod_rollback_plan_text,
@@ -40,6 +41,7 @@ __all__ = [
     "SCAN_TARGET_SANDBOX_MODS",
     "StartupConfigState",
     "build_archive_listing_text",
+    "build_archive_delete_result_text",
     "build_archive_restore_result_text",
     "build_findings_text",
     "build_discovery_search_text",

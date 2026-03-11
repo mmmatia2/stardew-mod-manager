@@ -2,6 +2,8 @@
 
 from .domain.models import (
     ArchivedModEntry,
+    ArchiveDeletePlan,
+    ArchiveDeleteResult,
     ArchiveRestorePlan,
     ArchiveRestoreResult,
     AppConfig,
@@ -113,6 +115,8 @@ __all__ = [
     "AppConfig",
     "AppConfigValidationResult",
     "ArchivedModEntry",
+    "ArchiveDeletePlan",
+    "ArchiveDeleteResult",
     "ArchiveRestorePlan",
     "ArchiveRestoreResult",
     "ModDiscoveryEntry",

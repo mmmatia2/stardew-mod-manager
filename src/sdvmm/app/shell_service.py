@@ -9,6 +9,8 @@ import zipfile
 
 from sdvmm.domain.models import (
     ArchivedModEntry,
+    ArchiveDeletePlan,
+    ArchiveDeleteResult,
     ArchiveRestorePlan,
     ArchiveRestoreResult,
     AppConfig,
@@ -67,6 +69,7 @@ from sdvmm.services.sandbox_installer import (
 from sdvmm.services.archive_manager import (
     allocate_archive_destination,
     ArchiveManagerError,
+    delete_archived_mod_entry,
     list_archived_mod_entries,
     rollback_installed_mod_from_archive,
     restore_archived_mod_entry,
@@ -1199,6 +1202,55 @@ class AppShellService:
             scan_context_path=plan.destination_mods_path,
             inventory=inventory,
             destination_kind=plan.destination_kind,
+        )
+
+    def build_archive_delete_plan(
+        self,
+        *,
+        source_kind: ArchiveSourceKind,
+        archived_path_text: str,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        existing_config: AppConfig | None = None,
+    ) -> ArchiveDeletePlan:
+        if source_kind not in {ARCHIVE_SOURCE_REAL, ARCHIVE_SOURCE_SANDBOX}:
+            raise AppShellError(f"Unknown archive source: {source_kind}")
+
+        archived_entry = self._resolve_archived_entry(
+            source_kind=source_kind,
+            archived_path_text=archived_path_text,
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+            existing_config=existing_config,
+        )
+        return ArchiveDeletePlan(entry=archived_entry)
+
+    def execute_archive_delete(
+        self,
+        plan: ArchiveDeletePlan,
+        *,
+        confirm_delete: bool = False,
+    ) -> ArchiveDeleteResult:
+        if not confirm_delete:
+            raise AppShellError("Explicit confirmation is required before permanent archive delete.")
+
+        try:
+            deleted_path = delete_archived_mod_entry(
+                archive_root=plan.entry.archive_root,
+                archived_path=plan.entry.archived_path,
+            )
+        except ArchiveManagerError as exc:
+            raise AppShellError(str(exc)) from exc
+        except OSError as exc:
+            raise AppShellError(f"Permanent archive delete failed: {exc}") from exc
+
+        return ArchiveDeleteResult(
+            plan=plan,
+            deleted_path=deleted_path,
         )
 
     def list_mod_rollback_candidates(

@@ -34,6 +34,7 @@ from PySide6.QtGui import QDesktopServices
 
 from sdvmm.app.inventory_presenter import (
     build_archive_listing_text,
+    build_archive_delete_result_text,
     build_archive_restore_result_text,
     build_dependency_preflight_text,
     build_mod_rollback_plan_text,
@@ -71,6 +72,7 @@ from sdvmm.domain.models import (
     GameEnvironmentStatus,
     ModDiscoveryResult,
     ArchiveRestoreResult,
+    ArchiveDeleteResult,
     ArchivedModEntry,
     ModRemovalResult,
     ModRollbackResult,
@@ -132,13 +134,6 @@ class MainWindow(QMainWindow):
         self._background_action_buttons: tuple[QPushButton, ...] = tuple()
 
         self.setWindowTitle("Stardew Mod Manager (Sandbox-first)")
-        self.setWindowFlags(
-            Qt.WindowType.Window
-            | Qt.WindowType.WindowTitleHint
-            | Qt.WindowType.WindowSystemMenuHint
-            | Qt.WindowType.WindowMinMaxButtonsHint
-            | Qt.WindowType.WindowCloseButtonHint
-        )
         self.setMinimumSize(980, 640)
         self.resize(1360, 860)
 
@@ -302,34 +297,56 @@ class MainWindow(QMainWindow):
         container = QWidget()
         root_layout = QVBoxLayout(container)
         root_layout.setContentsMargins(8, 6, 8, 6)
-        root_layout.setSpacing(6)
+        root_layout.setSpacing(7)
 
         context_group = QGroupBox("Context")
         context_layout = QGridLayout(context_group)
         context_layout.setContentsMargins(8, 6, 8, 6)
-        context_layout.setHorizontalSpacing(8)
-        context_layout.setVerticalSpacing(3)
-        context_layout.addWidget(_context_caption("Environment"), 0, 0)
-        context_layout.addWidget(self._environment_status_label, 0, 1)
-        context_layout.addWidget(_context_caption("SMAPI update"), 0, 2)
-        context_layout.addWidget(self._smapi_update_status_label, 0, 3)
-        context_layout.addWidget(_context_caption("SMAPI log"), 0, 4)
-        context_layout.addWidget(self._smapi_log_status_label, 0, 5)
-        context_layout.addWidget(_context_caption("Nexus"), 0, 6)
-        context_layout.addWidget(self._nexus_status_label, 0, 7)
-        context_layout.addWidget(_context_caption("Watcher"), 0, 8)
-        context_layout.addWidget(self._watch_status_label, 0, 9)
-        context_layout.addWidget(_context_caption("Scan source"), 1, 0)
-        context_layout.addWidget(self._scan_context_label, 1, 1, 1, 3)
-        context_layout.addWidget(_context_caption("Install destination"), 1, 4)
-        context_layout.addWidget(self._install_context_label, 1, 5, 1, 3)
-        context_layout.addWidget(_context_caption("Operation"), 1, 8)
-        context_layout.addWidget(self._operation_state_label, 1, 9)
-        context_layout.setColumnStretch(1, 2)
-        context_layout.setColumnStretch(3, 2)
-        context_layout.setColumnStretch(5, 2)
-        context_layout.setColumnStretch(7, 1)
-        context_layout.setColumnStretch(9, 2)
+        context_layout.setHorizontalSpacing(10)
+        context_layout.setVerticalSpacing(6)
+
+        environment_group = QGroupBox("Environment")
+        environment_layout = QGridLayout(environment_group)
+        environment_layout.setContentsMargins(8, 5, 8, 5)
+        environment_layout.setHorizontalSpacing(8)
+        environment_layout.setVerticalSpacing(3)
+        environment_layout.addWidget(_context_caption("Game"), 0, 0)
+        environment_layout.addWidget(self._environment_status_label, 0, 1)
+        environment_layout.addWidget(_context_caption("SMAPI update"), 1, 0)
+        environment_layout.addWidget(self._smapi_update_status_label, 1, 1)
+        environment_layout.addWidget(_context_caption("SMAPI log"), 2, 0)
+        environment_layout.addWidget(self._smapi_log_status_label, 2, 1)
+        environment_layout.setColumnStretch(1, 1)
+
+        runtime_group = QGroupBox("Runtime")
+        runtime_layout = QGridLayout(runtime_group)
+        runtime_layout.setContentsMargins(8, 5, 8, 5)
+        runtime_layout.setHorizontalSpacing(8)
+        runtime_layout.setVerticalSpacing(3)
+        runtime_layout.addWidget(_context_caption("Nexus"), 0, 0)
+        runtime_layout.addWidget(self._nexus_status_label, 0, 1)
+        runtime_layout.addWidget(_context_caption("Watcher"), 1, 0)
+        runtime_layout.addWidget(self._watch_status_label, 1, 1)
+        runtime_layout.addWidget(_context_caption("Operation"), 2, 0)
+        runtime_layout.addWidget(self._operation_state_label, 2, 1)
+        runtime_layout.setColumnStretch(1, 1)
+
+        paths_group = QGroupBox("Active Context")
+        paths_layout = QGridLayout(paths_group)
+        paths_layout.setContentsMargins(8, 5, 8, 5)
+        paths_layout.setHorizontalSpacing(8)
+        paths_layout.setVerticalSpacing(3)
+        paths_layout.addWidget(_context_caption("Scan source"), 0, 0)
+        paths_layout.addWidget(self._scan_context_label, 0, 1)
+        paths_layout.addWidget(_context_caption("Install destination"), 1, 0)
+        paths_layout.addWidget(self._install_context_label, 1, 1)
+        paths_layout.setColumnStretch(1, 1)
+
+        context_layout.addWidget(environment_group, 0, 0)
+        context_layout.addWidget(runtime_group, 0, 1)
+        context_layout.addWidget(paths_group, 1, 0, 1, 2)
+        context_layout.setColumnStretch(0, 1)
+        context_layout.setColumnStretch(1, 1)
         root_layout.addWidget(context_group)
 
         self._setup_toggle = QCheckBox("Show setup and path configuration")
@@ -393,62 +410,84 @@ class MainWindow(QMainWindow):
 
         workspace_splitter = QSplitter()
         workspace_splitter.setChildrenCollapsible(False)
-        workspace_splitter.setHandleWidth(6)
-        workspace_splitter.setOpaqueResize(False)
+        workspace_splitter.setHandleWidth(8)
+        workspace_splitter.setOpaqueResize(True)
 
         inventory_group = QGroupBox("Installed Mods Workspace")
-        inventory_group.setMinimumWidth(560)
+        inventory_group.setMinimumWidth(420)
+        inventory_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         inventory_layout = QVBoxLayout(inventory_group)
         inventory_layout.setContentsMargins(8, 6, 8, 6)
-        inventory_layout.setSpacing(5)
-        inventory_primary_controls = QHBoxLayout()
-        inventory_primary_controls.setSpacing(6)
-        inventory_primary_controls.addWidget(QLabel("Scan source"))
-        inventory_primary_controls.addWidget(self._scan_target_combo)
+        inventory_layout.setSpacing(6)
+
+        inventory_actions_group = QGroupBox("Inventory Actions")
+        inventory_actions_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        inventory_actions_layout = QGridLayout(inventory_actions_group)
+        inventory_actions_layout.setContentsMargins(8, 6, 8, 6)
+        inventory_actions_layout.setHorizontalSpacing(8)
+        inventory_actions_layout.setVerticalSpacing(4)
+        inventory_actions_layout.addWidget(QLabel("Scan source"), 0, 0)
+        inventory_actions_layout.addWidget(self._scan_target_combo, 0, 1)
         self._scan_button = QPushButton("Scan")
         self._scan_button.clicked.connect(self._on_scan)
-        inventory_primary_controls.addWidget(self._scan_button)
+        inventory_actions_layout.addWidget(self._scan_button, 0, 2)
         self._check_updates_button = QPushButton("Check updates")
         self._check_updates_button.clicked.connect(self._on_check_updates)
-        inventory_primary_controls.addWidget(self._check_updates_button)
-        self._check_smapi_update_button = QPushButton("Check SMAPI")
-        self._check_smapi_update_button.clicked.connect(self._on_check_smapi_update)
-        inventory_primary_controls.addWidget(self._check_smapi_update_button)
-        self._check_smapi_log_button = QPushButton("Check SMAPI log")
-        self._check_smapi_log_button.clicked.connect(self._on_check_smapi_log)
-        inventory_primary_controls.addWidget(self._check_smapi_log_button)
-        self._load_smapi_log_button = QPushButton("Load SMAPI log")
-        self._load_smapi_log_button.clicked.connect(self._on_load_smapi_log)
-        inventory_primary_controls.addWidget(self._load_smapi_log_button)
-        self._open_smapi_page_button = QPushButton("Open SMAPI page")
-        self._open_smapi_page_button.clicked.connect(self._on_open_smapi_page)
-        inventory_primary_controls.addWidget(self._open_smapi_page_button)
-        self._launch_vanilla_button = QPushButton("Launch vanilla")
-        self._launch_vanilla_button.clicked.connect(self._on_launch_vanilla)
-        inventory_primary_controls.addWidget(self._launch_vanilla_button)
-        self._launch_smapi_button = QPushButton("Launch with SMAPI")
-        self._launch_smapi_button.clicked.connect(self._on_launch_smapi)
-        inventory_primary_controls.addWidget(self._launch_smapi_button)
+        inventory_actions_layout.addWidget(self._check_updates_button, 0, 3)
         open_remote_button = QPushButton("Open remote page")
         open_remote_button.clicked.connect(self._on_open_remote_page)
-        inventory_primary_controls.addWidget(open_remote_button)
-        inventory_primary_controls.addStretch(1)
+        inventory_actions_layout.addWidget(open_remote_button, 0, 4)
+        inventory_actions_layout.addWidget(QLabel("Filter"), 1, 0)
+        inventory_actions_layout.addWidget(self._mods_filter_input, 1, 1, 1, 3)
+        inventory_actions_layout.addWidget(self._mods_filter_stats_label, 1, 4)
+        inventory_actions_layout.setColumnStretch(1, 1)
+        inventory_layout.addWidget(inventory_actions_group)
 
-        inventory_secondary_controls = QHBoxLayout()
-        inventory_secondary_controls.setSpacing(6)
+        game_smapi_group = QGroupBox("Game and SMAPI Actions")
+        game_smapi_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        game_smapi_layout = QGridLayout(game_smapi_group)
+        game_smapi_layout.setContentsMargins(8, 6, 8, 6)
+        game_smapi_layout.setHorizontalSpacing(8)
+        game_smapi_layout.setVerticalSpacing(4)
+        self._check_smapi_update_button = QPushButton("Check SMAPI")
+        self._check_smapi_update_button.clicked.connect(self._on_check_smapi_update)
+        game_smapi_layout.addWidget(self._check_smapi_update_button, 0, 0)
+        self._check_smapi_log_button = QPushButton("Check SMAPI log")
+        self._check_smapi_log_button.clicked.connect(self._on_check_smapi_log)
+        game_smapi_layout.addWidget(self._check_smapi_log_button, 0, 1)
+        self._load_smapi_log_button = QPushButton("Load SMAPI log")
+        self._load_smapi_log_button.clicked.connect(self._on_load_smapi_log)
+        game_smapi_layout.addWidget(self._load_smapi_log_button, 0, 2)
+        self._open_smapi_page_button = QPushButton("Open SMAPI page")
+        self._open_smapi_page_button.clicked.connect(self._on_open_smapi_page)
+        game_smapi_layout.addWidget(self._open_smapi_page_button, 0, 3)
+        self._launch_vanilla_button = QPushButton("Launch vanilla")
+        self._launch_vanilla_button.clicked.connect(self._on_launch_vanilla)
+        game_smapi_layout.addWidget(self._launch_vanilla_button, 1, 0)
+        self._launch_smapi_button = QPushButton("Launch with SMAPI")
+        self._launch_smapi_button.clicked.connect(self._on_launch_smapi)
+        game_smapi_layout.addWidget(self._launch_smapi_button, 1, 1)
+        game_smapi_layout.setColumnStretch(4, 1)
+        inventory_layout.addWidget(game_smapi_group)
+
+        archive_actions_group = QGroupBox("Archive and Rollback Actions")
+        archive_actions_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        archive_actions_layout = QHBoxLayout(archive_actions_group)
+        archive_actions_layout.setContentsMargins(8, 6, 8, 6)
+        archive_actions_layout.setSpacing(8)
         self._remove_mod_button = QPushButton("Remove selected (archive)")
         self._remove_mod_button.clicked.connect(self._on_remove_selected_mod)
-        inventory_secondary_controls.addWidget(self._remove_mod_button)
+        archive_actions_layout.addWidget(self._remove_mod_button)
         self._rollback_mod_button = QPushButton("Rollback selected")
         self._rollback_mod_button.clicked.connect(self._on_rollback_selected_mod)
-        inventory_secondary_controls.addWidget(self._rollback_mod_button)
-        inventory_secondary_controls.addWidget(QLabel("Filter"))
-        inventory_secondary_controls.addWidget(self._mods_filter_input, 1)
-        inventory_secondary_controls.addWidget(self._mods_filter_stats_label)
-        inventory_secondary_controls.addStretch(1)
+        archive_actions_layout.addWidget(self._rollback_mod_button)
+        archive_actions_layout.addStretch(1)
+        inventory_layout.addWidget(archive_actions_group)
 
-        inventory_layout.addLayout(inventory_primary_controls)
-        inventory_layout.addLayout(inventory_secondary_controls)
         flow_hint_label = QLabel(
             "Flow: Scan -> Check updates -> Open remote page -> manual download -> watcher intake -> plan/install."
         )
@@ -458,11 +497,17 @@ class MainWindow(QMainWindow):
             "Workflow: Scan -> Check updates -> Open remote page -> manual download -> watcher intake -> plan/install."
         )
         inventory_layout.addWidget(flow_hint_label)
-        inventory_layout.addWidget(self._mods_table)
+
+        installed_table_group = QGroupBox("Installed Mods")
+        installed_table_layout = QVBoxLayout(installed_table_group)
+        installed_table_layout.setContentsMargins(8, 6, 8, 6)
+        installed_table_layout.addWidget(self._mods_table)
+        inventory_layout.addWidget(installed_table_group, 1)
         workspace_splitter.addWidget(inventory_group)
 
         context_tabs = QTabWidget()
-        context_tabs.setMinimumWidth(480)
+        context_tabs.setMinimumWidth(360)
+        context_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         discovery_tab = QWidget()
         discovery_layout = QVBoxLayout(discovery_tab)
@@ -472,17 +517,19 @@ class MainWindow(QMainWindow):
         discovery_search_group.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
-        discovery_search_layout = QHBoxLayout(discovery_search_group)
+        discovery_search_layout = QGridLayout(discovery_search_group)
         discovery_search_layout.setContentsMargins(8, 6, 8, 6)
-        discovery_search_layout.setSpacing(6)
-        discovery_search_layout.addWidget(QLabel("Search query"))
-        discovery_search_layout.addWidget(self._discovery_query_input)
+        discovery_search_layout.setHorizontalSpacing(8)
+        discovery_search_layout.setVerticalSpacing(4)
+        discovery_search_layout.addWidget(QLabel("Search query"), 0, 0)
+        discovery_search_layout.addWidget(self._discovery_query_input, 0, 1, 1, 2)
         self._search_mods_button = QPushButton("Search mods")
         self._search_mods_button.clicked.connect(self._on_search_discovery)
-        discovery_search_layout.addWidget(self._search_mods_button)
+        discovery_search_layout.addWidget(self._search_mods_button, 0, 3)
         open_discovered_button = QPushButton("Open discovered page")
         open_discovered_button.clicked.connect(self._on_open_discovered_page)
-        discovery_search_layout.addWidget(open_discovered_button)
+        discovery_search_layout.addWidget(open_discovered_button, 1, 3)
+        discovery_search_layout.setColumnStretch(1, 1)
         discovery_layout.addWidget(discovery_search_group)
         discovery_results_group = QGroupBox("Results")
         discovery_results_layout = QVBoxLayout(discovery_results_group)
@@ -579,6 +626,10 @@ class MainWindow(QMainWindow):
         self._restore_archived_button.clicked.connect(self._on_restore_selected_archive)
         self._restore_archived_button.setEnabled(False)
         archive_controls_layout.addWidget(self._restore_archived_button, 1, 2)
+        self._delete_archived_button = QPushButton("Delete permanently")
+        self._delete_archived_button.clicked.connect(self._on_delete_selected_archive)
+        self._delete_archived_button.setEnabled(False)
+        archive_controls_layout.addWidget(self._delete_archived_button, 1, 3)
         archive_layout.addWidget(archive_controls_group)
         archive_table_group = QGroupBox("Archived Entries (real + sandbox)")
         archive_table_layout = QVBoxLayout(archive_table_group)
@@ -635,8 +686,8 @@ class MainWindow(QMainWindow):
         workspace_splitter.addWidget(context_tabs)
         workspace_splitter.setCollapsible(0, False)
         workspace_splitter.setCollapsible(1, False)
-        workspace_splitter.setSizes([760, 620])
-        workspace_splitter.setStretchFactor(0, 3)
+        workspace_splitter.setSizes([920, 760])
+        workspace_splitter.setStretchFactor(0, 5)
         workspace_splitter.setStretchFactor(1, 4)
         root_layout.addWidget(workspace_splitter, 1)
 
@@ -677,6 +728,7 @@ class MainWindow(QMainWindow):
             self._rollback_mod_button,
             self._refresh_archives_button,
             self._restore_archived_button,
+            self._delete_archived_button,
             self._launch_vanilla_button,
             self._launch_smapi_button,
         )
@@ -1596,11 +1648,7 @@ class MainWindow(QMainWindow):
             self._scan_target_label(result.destination_kind),
         )
         self._set_details_text(build_archive_restore_result_text(result))
-        restored_source = result.plan.entry.archived_path
-        self._archived_entries = tuple(
-            entry for entry in self._archived_entries if entry.archived_path != restored_source
-        )
-        self._render_archive_entries(self._archived_entries)
+        self._refresh_archived_entries_after_change()
         destination_label = (
             "REAL Mods"
             if result.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
@@ -1610,8 +1658,81 @@ class MainWindow(QMainWindow):
             f"Archive restore complete to {destination_label}: {result.restored_target.name}"
         )
 
+    def _on_delete_selected_archive(self) -> None:
+        entry = self._selected_archive_entry()
+        if entry is None:
+            message = "Select an archived entry first."
+            QMessageBox.warning(self, "No archive selection", message)
+            self._set_status(message)
+            return
+
+        try:
+            plan = self._shell_service.build_archive_delete_plan(
+                source_kind=entry.source_kind,
+                archived_path_text=str(entry.archived_path),
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            QMessageBox.critical(self, "Archive delete plan failed", str(exc))
+            self._set_status(str(exc))
+            return
+
+        yes = QMessageBox.question(
+            self,
+            "Confirm permanent archive delete",
+            (
+                "Permanently delete selected archived item?\n\n"
+                f"Archive source: {_archive_source_summary_label(entry.source_kind)}\n"
+                f"Archived folder: {entry.archived_folder_name}\n"
+                f"Archive path: {entry.archived_path}\n\n"
+                "This action is irreversible. The archived item will be deleted forever."
+            ),
+        )
+        if yes != QMessageBox.StandardButton.Yes:
+            self._set_status("Permanent archive delete cancelled.")
+            return
+
+        self._run_background_operation(
+            operation_name="Archive permanent delete",
+            running_label="Archive delete",
+            started_status=f"Deleting archived item permanently: {entry.archived_folder_name}",
+            error_title="Archive permanent delete failed",
+            task_fn=lambda _plan=plan: self._shell_service.execute_archive_delete(
+                _plan,
+                confirm_delete=True,
+            ),
+            on_success=self._on_delete_selected_archive_completed,
+        )
+
+    def _on_delete_selected_archive_completed(self, result: ArchiveDeleteResult) -> None:
+        self._set_details_text(build_archive_delete_result_text(result))
+        self._refresh_archived_entries_after_change()
+        self._set_status(f"Archived item deleted permanently: {result.deleted_path.name}")
+
     def _on_archive_selection_changed(self) -> None:
-        self._restore_archived_button.setEnabled(self._selected_archive_entry() is not None)
+        has_selection = self._selected_archive_entry() is not None
+        self._restore_archived_button.setEnabled(has_selection)
+        self._delete_archived_button.setEnabled(has_selection)
+
+    def _refresh_archived_entries_after_change(self) -> None:
+        try:
+            entries = self._shell_service.list_archived_entries(
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            self._set_status(f"Archive list refresh warning: {exc}")
+            return
+
+        self._archived_entries = entries
+        self._render_archive_entries(entries)
 
     def _on_start_watch(self) -> None:
         try:

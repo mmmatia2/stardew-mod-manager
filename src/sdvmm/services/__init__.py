@@ -16,6 +16,7 @@ from .sandbox_installer import (
 from .archive_manager import (
     allocate_archive_destination,
     ArchiveManagerError,
+    delete_archived_mod_entry,
     list_archived_mod_entries,
     rollback_installed_mod_from_archive,
     restore_archived_mod_entry,
@@ -72,6 +73,7 @@ __all__ = [
     "execute_sandbox_install_plan",
     "list_archived_mod_entries",
     "allocate_archive_destination",
+    "delete_archived_mod_entry",
     "rollback_installed_mod_from_archive",
     "restore_archived_mod_entry",
     "initialize_known_zip_paths",

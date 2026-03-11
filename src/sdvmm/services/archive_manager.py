@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import shutil
 
 from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.services.manifest_parser import parse_manifest_file
@@ -71,6 +72,33 @@ def restore_archived_mod_entry(
 
     archived_path.rename(destination_target)
     return destination_target
+
+
+def delete_archived_mod_entry(
+    *,
+    archive_root: Path,
+    archived_path: Path,
+) -> Path:
+    if not archive_root.exists() or not archive_root.is_dir():
+        raise ArchiveManagerError(f"Archive path is not accessible: {archive_root}")
+
+    archived_resolved = archived_path.resolve()
+    archive_root_resolved = archive_root.resolve()
+    if archived_resolved.parent != archive_root_resolved:
+        raise ArchiveManagerError(
+            "Archived entry must be a direct child of the selected archive root."
+        )
+    if not archived_path.exists() or not archived_path.is_dir():
+        raise ArchiveManagerError(f"Archived entry is not accessible: {archived_path}")
+
+    try:
+        shutil.rmtree(archived_path)
+    except OSError as exc:
+        raise ArchiveManagerError(
+            f"Could not permanently delete archived entry '{archived_path}': {exc}"
+        ) from exc
+
+    return archived_path
 
 
 def allocate_archive_destination(*, archive_root: Path, target_folder_name: str) -> Path:

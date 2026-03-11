@@ -884,6 +884,132 @@ def test_execute_archive_restore_to_real_moves_entry_and_rescans(tmp_path: Path)
     }
 
 
+def test_execute_archive_delete_requires_explicit_confirmation(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    archived = sandbox_archive / "DeleteMe__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Delete Me","UniqueID":"Sample.DeleteMe","Version":"1.0.0"}',
+        encoding="utf-8",
+    )
+
+    plan = service.build_archive_delete_plan(
+        source_kind=ARCHIVE_SOURCE_SANDBOX,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+    )
+
+    with pytest.raises(AppShellError, match="Explicit confirmation is required"):
+        service.execute_archive_delete(plan, confirm_delete=False)
+
+
+def test_execute_archive_delete_permanently_removes_real_archive_entry(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    archived = real_archive / "DeleteReal__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Delete Real","UniqueID":"Sample.DeleteReal","Version":"3.0.0"}',
+        encoding="utf-8",
+    )
+
+    plan = service.build_archive_delete_plan(
+        source_kind=ARCHIVE_SOURCE_REAL,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+    )
+    result = service.execute_archive_delete(plan, confirm_delete=True)
+
+    assert result.deleted_path == archived
+    assert not archived.exists()
+
+
+def test_execute_archive_delete_permanently_removes_sandbox_archive_entry(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    sandbox_archive.mkdir()
+    archived = sandbox_archive / "DeleteSandbox__sdvmm_archive_001"
+    archived.mkdir()
+    (archived / "manifest.json").write_text(
+        '{"Name":"Delete Sandbox","UniqueID":"Sample.DeleteSandbox","Version":"2.0.0"}',
+        encoding="utf-8",
+    )
+
+    plan = service.build_archive_delete_plan(
+        source_kind=ARCHIVE_SOURCE_SANDBOX,
+        archived_path_text=str(archived),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        sandbox_archive_path_text=str(sandbox_archive),
+    )
+    result = service.execute_archive_delete(plan, confirm_delete=True)
+
+    assert result.deleted_path == archived
+    assert not archived.exists()
+
+
+def test_archive_listing_reflects_permanent_delete_after_execution(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    real_archive.mkdir()
+    archived_keep = real_archive / "Keep__sdvmm_archive_001"
+    archived_delete = real_archive / "Delete__sdvmm_archive_001"
+    _create_archived_entry(archived_keep, unique_id="Sample.KeepArchived", version="1.0.0")
+    _create_archived_entry(archived_delete, unique_id="Sample.DeleteArchived", version="1.0.0")
+
+    before = service.list_archived_entries(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+    )
+    assert {entry.archived_path for entry in before} == {archived_keep, archived_delete}
+
+    plan = service.build_archive_delete_plan(
+        source_kind=ARCHIVE_SOURCE_REAL,
+        archived_path_text=str(archived_delete),
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+    )
+    service.execute_archive_delete(plan, confirm_delete=True)
+
+    after = service.list_archived_entries(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text="",
+    )
+    assert {entry.archived_path for entry in after} == {archived_keep}
+
+
 def test_build_archive_restore_plan_inferrs_real_destination_even_if_saved_install_target_is_sandbox(
     tmp_path: Path,
 ) -> None:

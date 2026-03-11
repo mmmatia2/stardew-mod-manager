@@ -16,6 +16,7 @@ from sdvmm.domain.environment_codes import (
 )
 from sdvmm.domain.models import (
     ArchivedModEntry,
+    ArchiveDeleteResult,
     ArchiveRestoreResult,
     DependencyPreflightFinding,
     DownloadsIntakeResult,
@@ -588,6 +589,17 @@ def build_archive_restore_result_text(result: ArchiveRestoreResult) -> str:
     lines.append("- Review scan findings and dependency warnings after restore.")
     lines.append("")
     lines.append(build_findings_text(result.inventory))
+    return "\n".join(lines)
+
+
+def build_archive_delete_result_text(result: ArchiveDeleteResult) -> str:
+    lines: list[str] = []
+    lines.append("Archive permanent delete completed.")
+    lines.append(f"- Archive source: {_archive_source_label(result.plan.entry.source_kind)}")
+    lines.append(f"- Deleted archived folder: {result.deleted_path}")
+    lines.append("")
+    lines.append("Recommended next step:")
+    lines.append("- Refresh archives and continue restore/rollback planning with remaining entries if needed.")
     return "\n".join(lines)
 
 

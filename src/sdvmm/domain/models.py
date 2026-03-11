@@ -398,6 +398,17 @@ class ArchiveRestoreResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ArchiveDeletePlan:
+    entry: ArchivedModEntry
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveDeleteResult:
+    plan: ArchiveDeletePlan
+    deleted_path: Path
+
+
+@dataclass(frozen=True, slots=True)
 class ModRollbackPlan:
     destination_kind: str
     mods_path: Path
