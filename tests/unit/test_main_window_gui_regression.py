@@ -235,3 +235,44 @@ def test_main_window_discovery_surface_key_controls_exist(
     assert main_window._discovery_filter_input is discovery_filter_input
     assert main_window._discovery_table is discovery_table
     assert main_window._search_mods_button is discovery_search_button
+
+
+def test_main_window_archive_surface_has_expected_structure(
+    main_window: MainWindow,
+) -> None:
+    context_tabs = main_window._context_tabs
+    archive_tab = main_window.findChild(QWidget, "archive_tab")
+    archive_controls_group = main_window.findChild(QGroupBox, "archive_controls_group")
+    archive_results_group = main_window.findChild(QGroupBox, "archive_results_group")
+
+    assert context_tabs is not None
+    assert isinstance(context_tabs, QTabWidget)
+    assert archive_tab is not None
+    assert archive_controls_group is not None
+    assert archive_results_group is not None
+
+    tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
+    assert "Archive" in tab_labels
+    assert context_tabs.indexOf(archive_tab) >= 0
+
+
+def test_main_window_archive_surface_key_controls_exist(
+    main_window: MainWindow,
+) -> None:
+    archive_filter_input = main_window.findChild(QLineEdit, "archive_filter_input")
+    archive_table = main_window.findChild(QTableWidget, "archive_results_table")
+    refresh_button = main_window.findChild(QPushButton, "archive_refresh_button")
+    restore_button = main_window.findChild(QPushButton, "archive_restore_button")
+    delete_button = main_window.findChild(QPushButton, "archive_delete_button")
+
+    assert archive_filter_input is not None
+    assert archive_table is not None
+    assert refresh_button is not None
+    assert restore_button is not None
+    assert delete_button is not None
+
+    assert main_window._archive_filter_input is archive_filter_input
+    assert main_window._archive_table is archive_table
+    assert main_window._refresh_archives_button is refresh_button
+    assert main_window._restore_archived_button is restore_button
+    assert main_window._delete_archived_button is delete_button
