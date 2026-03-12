@@ -2179,10 +2179,10 @@ def _build_intake_flow_messages(
             "Select package and review all sandbox plan entries before execution.",
         )
 
-        return (
-            "Detected package appears to be a new install candidate.",
-            "Select package and plan install.",
-        )
+    return (
+        "Detected package appears to be a new install candidate.",
+        "Select package and plan install.",
+    )
 
 
 def _evaluate_sandbox_plan_dependencies(

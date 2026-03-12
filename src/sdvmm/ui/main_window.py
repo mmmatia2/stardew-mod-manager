@@ -104,6 +104,7 @@ from sdvmm.domain.smapi_log_codes import (
     SMAPI_LOG_WARNING,
 )
 from sdvmm.ui.background_task import BackgroundTask
+from sdvmm.ui.archive_tab_surface import ArchiveTabSurface
 from sdvmm.ui.bottom_details_region import BottomDetailsRegion
 from sdvmm.ui.discovery_tab_surface import DiscoveryTabSurface
 from sdvmm.ui.global_status_strip import GlobalStatusStrip
@@ -658,51 +659,28 @@ class MainWindow(QMainWindow):
         intake_layout.addStretch(1)
         context_tabs.addTab(intake_tab, "Packages & Intake")
 
-        archive_tab = QWidget()
-        archive_tab.setObjectName("archive_tab")
-        archive_layout = QVBoxLayout(archive_tab)
-        archive_layout.setContentsMargins(6, 6, 6, 6)
-        archive_layout.setSpacing(0)
-        archive_controls_group = QGroupBox("Archive Browser")
-        archive_controls_group.setObjectName("archive_controls_group")
-        archive_controls_group.setFlat(True)
-        archive_controls_group.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
-        )
-        archive_controls_layout = QGridLayout(archive_controls_group)
-        archive_controls_layout.setContentsMargins(8, 6, 8, 6)
-        archive_controls_layout.setHorizontalSpacing(8)
-        archive_controls_layout.setVerticalSpacing(4)
-        archive_controls_layout.addWidget(QLabel("Filter"), 0, 0)
-        archive_controls_layout.addWidget(self._archive_filter_input, 0, 1, 1, 2)
-        archive_controls_layout.addWidget(self._archive_filter_stats_label, 0, 3)
         self._refresh_archives_button = QPushButton("Refresh archives")
         self._refresh_archives_button.setObjectName("archive_refresh_button")
         self._refresh_archives_button.clicked.connect(self._on_refresh_archives)
         _set_primary_button_style(self._refresh_archives_button)
-        archive_controls_layout.addWidget(self._refresh_archives_button, 1, 1)
         self._restore_archived_button = QPushButton("Restore selected")
         self._restore_archived_button.setObjectName("archive_restore_button")
         self._restore_archived_button.clicked.connect(self._on_restore_selected_archive)
         _set_primary_button_style(self._restore_archived_button)
         self._restore_archived_button.setEnabled(False)
-        archive_controls_layout.addWidget(self._restore_archived_button, 1, 2)
         self._delete_archived_button = QPushButton("Delete permanently")
         self._delete_archived_button.setObjectName("archive_delete_button")
         self._delete_archived_button.clicked.connect(self._on_delete_selected_archive)
         _set_danger_button_style(self._delete_archived_button)
         self._delete_archived_button.setEnabled(False)
-        archive_controls_layout.addWidget(self._delete_archived_button, 1, 3)
-        archive_layout.addWidget(archive_controls_group)
-        archive_results_group = QGroupBox("Archived Entries (real + sandbox)")
-        archive_results_group.setObjectName("archive_results_group")
-        archive_results_group.setFlat(True)
-        archive_results_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        archive_results_layout = QVBoxLayout(archive_results_group)
-        archive_results_layout.setContentsMargins(8, 0, 8, 6)
-        archive_results_layout.setSpacing(0)
-        archive_results_layout.addWidget(self._archive_table)
-        archive_layout.addWidget(archive_results_group, 1)
+        archive_tab = ArchiveTabSurface(
+            archive_filter_input=self._archive_filter_input,
+            archive_filter_stats_label=self._archive_filter_stats_label,
+            archive_table=self._archive_table,
+            refresh_archives_button=self._refresh_archives_button,
+            restore_archived_button=self._restore_archived_button,
+            delete_archived_button=self._delete_archived_button,
+        )
         self._archive_table.itemSelectionChanged.connect(self._on_archive_selection_changed)
         context_tabs.addTab(archive_tab, "Archive")
 
@@ -1778,22 +1756,55 @@ class MainWindow(QMainWindow):
 
     def _on_start_watch(self) -> None:
         try:
+            watched_downloads_path_text = self._watched_downloads_path_input.text()
             self._known_watched_zip_paths = self._shell_service.initialize_downloads_watch(
-                self._watched_downloads_path_input.text()
+                watched_downloads_path_text
+            )
+            initial_result = self._shell_service.poll_downloads_watch(
+                watched_downloads_path_text=watched_downloads_path_text,
+                known_zip_paths=tuple(),
+                inventory=self._current_inventory_or_empty(),
+                nexus_api_key_text=self._nexus_api_key_input.text(),
+                existing_config=self._config,
             )
         except AppShellError as exc:
             QMessageBox.critical(self, "Watch start failed", str(exc))
             self._set_status(str(exc))
             return
 
+        self._known_watched_zip_paths = initial_result.known_zip_paths
         self._watch_timer.start()
         baseline_count = len(self._known_watched_zip_paths)
         watched_path = self._watched_downloads_path_input.text().strip()
         self._watch_status_label.setText(
             f"Running | {watched_path} | baseline={baseline_count} zip(s)"
         )
+        if not initial_result.intakes:
+            self._set_status(
+                "Downloads watcher started. Watching for new zip files."
+            )
+            return
+
+        new_correlations = self._shell_service.correlate_intakes_with_updates(
+            intakes=initial_result.intakes,
+            update_report=self._current_update_report,
+            guided_update_unique_ids=self._guided_update_unique_ids,
+        )
+        self._detected_intakes = self._merge_detected_intakes(
+            self._detected_intakes,
+            initial_result.intakes,
+        )
+        self._recompute_intake_correlations()
+        self._set_details_text(
+            "\n\n".join(
+                (
+                    build_downloads_intake_text(initial_result),
+                    build_intake_correlation_text(new_correlations),
+                )
+            )
+        )
         self._set_status(
-            "Downloads watcher started. Only zip files added after start are detected."
+            f"Downloads watcher started. Detected {len(initial_result.intakes)} package(s) in watched downloads."
         )
 
     def _on_stop_watch(self) -> None:
@@ -1826,7 +1837,10 @@ class MainWindow(QMainWindow):
             update_report=self._current_update_report,
             guided_update_unique_ids=self._guided_update_unique_ids,
         )
-        self._detected_intakes = self._detected_intakes + result.intakes
+        self._detected_intakes = self._merge_detected_intakes(
+            self._detected_intakes,
+            result.intakes,
+        )
         self._recompute_intake_correlations()
         self._set_details_text(
             "\n\n".join(
@@ -2493,6 +2507,33 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _set_filter_stats(label: QLabel, *, shown_count: int, total_count: int) -> None:
         label.setText(f"{shown_count}/{total_count} shown")
+
+    @staticmethod
+    def _merge_detected_intakes(
+        existing: tuple[DownloadsIntakeResult, ...],
+        incoming: tuple[DownloadsIntakeResult, ...],
+    ) -> tuple[DownloadsIntakeResult, ...]:
+        merged_by_path: dict[str, DownloadsIntakeResult] = {
+            str(intake.package_path): intake for intake in existing
+        }
+        for intake in incoming:
+            merged_by_path[str(intake.package_path)] = intake
+
+        ordered: list[DownloadsIntakeResult] = []
+        seen_paths: set[str] = set()
+        for intake in existing:
+            path_key = str(intake.package_path)
+            if path_key in seen_paths:
+                continue
+            ordered.append(merged_by_path[path_key])
+            seen_paths.add(path_key)
+        for intake in incoming:
+            path_key = str(intake.package_path)
+            if path_key in seen_paths:
+                continue
+            ordered.append(merged_by_path[path_key])
+            seen_paths.add(path_key)
+        return tuple(ordered)
 
 
 def _discovery_source_label(provider: str) -> str:

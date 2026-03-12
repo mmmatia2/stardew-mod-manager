@@ -19,6 +19,22 @@ def test_initialize_known_zip_paths_returns_existing_zip_files(tmp_path: Path) -
     assert [path.name for path in known] == ["a.zip", "b.zip"]
 
 
+def test_initialize_known_zip_paths_includes_nested_zip_files(tmp_path: Path) -> None:
+    watched = tmp_path / "Downloads"
+    nested = watched / "Nexus" / "Collections"
+    nested.mkdir(parents=True)
+    _build_zip(
+        nested / "nested.zip",
+        {"Nested/manifest.json": _manifest("Nested", "Pkg.Nested", "1.0.0")},
+    )
+
+    known = initialize_known_zip_paths(watched)
+
+    assert len(known) == 1
+    assert known[0].name == "nested.zip"
+    assert known[0].parent == nested
+
+
 def test_poll_detects_new_valid_package_and_classifies_new_install(tmp_path: Path) -> None:
     watched = tmp_path / "Downloads"
     watched.mkdir()
@@ -38,6 +54,29 @@ def test_poll_detects_new_valid_package_and_classifies_new_install(tmp_path: Pat
     assert len(result.intakes) == 1
     intake = result.intakes[0]
     assert intake.package_path.name == "new_mod.zip"
+    assert intake.classification == "new_install_candidate"
+
+
+def test_poll_detects_new_valid_package_in_nested_subdirectory(tmp_path: Path) -> None:
+    watched = tmp_path / "Downloads"
+    nested = watched / "Nexus"
+    nested.mkdir(parents=True)
+
+    known = initialize_known_zip_paths(watched)
+    _build_zip(
+        nested / "new_mod_nested.zip",
+        {"NewMod/manifest.json": _manifest("New Mod", "Pkg.NewMod", "1.0.0")},
+    )
+
+    result = poll_watched_directory(
+        watched_path=watched,
+        known_zip_paths=known,
+        inventory=_empty_inventory(),
+    )
+
+    assert len(result.intakes) == 1
+    intake = result.intakes[0]
+    assert intake.package_path.name == "new_mod_nested.zip"
     assert intake.classification == "new_install_candidate"
 
 

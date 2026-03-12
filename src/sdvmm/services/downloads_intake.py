@@ -118,7 +118,10 @@ def _inspect_new_package(package_path: Path, inventory: ModsInventory) -> Downlo
 def _list_zip_files(watched_path: Path) -> list[Path]:
     zip_paths = [
         item
-        for item in sorted(watched_path.iterdir(), key=lambda path: path.name.lower())
+        for item in sorted(
+            watched_path.rglob("*"),
+            key=lambda path: str(path.relative_to(watched_path)).lower(),
+        )
         if item.is_file() and item.suffix.lower() == ".zip"
     ]
     return zip_paths

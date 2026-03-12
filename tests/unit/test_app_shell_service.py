@@ -2333,6 +2333,27 @@ def test_correlate_intake_with_updates_keeps_unusable_non_actionable(tmp_path: P
     assert "unusable" in correlation.summary.casefold()
 
 
+def test_correlate_intake_with_updates_new_install_candidate_has_default_flow_message(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    intake = _intake_result(
+        package_path=tmp_path / "new-install.zip",
+        classification="new_install_candidate",
+        matched_installed_unique_ids=tuple(),
+    )
+
+    correlation = service.correlate_intake_with_updates(
+        intake=intake,
+        update_report=None,
+        guided_update_unique_ids=tuple(),
+    )
+
+    assert correlation.actionable is True
+    assert "new install candidate" in correlation.summary.casefold()
+    assert "plan install" in correlation.next_step.casefold()
+
+
 def _empty_inventory():
     from sdvmm.domain.models import ModsInventory
 
