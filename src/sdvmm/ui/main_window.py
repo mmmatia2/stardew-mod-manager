@@ -108,6 +108,7 @@ from sdvmm.domain.smapi_log_codes import (
 from sdvmm.ui.background_task import BackgroundTask
 from sdvmm.ui.bottom_details_region import BottomDetailsRegion
 from sdvmm.ui.global_status_strip import GlobalStatusStrip
+from sdvmm.ui.top_context_surface import TopContextSurface
 
 _ROLE_MOD_UPDATE_STATUS = int(Qt.ItemDataRole.UserRole) + 1
 _ROLE_REMOTE_LINK = int(Qt.ItemDataRole.UserRole) + 2
@@ -367,80 +368,17 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(6, 4, 6, 4)
         root_layout.setSpacing(4)
 
-        context_group = QGroupBox("Context")
-        context_group.setObjectName("top_context_surface_group")
-        context_group.setFlat(True)
-        context_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        context_group = TopContextSurface(
+            environment_status_label=self._environment_status_label,
+            smapi_update_status_label=self._smapi_update_status_label,
+            smapi_log_status_label=self._smapi_log_status_label,
+            nexus_status_label=self._nexus_status_label,
+            watch_status_label=self._watch_status_label,
+            operation_state_label=self._operation_state_label,
+            scan_context_label=self._scan_context_label,
+            install_context_label=self._install_context_label,
+        )
         self._context_group = context_group
-        context_layout = QGridLayout(context_group)
-        context_layout.setContentsMargins(6, 3, 6, 3)
-        context_layout.setHorizontalSpacing(10)
-        context_layout.setVerticalSpacing(2)
-
-        environment_group = QWidget()
-        environment_group.setObjectName("top_context_environment_panel")
-        environment_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        environment_container_layout = QVBoxLayout(environment_group)
-        environment_container_layout.setContentsMargins(4, 2, 4, 2)
-        environment_container_layout.setSpacing(2)
-        environment_container_layout.addWidget(_section_label("Environment"))
-        environment_layout = QGridLayout()
-        environment_layout.setContentsMargins(0, 0, 0, 0)
-        environment_layout.setHorizontalSpacing(8)
-        environment_layout.setVerticalSpacing(2)
-        environment_layout.addWidget(_context_caption("Game"), 0, 0)
-        environment_layout.addWidget(self._environment_status_label, 0, 1)
-        environment_layout.addWidget(_context_caption("SMAPI update"), 1, 0)
-        environment_layout.addWidget(self._smapi_update_status_label, 1, 1)
-        environment_layout.addWidget(_context_caption("SMAPI log"), 2, 0)
-        environment_layout.addWidget(self._smapi_log_status_label, 2, 1)
-        environment_layout.setColumnStretch(1, 1)
-        environment_container_layout.addLayout(environment_layout)
-
-        runtime_group = QWidget()
-        runtime_group.setObjectName("top_context_runtime_panel")
-        runtime_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        runtime_container_layout = QVBoxLayout(runtime_group)
-        runtime_container_layout.setContentsMargins(4, 2, 4, 2)
-        runtime_container_layout.setSpacing(2)
-        runtime_container_layout.addWidget(_section_label("Runtime"))
-        runtime_layout = QGridLayout()
-        runtime_layout.setContentsMargins(0, 0, 0, 0)
-        runtime_layout.setHorizontalSpacing(8)
-        runtime_layout.setVerticalSpacing(2)
-        runtime_layout.addWidget(_context_caption("Nexus"), 0, 0)
-        runtime_layout.addWidget(self._nexus_status_label, 0, 1)
-        runtime_layout.addWidget(_context_caption("Watcher"), 1, 0)
-        runtime_layout.addWidget(self._watch_status_label, 1, 1)
-        runtime_layout.addWidget(_context_caption("Operation"), 2, 0)
-        runtime_layout.addWidget(self._operation_state_label, 2, 1)
-        runtime_layout.setColumnStretch(1, 1)
-        runtime_container_layout.addLayout(runtime_layout)
-
-        paths_group = QWidget()
-        paths_group.setObjectName("top_context_active_context_panel")
-        paths_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        paths_container_layout = QVBoxLayout(paths_group)
-        paths_container_layout.setContentsMargins(4, 2, 4, 2)
-        paths_container_layout.setSpacing(2)
-        paths_container_layout.addWidget(_section_label("Active Context"))
-        paths_layout = QGridLayout()
-        paths_layout.setContentsMargins(0, 0, 0, 0)
-        paths_layout.setHorizontalSpacing(8)
-        paths_layout.setVerticalSpacing(2)
-        paths_layout.addWidget(_context_caption("Scan source"), 0, 0)
-        paths_layout.addWidget(self._scan_context_label, 0, 1)
-        paths_layout.addWidget(_context_caption("Install destination"), 1, 0)
-        paths_layout.addWidget(self._install_context_label, 1, 1)
-        paths_layout.setColumnStretch(1, 1)
-        paths_container_layout.addLayout(paths_layout)
-
-        context_layout.addWidget(environment_group, 0, 0)
-        context_layout.addWidget(runtime_group, 0, 1)
-        context_layout.addWidget(paths_group, 0, 2)
-        context_layout.setColumnStretch(0, 1)
-        context_layout.setColumnStretch(1, 1)
-        context_layout.setColumnStretch(2, 2)
         root_layout.addWidget(context_group)
 
         setup_group = QGroupBox("Setup and Configuration")
