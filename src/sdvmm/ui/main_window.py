@@ -310,8 +310,11 @@ class MainWindow(QMainWindow):
         )
 
         self._status_strip_label = QLabel("Waiting for action.")
+        self._status_strip_label.setObjectName("global_status_current_label")
         self._blocking_issues_strip_label = QLabel("No blocking issues detected.")
+        self._blocking_issues_strip_label.setObjectName("global_status_blocking_label")
         self._next_step_strip_label = QLabel("Run Scan to refresh installed inventory.")
+        self._next_step_strip_label.setObjectName("global_status_next_step_label")
         self._scan_context_label = QLabel("Not set")
         self._install_context_label = QLabel("Not set")
         self._environment_status_label = QLabel("Not checked")
@@ -844,6 +847,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(workspace_splitter, 1)
 
         status_strip_group = QGroupBox("Global Status")
+        status_strip_group.setObjectName("global_status_strip_group")
         status_strip_group.setFlat(True)
         status_strip_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         status_strip_layout = QHBoxLayout(status_strip_group)
@@ -865,6 +869,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(status_strip_group)
 
         summary_tab = QWidget()
+        summary_tab.setObjectName("bottom_summary_tab")
         summary_tab_layout = QVBoxLayout(summary_tab)
         summary_tab_layout.setContentsMargins(6, 4, 6, 4)
         summary_tab_layout.setSpacing(4)
@@ -879,6 +884,7 @@ class MainWindow(QMainWindow):
         summary_tab_layout.addWidget(summary_help_label)
         summary_tab_layout.addWidget(self._details_toggle)
         details_group = QGroupBox("Detailed output")
+        details_group.setObjectName("bottom_summary_details_group")
         details_group.setFlat(True)
         details_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         details_layout = QVBoxLayout(details_group)
@@ -889,6 +895,7 @@ class MainWindow(QMainWindow):
         summary_tab_layout.addWidget(details_group, 1)
 
         secondary_group = QGroupBox("Details")
+        secondary_group.setObjectName("bottom_details_group")
         secondary_group.setFlat(True)
         secondary_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         secondary_layout = QVBoxLayout(secondary_group)
@@ -896,10 +903,12 @@ class MainWindow(QMainWindow):
         secondary_layout.setSpacing(4)
         self._guidance_group = secondary_group
         secondary_tabs = QTabWidget()
+        secondary_tabs.setObjectName("bottom_details_tabs")
         secondary_tabs.setDocumentMode(True)
         secondary_tabs.setUsesScrollButtons(True)
         secondary_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self._summary_tab_index = secondary_tabs.addTab(summary_tab, "Summary")
+        setup_scroll.setObjectName("bottom_setup_tab")
         self._setup_tab_index = secondary_tabs.addTab(setup_scroll, "Setup")
         self._secondary_tabs = secondary_tabs
         secondary_tabs.currentChanged.connect(self._on_secondary_tab_changed)
