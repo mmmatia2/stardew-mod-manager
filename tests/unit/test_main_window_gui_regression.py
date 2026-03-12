@@ -4,7 +4,16 @@ import os
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication, QGroupBox, QLabel, QScrollArea, QTabWidget, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QWidget,
+)
 
 from sdvmm.app.shell_service import AppShellService
 from sdvmm.ui.main_window import MainWindow
@@ -110,3 +119,39 @@ def test_main_window_top_context_value_labels_exist(main_window: MainWindow) -> 
         label = main_window.findChild(QLabel, name)
         assert label is not None
         assert label.text().strip() != ""
+
+
+def test_main_window_setup_surface_group_and_scroll_exist(main_window: MainWindow) -> None:
+    setup_group = main_window.findChild(QGroupBox, "setup_surface_group")
+    setup_scroll = main_window._setup_scroll
+
+    assert setup_group is not None
+    assert setup_scroll is not None
+    assert isinstance(setup_scroll, QScrollArea)
+    assert setup_group.isVisible()
+    assert setup_scroll.widget() is setup_group
+    assert main_window._setup_group is setup_group
+    assert main_window._setup_scroll is setup_scroll
+
+
+def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: MainWindow) -> None:
+    input_names = (
+        "setup_game_path_input",
+        "setup_mods_path_input",
+        "setup_sandbox_mods_input",
+        "setup_sandbox_archive_input",
+        "setup_real_archive_input",
+        "setup_nexus_api_key_input",
+    )
+    button_names = (
+        "setup_save_config_button",
+        "setup_detect_environment_button",
+    )
+
+    for name in input_names:
+        control = main_window.findChild(QLineEdit, name)
+        assert control is not None
+
+    for name in button_names:
+        button = main_window.findChild(QPushButton, name)
+        assert button is not None
