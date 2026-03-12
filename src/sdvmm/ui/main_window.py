@@ -105,6 +105,7 @@ from sdvmm.domain.smapi_log_codes import (
 )
 from sdvmm.ui.background_task import BackgroundTask
 from sdvmm.ui.bottom_details_region import BottomDetailsRegion
+from sdvmm.ui.discovery_tab_surface import DiscoveryTabSurface
 from sdvmm.ui.global_status_strip import GlobalStatusStrip
 from sdvmm.ui.plan_install_tab_surface import PlanInstallTabSurface
 from sdvmm.ui.setup_configuration_surface import SetupConfigurationSurface
@@ -558,48 +559,21 @@ class MainWindow(QMainWindow):
         context_tabs.setDocumentMode(True)
         self._context_tabs = context_tabs
 
-        discovery_tab = QWidget()
-        discovery_tab.setObjectName("discovery_tab")
-        discovery_layout = QVBoxLayout(discovery_tab)
-        discovery_layout.setContentsMargins(6, 6, 6, 6)
-        discovery_layout.setSpacing(6)
-        discovery_search_group = QGroupBox("Search and Source")
-        discovery_search_group.setObjectName("discovery_search_group")
-        discovery_search_group.setFlat(True)
-        discovery_search_group.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
-        )
-        discovery_search_layout = QGridLayout(discovery_search_group)
-        discovery_search_layout.setContentsMargins(8, 6, 8, 6)
-        discovery_search_layout.setHorizontalSpacing(8)
-        discovery_search_layout.setVerticalSpacing(4)
-        discovery_search_layout.addWidget(QLabel("Search query"), 0, 0)
-        discovery_search_layout.addWidget(self._discovery_query_input, 0, 1, 1, 2)
         self._search_mods_button = QPushButton("Search mods")
         self._search_mods_button.setObjectName("discovery_search_button")
         self._search_mods_button.clicked.connect(self._on_search_discovery)
         _set_primary_button_style(self._search_mods_button)
-        discovery_search_layout.addWidget(self._search_mods_button, 0, 3)
         open_discovered_button = QPushButton("Open discovered page")
         open_discovered_button.clicked.connect(self._on_open_discovered_page)
         _set_secondary_button_style(open_discovered_button)
-        discovery_search_layout.addWidget(open_discovered_button, 1, 3)
-        discovery_search_layout.setColumnStretch(1, 1)
-        discovery_layout.addWidget(discovery_search_group)
-        discovery_results_group = QGroupBox("Results")
-        discovery_results_group.setObjectName("discovery_results_group")
-        discovery_results_group.setFlat(True)
-        discovery_results_layout = QVBoxLayout(discovery_results_group)
-        discovery_results_layout.setContentsMargins(8, 6, 8, 6)
-        discovery_filter_layout = QHBoxLayout()
-        discovery_filter_layout.setSpacing(6)
-        discovery_filter_layout.addWidget(QLabel("Filter"))
-        discovery_filter_layout.addWidget(self._discovery_filter_input, 1)
-        discovery_filter_layout.addWidget(self._discovery_filter_stats_label)
-        discovery_results_layout.addLayout(discovery_filter_layout)
-        discovery_results_layout.addWidget(self._discovery_table)
-        discovery_layout.addWidget(discovery_results_group)
-        discovery_layout.setStretch(1, 1)
+        discovery_tab = DiscoveryTabSurface(
+            discovery_query_input=self._discovery_query_input,
+            discovery_filter_input=self._discovery_filter_input,
+            discovery_filter_stats_label=self._discovery_filter_stats_label,
+            discovery_table=self._discovery_table,
+            discovery_search_button=self._search_mods_button,
+            open_discovered_button=open_discovered_button,
+        )
         context_tabs.addTab(discovery_tab, "Discovery")
 
         intake_tab = QWidget()
