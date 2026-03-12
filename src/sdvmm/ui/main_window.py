@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
 
         self._findings_box = QPlainTextEdit()
         self._findings_box.setReadOnly(True)
-        self._findings_box.setMinimumHeight(110)
+        self._findings_box.setMinimumHeight(140)
         self._findings_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._package_inspection_result_box = QPlainTextEdit()
         self._package_inspection_result_box.setReadOnly(True)
@@ -307,9 +307,9 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
-        self._status_label = QLabel()
-        self._blocking_issues_label = QLabel("No blocking issues detected.")
-        self._next_step_label = QLabel("Run Scan to refresh installed inventory.")
+        self._status_strip_label = QLabel("Waiting for action.")
+        self._blocking_issues_strip_label = QLabel("No blocking issues detected.")
+        self._next_step_strip_label = QLabel("Run Scan to refresh installed inventory.")
         self._scan_context_label = QLabel("Not set")
         self._install_context_label = QLabel("Not set")
         self._environment_status_label = QLabel("Not checked")
@@ -320,18 +320,12 @@ class MainWindow(QMainWindow):
         self._operation_state_label = QLabel("Idle")
         self._scan_context_label.setWordWrap(True)
         self._install_context_label.setWordWrap(True)
-        self._status_label.setWordWrap(True)
-        self._blocking_issues_label.setWordWrap(True)
-        self._next_step_label.setWordWrap(True)
-        self._next_step_label.setStyleSheet(
-            "font-weight: 600; padding: 4px 6px; border: 1px solid #b8c8e8; background: #eef4ff;"
-        )
-        self._blocking_issues_label.setStyleSheet(
-            "padding: 4px 6px; border: 1px solid #e0d1a5; background: #fff8e6;"
-        )
-        self._status_label.setStyleSheet(
-            "padding: 4px 6px; border: 1px solid #d9d9d9; background: #f6f6f6;"
-        )
+        self._status_strip_label.setWordWrap(True)
+        self._blocking_issues_strip_label.setWordWrap(True)
+        self._next_step_strip_label.setWordWrap(True)
+        self._status_strip_label.setStyleSheet("padding: 0px; color: #1f2937;")
+        self._blocking_issues_strip_label.setStyleSheet("padding: 0px; color: #7c5a00;")
+        self._next_step_strip_label.setStyleSheet("padding: 0px; color: #1d4f91; font-weight: 600;")
         self._details_toggle = QCheckBox("Show detailed output")
         self._watch_timer = QTimer(self)
         self._watch_timer.setInterval(2000)
@@ -753,11 +747,11 @@ class MainWindow(QMainWindow):
         archive_tab = QWidget()
         archive_layout = QVBoxLayout(archive_tab)
         archive_layout.setContentsMargins(6, 6, 6, 6)
-        archive_layout.setSpacing(6)
+        archive_layout.setSpacing(0)
         archive_controls_group = QGroupBox("Archive Browser")
         archive_controls_group.setFlat(True)
         archive_controls_group.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
         archive_controls_layout = QGridLayout(archive_controls_group)
         archive_controls_layout.setContentsMargins(8, 6, 8, 6)
@@ -781,11 +775,14 @@ class MainWindow(QMainWindow):
         self._delete_archived_button.setEnabled(False)
         archive_controls_layout.addWidget(self._delete_archived_button, 1, 3)
         archive_layout.addWidget(archive_controls_group)
-        archive_table_label = QLabel("Archived Entries (real + sandbox)")
-        archive_table_label.setStyleSheet("font-weight: 600; color: #374151;")
-        archive_layout.addWidget(archive_table_label)
-        archive_layout.addWidget(self._archive_table)
-        archive_layout.setStretch(1, 1)
+        archive_results_group = QGroupBox("Archived Entries (real + sandbox)")
+        archive_results_group.setFlat(True)
+        archive_results_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        archive_results_layout = QVBoxLayout(archive_results_group)
+        archive_results_layout.setContentsMargins(8, 0, 8, 6)
+        archive_results_layout.setSpacing(0)
+        archive_results_layout.addWidget(self._archive_table)
+        archive_layout.addWidget(archive_results_group, 1)
         self._archive_table.itemSelectionChanged.connect(self._on_archive_selection_changed)
         context_tabs.addTab(archive_tab, "Archive")
 
@@ -844,45 +841,69 @@ class MainWindow(QMainWindow):
         workspace_splitter.setStretchFactor(1, 5)
         root_layout.addWidget(workspace_splitter, 1)
 
-        guidance_group = QGroupBox("Guidance and Status")
-        guidance_group.setFlat(True)
-        guidance_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        guidance_layout = QVBoxLayout(guidance_group)
-        guidance_layout.setContentsMargins(8, 6, 8, 6)
-        guidance_layout.setSpacing(6)
-        summary_header_label = QLabel("Operational Summary")
+        status_strip_group = QGroupBox("Global Status")
+        status_strip_group.setFlat(True)
+        status_strip_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        status_strip_layout = QHBoxLayout(status_strip_group)
+        status_strip_layout.setContentsMargins(8, 6, 8, 6)
+        status_strip_layout.setSpacing(8)
+        status_strip_layout.addWidget(
+            _build_status_panel("Current status", self._status_strip_label),
+            1,
+        )
+        status_strip_layout.addWidget(
+            _build_status_panel("Blocking issues", self._blocking_issues_strip_label),
+            1,
+        )
+        status_strip_layout.addWidget(
+            _build_status_panel("Recommended next step", self._next_step_strip_label),
+            1,
+        )
+        self._status_strip_group = status_strip_group
+        root_layout.addWidget(status_strip_group)
+
+        summary_tab = QWidget()
+        summary_tab_layout = QVBoxLayout(summary_tab)
+        summary_tab_layout.setContentsMargins(8, 6, 8, 6)
+        summary_tab_layout.setSpacing(6)
+        summary_header_label = QLabel("Operational Detail")
         summary_header_label.setStyleSheet("font-weight: 600; color: #374151;")
-        guidance_layout.addWidget(summary_header_label)
-        summary_layout = QGridLayout()
-        summary_layout.setHorizontalSpacing(8)
-        summary_layout.setVerticalSpacing(4)
-        summary_layout.addWidget(_summary_caption("Current status"), 0, 0)
-        summary_layout.addWidget(self._status_label, 0, 1)
-        summary_layout.addWidget(_summary_caption("Blocking issues"), 1, 0)
-        summary_layout.addWidget(self._blocking_issues_label, 1, 1)
-        summary_layout.addWidget(_summary_caption("Recommended next step"), 2, 0)
-        summary_layout.addWidget(self._next_step_label, 2, 1)
-        summary_layout.setColumnStretch(1, 1)
-        guidance_layout.addLayout(summary_layout)
-        guidance_layout.addWidget(self._details_toggle)
+        summary_tab_layout.addWidget(summary_header_label)
+        summary_help_label = QLabel(
+            "Use this tab for the full narrative output of the last operation. The Global Status strip above stays visible for quick status reading."
+        )
+        summary_help_label.setWordWrap(True)
+        summary_help_label.setStyleSheet("color: #4b5563;")
+        summary_tab_layout.addWidget(summary_help_label)
+        summary_tab_layout.addWidget(self._details_toggle)
         details_group = QGroupBox("Detailed output")
         details_group.setFlat(True)
+        details_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         details_layout = QVBoxLayout(details_group)
         details_layout.setContentsMargins(8, 6, 8, 6)
         details_layout.addWidget(self._findings_box)
         details_group.setVisible(False)
         self._details_group = details_group
-        self._guidance_group = guidance_group
-        guidance_layout.addWidget(details_group)
+        summary_tab_layout.addWidget(details_group, 1)
+
+        secondary_group = QGroupBox("Details")
+        secondary_group.setFlat(True)
+        secondary_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        secondary_layout = QVBoxLayout(secondary_group)
+        secondary_layout.setContentsMargins(8, 6, 8, 6)
+        secondary_layout.setSpacing(6)
+        self._guidance_group = secondary_group
         secondary_tabs = QTabWidget()
         secondary_tabs.setDocumentMode(True)
         secondary_tabs.setUsesScrollButtons(True)
         secondary_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        self._summary_tab_index = secondary_tabs.addTab(guidance_group, "Summary")
+        self._summary_tab_index = secondary_tabs.addTab(summary_tab, "Summary")
         self._setup_tab_index = secondary_tabs.addTab(setup_scroll, "Setup")
         self._secondary_tabs = secondary_tabs
         secondary_tabs.currentChanged.connect(self._on_secondary_tab_changed)
-        root_layout.addWidget(secondary_tabs)
+        secondary_layout.addWidget(secondary_tabs)
+        self._secondary_group = secondary_group
+        root_layout.addWidget(secondary_group)
         self._apply_guidance_compact_mode(details_visible=False)
         self._background_action_buttons = (
             self._scan_button,
@@ -2099,8 +2120,8 @@ class MainWindow(QMainWindow):
         self._on_archive_selection_changed()
 
     def _set_status(self, text: str) -> None:
-        self._status_label.setText(text)
-        self._status_label.setToolTip(text)
+        self._status_strip_label.setText(text)
+        self._status_strip_label.setToolTip(text)
 
     def _run_background_operation(
         self,
@@ -2192,10 +2213,10 @@ class MainWindow(QMainWindow):
     def _set_details_text(self, text: str) -> None:
         self._findings_box.setPlainText(text)
         blocking_issue, next_step = _summarize_details_text(text)
-        self._blocking_issues_label.setText(blocking_issue)
-        self._next_step_label.setText(next_step)
-        self._blocking_issues_label.setToolTip(blocking_issue)
-        self._next_step_label.setToolTip(next_step)
+        self._blocking_issues_strip_label.setText(blocking_issue)
+        self._next_step_strip_label.setText(next_step)
+        self._blocking_issues_strip_label.setToolTip(blocking_issue)
+        self._next_step_strip_label.setToolTip(next_step)
 
     def _set_package_inspection_result_text(self, text: str | None) -> None:
         has_text = bool(text and text.strip())
@@ -2586,13 +2607,17 @@ class MainWindow(QMainWindow):
         inventory_controls_cap = max(160, min(220, int(window_height * 0.30)))
         flow_hint_cap = max(32, min(58, int(window_height * 0.08)))
         intake_result_cap = max(120, min(190, int(window_height * 0.24)))
-        setup_cap = max(150, min(210, int(window_height * 0.26)))
-        details_cap = max(110, min(220, int(window_height * 0.28)))
-        guidance_closed_cap = max(120, min(156, int(window_height * 0.20)))
-        guidance_open_cap = max(180, min(230, int(window_height * 0.29)))
+        status_strip_cap = max(64, min(90, int(window_height * 0.12)))
+        setup_cap = max(150, min(190, int(window_height * 0.24)))
+        details_cap = max(140, min(240, int(window_height * 0.32)))
+        guidance_closed_cap = max(150, min(190, int(window_height * 0.24)))
+        guidance_open_cap = max(240, min(320, int(window_height * 0.40)))
 
         if hasattr(self, "_context_group"):
             self._context_group.setMaximumHeight(context_cap)
+
+        if hasattr(self, "_status_strip_group"):
+            self._status_strip_group.setMaximumHeight(status_strip_cap)
 
         if hasattr(self, "_inventory_controls_tabs"):
             self._inventory_controls_tabs.setMaximumHeight(inventory_controls_cap)
@@ -2613,10 +2638,14 @@ class MainWindow(QMainWindow):
             current_index = self._secondary_tabs.currentIndex()
             if current_index == self._setup_tab_index:
                 secondary_cap = setup_cap
+                if self._details_group.isVisible():
+                    secondary_cap = max(secondary_cap, guidance_open_cap)
             else:
                 secondary_cap = (
                     guidance_open_cap if self._details_group.isVisible() else guidance_closed_cap
                 )
+            if hasattr(self, "_secondary_group"):
+                self._secondary_group.setMaximumHeight(secondary_cap)
             self._secondary_tabs.setMaximumHeight(secondary_cap)
 
     @staticmethod
@@ -2647,11 +2676,20 @@ def _section_label(text: str) -> QLabel:
     return label
 
 
-def _summary_caption(text: str) -> QLabel:
-    label = QLabel(text)
-    label.setStyleSheet("color: #4b5563; font-weight: 600;")
-    label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-    return label
+def _build_status_panel(title: str, value_label: QLabel) -> QWidget:
+    panel = QFrame()
+    panel.setFrameShape(QFrame.Shape.StyledPanel)
+    panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    layout = QVBoxLayout(panel)
+    layout.setContentsMargins(6, 4, 6, 4)
+    layout.setSpacing(2)
+    title_label = QLabel(title)
+    title_label.setStyleSheet("color: #4b5563; font-weight: 600;")
+    title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    layout.addWidget(title_label)
+    layout.addWidget(value_label)
+    return panel
 
 
 def _set_primary_button_style(button: QPushButton) -> None:

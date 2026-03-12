@@ -36,9 +36,9 @@ def test_save_and_load_app_config_round_trip(tmp_path: Path) -> None:
 
     payload = json.loads(state_file.read_text(encoding="utf-8"))
     assert payload["version"] == APP_STATE_VERSION
-    assert payload["app_config"]["sandbox_mods_path"] == "/tmp/Sandbox/Mods"
-    assert payload["app_config"]["watched_downloads_path"] == "/tmp/Downloads"
-    assert payload["app_config"]["real_archive_path"] == "/games/Stardew Valley/Mods/.sdvmm-archive"
+    assert payload["app_config"]["sandbox_mods_path"] == str(config.sandbox_mods_path)
+    assert payload["app_config"]["watched_downloads_path"] == str(config.watched_downloads_path)
+    assert payload["app_config"]["real_archive_path"] == str(config.real_archive_path)
     assert payload["app_config"]["nexus_api_key"] == "test-nexus-key"
     assert payload["app_config"]["install_target"] == "configured_real_mods"
 

@@ -311,7 +311,7 @@ def test_archive_restore_result_text_shows_destination_and_target_path() -> None
 
     assert "Archive restore completed" in text
     assert "Game Mods destination (real)" in text
-    assert "/tmp/RealMods/RestoreReal" in text
+    assert str(result.restored_target) in text
 
 
 def test_mod_rollback_result_text_shows_destination_and_paths() -> None:
@@ -354,5 +354,5 @@ def test_mod_rollback_result_text_shows_destination_and_paths() -> None:
 
     assert "Mod rollback completed." in text
     assert "Sandbox Mods destination" in text
-    assert "/tmp/SandboxArchive/SampleMod__sdvmm_archive_002" in text
-    assert "/tmp/SandboxMods/SampleMod" in text
+    assert str(result.archived_current_target) in text
+    assert str(result.restored_target) in text
