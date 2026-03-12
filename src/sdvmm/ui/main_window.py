@@ -106,6 +106,7 @@ from sdvmm.domain.smapi_log_codes import (
     SMAPI_LOG_WARNING,
 )
 from sdvmm.ui.background_task import BackgroundTask
+from sdvmm.ui.bottom_details_region import BottomDetailsRegion
 from sdvmm.ui.global_status_strip import GlobalStatusStrip
 
 _ROLE_MOD_UPDATE_STATUS = int(Qt.ItemDataRole.UserRole) + 1
@@ -841,53 +842,19 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(self._status_strip_group)
 
-        summary_tab = QWidget()
-        summary_tab.setObjectName("bottom_summary_tab")
-        summary_tab_layout = QVBoxLayout(summary_tab)
-        summary_tab_layout.setContentsMargins(6, 4, 6, 4)
-        summary_tab_layout.setSpacing(4)
-        summary_header_label = QLabel("Operational Detail")
-        _set_section_label_style(summary_header_label)
-        summary_tab_layout.addWidget(summary_header_label)
-        summary_help_label = QLabel(
-            "Use this tab for the full narrative output of the last operation. The Global Status strip above stays visible for quick status reading."
+        bottom_details_region = BottomDetailsRegion(
+            details_toggle=self._details_toggle,
+            findings_box=self._findings_box,
+            setup_scroll=setup_scroll,
         )
-        summary_help_label.setWordWrap(True)
-        _set_auxiliary_label_style(summary_help_label)
-        summary_tab_layout.addWidget(summary_help_label)
-        summary_tab_layout.addWidget(self._details_toggle)
-        details_group = QGroupBox("Detailed output")
-        details_group.setObjectName("bottom_summary_details_group")
-        details_group.setFlat(True)
-        details_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        details_layout = QVBoxLayout(details_group)
-        details_layout.setContentsMargins(6, 4, 6, 4)
-        details_layout.addWidget(self._findings_box)
-        details_group.setVisible(False)
-        self._details_group = details_group
-        summary_tab_layout.addWidget(details_group, 1)
-
-        secondary_group = QGroupBox("Details")
-        secondary_group.setObjectName("bottom_details_group")
-        secondary_group.setFlat(True)
-        secondary_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        secondary_layout = QVBoxLayout(secondary_group)
-        secondary_layout.setContentsMargins(6, 4, 6, 4)
-        secondary_layout.setSpacing(4)
-        self._guidance_group = secondary_group
-        secondary_tabs = QTabWidget()
-        secondary_tabs.setObjectName("bottom_details_tabs")
-        secondary_tabs.setDocumentMode(True)
-        secondary_tabs.setUsesScrollButtons(True)
-        secondary_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        self._summary_tab_index = secondary_tabs.addTab(summary_tab, "Summary")
-        setup_scroll.setObjectName("bottom_setup_tab")
-        self._setup_tab_index = secondary_tabs.addTab(setup_scroll, "Setup")
-        self._secondary_tabs = secondary_tabs
-        secondary_tabs.currentChanged.connect(self._on_secondary_tab_changed)
-        secondary_layout.addWidget(secondary_tabs)
-        self._secondary_group = secondary_group
-        root_layout.addWidget(secondary_group)
+        self._guidance_group = bottom_details_region
+        self._secondary_group = bottom_details_region
+        self._details_group = bottom_details_region.details_group
+        self._secondary_tabs = bottom_details_region.tabs
+        self._summary_tab_index = bottom_details_region.summary_tab_index
+        self._setup_tab_index = bottom_details_region.setup_tab_index
+        self._secondary_tabs.currentChanged.connect(self._on_secondary_tab_changed)
+        root_layout.addWidget(bottom_details_region)
         self._apply_guidance_compact_mode(details_visible=False)
         self._background_action_buttons = (
             self._scan_button,
