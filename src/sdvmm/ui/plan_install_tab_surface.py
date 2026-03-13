@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QFont
 from PySide6.QtGui import QPalette
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox
 from PySide6.QtWidgets import QComboBox
 from PySide6.QtWidgets import QGridLayout
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import QGroupBox
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QScrollArea
 from PySide6.QtWidgets import QSizePolicy
 from PySide6.QtWidgets import QVBoxLayout
 from PySide6.QtWidgets import QWidget
@@ -28,8 +30,23 @@ class PlanInstallTabSurface(QWidget):
         self.setObjectName("plan_install_tab")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("plan_install_scroll_area")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        content.setObjectName("plan_install_tab_content")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(6, 6, 6, 6)
+        content_layout.setSpacing(6)
+
+        scroll_area.setWidget(content)
+        layout.addWidget(scroll_area)
 
         destination_group = QGroupBox("Destination and Safety Context")
         destination_group.setObjectName("plan_install_destination_group")
@@ -45,7 +62,7 @@ class PlanInstallTabSurface(QWidget):
         destination_layout.addWidget(install_target_combo, 0, 1)
         destination_layout.addWidget(overwrite_checkbox, 0, 2)
         destination_layout.addWidget(install_archive_label, 1, 0, 1, 3)
-        layout.addWidget(destination_group)
+        content_layout.addWidget(destination_group)
 
         execute_group = QGroupBox("Plan and Execute")
         execute_group.setObjectName("plan_install_execute_group")
@@ -69,11 +86,14 @@ class PlanInstallTabSurface(QWidget):
         _set_auxiliary_label_style(caution_label)
         execute_layout.addWidget(caution_label)
 
-        layout.addWidget(execute_group)
-        layout.addStretch(1)
+        content_layout.addWidget(execute_group)
+        content_layout.addStretch(1)
 
         self.destination_group = destination_group
         self.execute_group = execute_group
+        self.scroll_area = scroll_area
+        self.content_widget = content
+        self.content_layout = content_layout
 
 
 def _set_label_font_weight(label: QLabel, *, bold: bool = False) -> None:

@@ -107,6 +107,7 @@ def test_main_window_bottom_details_tabs_include_summary_and_setup(
 
 def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow) -> None:
     plan_tab = main_window.findChild(QWidget, "plan_install_tab")
+    plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
     summary_tab = main_window.findChild(QWidget, "bottom_summary_tab")
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
     recovery_output_box = main_window.findChild(QPlainTextEdit, "recovery_local_output_box")
@@ -115,13 +116,14 @@ def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow)
     run_recovery_button = main_window.findChild(QPushButton, "recovery_execute_button")
 
     assert plan_tab is not None
+    assert plan_content is not None
     assert summary_tab is not None
     assert recovery_group is not None
     assert recovery_output_box is not None
     assert recovery_combo is not None
     assert recovery_button is not None
     assert run_recovery_button is not None
-    assert recovery_group.parentWidget() is plan_tab
+    assert recovery_group.parentWidget() is plan_content
     assert summary_tab.findChild(QGroupBox, "recovery_inspection_group") is None
     assert main_window._recovery_output_box is recovery_output_box
     assert main_window._install_history_combo is recovery_combo
@@ -429,7 +431,10 @@ def test_main_window_plan_install_surface_has_expected_structure(
 ) -> None:
     context_tabs = main_window._context_tabs
     plan_tab = main_window.findChild(QWidget, "plan_install_tab")
+    plan_scroll = main_window.findChild(QScrollArea, "plan_install_scroll_area")
+    plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
     destination_group = main_window.findChild(QGroupBox, "plan_install_destination_group")
+    safety_panel_group = main_window.findChild(QGroupBox, "plan_install_safety_panel_group")
     staged_package_group = main_window.findChild(QGroupBox, "plan_install_staged_package_group")
     execute_group = main_window.findChild(QGroupBox, "plan_install_execute_group")
     plan_output_group = main_window.findChild(QGroupBox, "plan_install_output_group")
@@ -439,7 +444,10 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert context_tabs is not None
     assert isinstance(context_tabs, QTabWidget)
     assert plan_tab is not None
+    assert plan_scroll is not None
+    assert plan_content is not None
     assert destination_group is not None
+    assert safety_panel_group is not None
     assert staged_package_group is not None
     assert execute_group is not None
     assert plan_output_group is not None
@@ -450,13 +458,102 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert "Plan & Install" in tab_labels
     assert context_tabs.indexOf(plan_tab) >= 0
 
-    plan_layout = plan_tab.layout()
+    assert plan_scroll.parentWidget() is plan_tab
+    assert plan_scroll.widget() is plan_content
+
+    plan_layout = plan_content.layout()
     assert plan_layout is not None
-    assert plan_layout.indexOf(destination_group) < plan_layout.indexOf(staged_package_group)
+    assert plan_layout.indexOf(destination_group) < plan_layout.indexOf(safety_panel_group)
+    assert plan_layout.indexOf(safety_panel_group) < plan_layout.indexOf(staged_package_group)
     assert plan_layout.indexOf(staged_package_group) < plan_layout.indexOf(execute_group)
     assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_output_group)
     assert plan_layout.indexOf(plan_output_group) < plan_layout.indexOf(recovery_group)
     assert plan_layout.indexOf(recovery_group) < plan_layout.indexOf(recovery_output_group)
+
+
+def test_main_window_plan_install_tab_hosts_scroll_content_for_constrained_height(
+    main_window: MainWindow,
+) -> None:
+    plan_tab = main_window.findChild(QWidget, "plan_install_tab")
+    plan_scroll = main_window.findChild(QScrollArea, "plan_install_scroll_area")
+    plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
+
+    assert plan_tab is not None
+    assert plan_scroll is not None
+    assert plan_content is not None
+    assert plan_scroll.parentWidget() is plan_tab
+    assert plan_scroll.widget() is plan_content
+    assert plan_scroll.widgetResizable() is True
+
+
+def test_main_window_plan_install_safety_panel_exists_and_sandbox_text_is_present(
+    main_window: MainWindow,
+) -> None:
+    panel_group = main_window.findChild(QGroupBox, "plan_install_safety_panel_group")
+    panel_text = main_window.findChild(QLabel, "plan_install_safety_panel_text")
+    plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
+
+    assert panel_group is not None
+    assert panel_text is not None
+    assert plan_content is not None
+    assert panel_group.parentWidget() is plan_content
+    assert "Sandbox destination selected (recommended/test path)." in panel_text.text()
+    assert "Destination Mods path:" in panel_text.text()
+    assert "Archive path:" in panel_text.text()
+
+
+def test_main_window_plan_install_safety_panel_updates_for_real_target(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    panel_text = main_window.findChild(QLabel, "plan_install_safety_panel_text")
+    install_target_combo = main_window._install_target_combo
+    real_index = install_target_combo.findData(INSTALL_TARGET_CONFIGURED_REAL_MODS)
+
+    assert panel_text is not None
+    assert real_index >= 0
+
+    main_window._mods_path_input.setText(r"C:\Game\Mods")
+    main_window._real_archive_path_input.setText(r"C:\Game\.sdvmm-real-archive")
+    install_target_combo.setCurrentIndex(real_index)
+    qapp.processEvents()
+
+    text = panel_text.text()
+    assert "REAL game Mods destination selected (live changes warning)." in text
+    assert "Destination Mods path: C:\\Game\\Mods" in text
+    assert "Archive path: C:\\Game\\.sdvmm-real-archive" in text
+    assert "Explicit confirmation is required before execution." in text
+    assert "Inspect Recovery after execution if rollback is needed." in text
+
+
+def test_main_window_plan_install_safety_panel_updates_when_paths_change(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    panel_text = main_window.findChild(QLabel, "plan_install_safety_panel_text")
+    install_target_combo = main_window._install_target_combo
+    sandbox_index = install_target_combo.findData(INSTALL_TARGET_SANDBOX_MODS)
+    real_index = install_target_combo.findData(INSTALL_TARGET_CONFIGURED_REAL_MODS)
+
+    assert panel_text is not None
+    assert sandbox_index >= 0
+    assert real_index >= 0
+
+    install_target_combo.setCurrentIndex(sandbox_index)
+    main_window._sandbox_mods_path_input.setText(r"D:\Sandbox\Mods")
+    main_window._sandbox_archive_path_input.setText(r"D:\Sandbox\.sdvmm-sandbox-archive")
+    qapp.processEvents()
+    sandbox_text = panel_text.text()
+    assert "Destination Mods path: D:\\Sandbox\\Mods" in sandbox_text
+    assert "Archive path: D:\\Sandbox\\.sdvmm-sandbox-archive" in sandbox_text
+
+    install_target_combo.setCurrentIndex(real_index)
+    main_window._mods_path_input.setText(r"E:\Game\Mods")
+    main_window._real_archive_path_input.setText(r"E:\Game\.sdvmm-real-archive")
+    qapp.processEvents()
+    real_text = panel_text.text()
+    assert "Destination Mods path: E:\\Game\\Mods" in real_text
+    assert "Archive path: E:\\Game\\.sdvmm-real-archive" in real_text
 
 
 def test_main_window_plan_install_surface_key_controls_exist(
@@ -486,6 +583,16 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert main_window._staged_package_label is staged_package_label
     assert main_window._plan_install_output_box is plan_output_box
     assert staged_package_label.isReadOnly() is True
+
+
+def test_main_window_plan_and_recovery_local_output_behavior_remains_intact(
+    main_window: MainWindow,
+) -> None:
+    main_window._set_plan_install_output_text("Plan output narrative")
+    main_window._set_recovery_output_text("Recovery output narrative")
+
+    assert main_window._plan_install_output_box.toPlainText() == "Plan output narrative"
+    assert main_window._recovery_output_box.toPlainText() == "Recovery output narrative"
 
 
 def test_main_window_packages_intake_local_output_box_exists(main_window: MainWindow) -> None:

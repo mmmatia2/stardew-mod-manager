@@ -354,14 +354,14 @@ class MainWindow(QMainWindow):
         self._plan_install_output_box = QPlainTextEdit()
         self._plan_install_output_box.setObjectName("plan_install_output_box")
         self._plan_install_output_box.setReadOnly(True)
-        self._plan_install_output_box.setMinimumHeight(92)
+        self._plan_install_output_box.setMinimumHeight(72)
         self._plan_install_output_box.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self._recovery_output_box = QPlainTextEdit()
         self._recovery_output_box.setObjectName("recovery_local_output_box")
         self._recovery_output_box.setReadOnly(True)
-        self._recovery_output_box.setMinimumHeight(92)
+        self._recovery_output_box.setMinimumHeight(72)
         self._recovery_output_box.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -393,7 +393,9 @@ class MainWindow(QMainWindow):
         self._zip_path_input.textChanged.connect(self._on_zip_path_changed)
         self._sandbox_mods_path_input.textChanged.connect(self._invalidate_pending_plan)
         self._sandbox_archive_path_input.textChanged.connect(self._invalidate_pending_plan)
+        self._sandbox_archive_path_input.textChanged.connect(self._refresh_install_safety_panel)
         self._real_archive_path_input.textChanged.connect(self._invalidate_pending_plan)
+        self._real_archive_path_input.textChanged.connect(self._refresh_install_safety_panel)
         self._overwrite_checkbox.toggled.connect(self._invalidate_pending_plan)
         self._scan_target_combo.currentIndexChanged.connect(self._refresh_scan_context_preview)
         self._install_target_combo.currentIndexChanged.connect(self._on_install_target_changed)
@@ -750,8 +752,25 @@ class MainWindow(QMainWindow):
             plan_install_button=plan_install_button,
             run_install_button=run_install_button,
         )
-        plan_tab_layout = plan_tab.layout()
+        plan_tab_layout = plan_tab.content_layout
         if isinstance(plan_tab_layout, QVBoxLayout):
+            safety_group = QGroupBox("Install Destination Safety")
+            safety_group.setObjectName("plan_install_safety_panel_group")
+            safety_group.setFlat(True)
+            safety_group.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+            )
+            safety_layout = QVBoxLayout(safety_group)
+            safety_layout.setContentsMargins(8, 6, 8, 6)
+            safety_layout.setSpacing(4)
+            safety_label = QLabel("Install safety context unavailable.")
+            safety_label.setObjectName("plan_install_safety_panel_text")
+            safety_label.setWordWrap(True)
+            safety_layout.addWidget(safety_label)
+            self._install_safety_panel_group = safety_group
+            self._install_safety_panel_label = safety_label
+            plan_tab_layout.insertWidget(1, safety_group)
+
             staged_package_group = QGroupBox("Staged Package")
             staged_package_group.setObjectName("plan_install_staged_package_group")
             staged_package_group.setFlat(True)
@@ -763,7 +782,7 @@ class MainWindow(QMainWindow):
             staged_package_layout.setSpacing(4)
             staged_package_layout.addWidget(QLabel("Current package ready for planning"))
             staged_package_layout.addWidget(self._staged_package_label)
-            plan_tab_layout.insertWidget(1, staged_package_group)
+            plan_tab_layout.insertWidget(2, staged_package_group)
 
             plan_install_output_group = QGroupBox("Plan & Install Output")
             plan_install_output_group.setObjectName("plan_install_output_group")
@@ -775,7 +794,7 @@ class MainWindow(QMainWindow):
             plan_install_output_layout.setContentsMargins(8, 6, 8, 6)
             plan_install_output_layout.setSpacing(6)
             plan_install_output_layout.addWidget(self._plan_install_output_box)
-            plan_tab_layout.insertWidget(3, plan_install_output_group)
+            plan_tab_layout.insertWidget(4, plan_install_output_group)
 
             recovery_group = QGroupBox("Recovery")
             recovery_group.setObjectName("recovery_inspection_group")
@@ -799,7 +818,7 @@ class MainWindow(QMainWindow):
             self._run_recovery_button.setEnabled(False)
             recovery_controls.addWidget(self._run_recovery_button)
             recovery_layout.addLayout(recovery_controls)
-            plan_tab_layout.insertWidget(4, recovery_group)
+            plan_tab_layout.insertWidget(5, recovery_group)
 
             recovery_output_group = QGroupBox("Recovery Output")
             recovery_output_group.setObjectName("recovery_output_group")
@@ -811,7 +830,7 @@ class MainWindow(QMainWindow):
             recovery_output_layout.setContentsMargins(8, 6, 8, 6)
             recovery_output_layout.setSpacing(6)
             recovery_output_layout.addWidget(self._recovery_output_box)
-            plan_tab_layout.insertWidget(5, recovery_output_group)
+            plan_tab_layout.insertWidget(6, recovery_output_group)
         context_tabs.addTab(plan_tab, "Plan & Install")
         self._plan_install_tab = plan_tab
 
@@ -2656,6 +2675,7 @@ class MainWindow(QMainWindow):
                 self._real_archive_path_input.setText(
                     str(Path(self._mods_path_input.text().strip()).parent / ".sdvmm-real-archive")
                 )
+            self._refresh_install_safety_panel()
             return
 
         self._install_archive_label.setText("Archive path for sandbox destination")
@@ -2669,6 +2689,44 @@ class MainWindow(QMainWindow):
             self._sandbox_archive_path_input.setText(
                 str(Path(self._sandbox_mods_path_input.text().strip()).parent / ".sdvmm-sandbox-archive")
             )
+        self._refresh_install_safety_panel()
+
+    def _refresh_install_safety_panel(self, *_: object) -> None:
+        panel_label = getattr(self, "_install_safety_panel_label", None)
+        if panel_label is None:
+            return
+
+        target = self._current_install_target()
+        if target == INSTALL_TARGET_CONFIGURED_REAL_MODS:
+            destination_path = self._mods_path_input.text().strip() or "<unset>"
+            archive_path = self._real_archive_path_input.text().strip() or "<unset>"
+            panel_label.setText(
+                "REAL game Mods destination selected (live changes warning).\n"
+                "Destination Mods path: "
+                f"{destination_path}\n"
+                "Archive path: "
+                f"{archive_path}\n"
+                "Explicit confirmation is required before execution.\n"
+                "Inspect Recovery after execution if rollback is needed."
+            )
+            panel_label.setToolTip(
+                f"Destination Mods path: {destination_path}\nArchive path: {archive_path}"
+            )
+            return
+
+        destination_path = self._sandbox_mods_path_input.text().strip() or "<unset>"
+        archive_path = self._sandbox_archive_path_input.text().strip() or "<unset>"
+        panel_label.setText(
+            "Sandbox destination selected (recommended/test path).\n"
+            "Destination Mods path: "
+            f"{destination_path}\n"
+            "Archive path: "
+            f"{archive_path}\n"
+            "Use this path to validate changes before live Mods installs."
+        )
+        panel_label.setToolTip(
+            f"Destination Mods path: {destination_path}\nArchive path: {archive_path}"
+        )
 
     def _current_scan_target(self) -> str:
         return str(self._scan_target_combo.currentData())
