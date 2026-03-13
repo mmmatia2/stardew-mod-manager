@@ -26,6 +26,9 @@ from sdvmm.domain.models import (
     InstallOperationEntryRecord,
     InstallOperationHistory,
     InstallOperationRecord,
+    InstallRecoveryPlan,
+    InstallRecoveryPlanEntry,
+    InstallRecoveryPlanSummary,
     ModDiscoveryEntry,
     ModDiscoveryResult,
     ModRemovalPlan,
@@ -220,6 +223,32 @@ class AppShellService:
             return load_install_operation_history(self._install_operation_history_file)
         except AppStateStoreError as exc:
             raise AppShellError(f"Could not load install history: {exc}") from exc
+
+    def derive_install_operation_recovery_plan(
+        self,
+        operation: InstallOperationRecord,
+    ) -> InstallRecoveryPlan:
+        entries = tuple(
+            _derive_install_operation_recovery_entry(operation, entry)
+            for entry in operation.entries
+        )
+        warnings = tuple(entry.message for entry in entries if not entry.recoverable)
+        recoverable_entry_count = sum(1 for entry in entries if entry.recoverable)
+        non_recoverable_entry_count = len(entries) - recoverable_entry_count
+        return InstallRecoveryPlan(
+            operation=operation,
+            entries=entries,
+            summary=InstallRecoveryPlanSummary(
+                total_recovery_entry_count=len(entries),
+                recoverable_entry_count=recoverable_entry_count,
+                non_recoverable_entry_count=non_recoverable_entry_count,
+                involves_archive_restore=any(
+                    entry.action == "restore_from_archive" and entry.recoverable
+                    for entry in entries
+                ),
+                warnings=warnings,
+            ),
+        )
 
     def build_install_execution_summary(
         self,
@@ -2324,6 +2353,101 @@ def _build_real_install_review_message(summary: InstallExecutionSummary) -> str:
 
 def _entry_count_label(count: int) -> str:
     return "entry" if count == 1 else "entries"
+
+
+def _derive_install_operation_recovery_entry(
+    operation: InstallOperationRecord,
+    entry: InstallOperationEntryRecord,
+) -> InstallRecoveryPlanEntry:
+    if entry.action == INSTALL_NEW:
+        if _operation_record_contains_path(operation.installed_targets, entry.target_path):
+            return InstallRecoveryPlanEntry(
+                name=entry.name,
+                unique_id=entry.unique_id,
+                version=entry.version,
+                action="remove_installed_target",
+                target_path=entry.target_path,
+                archive_path=entry.archive_path,
+                recoverable=True,
+                message=f"Remove installed target recorded for {entry.name}.",
+                warnings=entry.warnings,
+            )
+        return InstallRecoveryPlanEntry(
+            name=entry.name,
+            unique_id=entry.unique_id,
+            version=entry.version,
+            action="not_recoverable",
+            target_path=entry.target_path,
+            archive_path=entry.archive_path,
+            recoverable=False,
+            message=(
+                f"{entry.name} is not safely recoverable: the install history does not "
+                "record the installed target for removal."
+            ),
+            warnings=entry.warnings,
+        )
+
+    if entry.action == OVERWRITE_WITH_ARCHIVE:
+        if entry.archive_path is None:
+            return InstallRecoveryPlanEntry(
+                name=entry.name,
+                unique_id=entry.unique_id,
+                version=entry.version,
+                action="not_recoverable",
+                target_path=entry.target_path,
+                archive_path=entry.archive_path,
+                recoverable=False,
+                message=(
+                    f"{entry.name} is not safely recoverable: no archived target was recorded "
+                    "for restoration."
+                ),
+                warnings=entry.warnings,
+            )
+        if not _operation_record_contains_path(operation.archived_targets, entry.archive_path):
+            return InstallRecoveryPlanEntry(
+                name=entry.name,
+                unique_id=entry.unique_id,
+                version=entry.version,
+                action="not_recoverable",
+                target_path=entry.target_path,
+                archive_path=entry.archive_path,
+                recoverable=False,
+                message=(
+                    f"{entry.name} is not safely recoverable: the recorded archive target "
+                    "cannot be matched for restoration."
+                ),
+                warnings=entry.warnings,
+            )
+        return InstallRecoveryPlanEntry(
+            name=entry.name,
+            unique_id=entry.unique_id,
+            version=entry.version,
+            action="restore_from_archive",
+            target_path=entry.target_path,
+            archive_path=entry.archive_path,
+            recoverable=True,
+            message=f"Restore archived target recorded for {entry.name}.",
+            warnings=entry.warnings,
+        )
+
+    return InstallRecoveryPlanEntry(
+        name=entry.name,
+        unique_id=entry.unique_id,
+        version=entry.version,
+        action="not_recoverable",
+        target_path=entry.target_path,
+        archive_path=entry.archive_path,
+        recoverable=False,
+        message=(
+            f"{entry.name} is not safely recoverable: recorded action "
+            f"{entry.action!r} is not supported for recovery."
+        ),
+        warnings=entry.warnings,
+    )
+
+
+def _operation_record_contains_path(paths: tuple[Path, ...], expected: Path) -> bool:
+    return any(_paths_deterministically_match(path, expected) for path in paths)
 
 
 def _build_intake_flow_messages(

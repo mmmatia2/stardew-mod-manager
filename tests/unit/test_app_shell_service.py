@@ -1965,6 +1965,138 @@ def test_load_install_operation_history_returns_preexisting_records(tmp_path: Pa
     assert history.operations == (operation,)
 
 
+def test_derive_install_operation_recovery_plan_maps_install_new_to_remove_action(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="New Mod",
+                unique_id="Sample.New",
+                action=INSTALL_NEW,
+            ),
+        ),
+    )
+
+    plan = service.derive_install_operation_recovery_plan(operation)
+
+    assert plan.summary.total_recovery_entry_count == 1
+    assert plan.summary.recoverable_entry_count == 1
+    assert plan.summary.non_recoverable_entry_count == 0
+    assert plan.summary.involves_archive_restore is False
+    assert plan.summary.warnings == tuple()
+    assert plan.entries[0].action == "remove_installed_target"
+    assert plan.entries[0].recoverable is True
+    assert "Remove installed target" in plan.entries[0].message
+
+
+def test_derive_install_operation_recovery_plan_maps_overwrite_to_restore_from_archive(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    archive_path = tmp_path / "Archive" / "Existing Mod-old"
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                archive_path=archive_path,
+            ),
+        ),
+        archived_targets=(archive_path,),
+    )
+
+    plan = service.derive_install_operation_recovery_plan(operation)
+
+    assert plan.summary.total_recovery_entry_count == 1
+    assert plan.summary.recoverable_entry_count == 1
+    assert plan.summary.non_recoverable_entry_count == 0
+    assert plan.summary.involves_archive_restore is True
+    assert plan.entries[0].action == "restore_from_archive"
+    assert plan.entries[0].recoverable is True
+    assert plan.entries[0].archive_path == archive_path
+    assert "Restore archived target" in plan.entries[0].message
+
+
+def test_derive_install_operation_recovery_plan_reports_mixed_counts_and_warnings(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    archive_path = tmp_path / "Archive" / "Existing Mod-old"
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="New Mod",
+                unique_id="Sample.New",
+                action=INSTALL_NEW,
+            ),
+            _install_operation_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                archive_path=archive_path,
+            ),
+            _install_operation_entry(
+                tmp_path,
+                name="Unsupported Mod",
+                unique_id="Sample.Blocked",
+                action=BLOCKED,
+                can_install=False,
+                warnings=("Dependency missing.",),
+            ),
+        ),
+        archived_targets=(archive_path,),
+    )
+
+    plan = service.derive_install_operation_recovery_plan(operation)
+
+    assert plan.summary.total_recovery_entry_count == 3
+    assert plan.summary.recoverable_entry_count == 2
+    assert plan.summary.non_recoverable_entry_count == 1
+    assert plan.summary.involves_archive_restore is True
+    assert len(plan.summary.warnings) == 1
+    assert "Unsupported Mod is not safely recoverable" in plan.summary.warnings[0]
+
+
+def test_derive_install_operation_recovery_plan_marks_unsupported_cases_non_recoverable(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    missing_archive = tmp_path / "Archive" / "Missing-old"
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="Untracked Overwrite",
+                unique_id="Sample.MissingArchive",
+                action=OVERWRITE_WITH_ARCHIVE,
+                archive_path=missing_archive,
+            ),
+        ),
+        archived_targets=tuple(),
+    )
+
+    plan = service.derive_install_operation_recovery_plan(operation)
+
+    assert plan.summary.total_recovery_entry_count == 1
+    assert plan.summary.recoverable_entry_count == 0
+    assert plan.summary.non_recoverable_entry_count == 1
+    assert plan.summary.involves_archive_restore is False
+    assert plan.entries[0].action == "not_recoverable"
+    assert plan.entries[0].recoverable is False
+    assert "cannot be matched for restoration" in plan.entries[0].message
+
+
 def test_build_sandbox_plan_defaults_archive_path_when_empty(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     sandbox = tmp_path / "SandboxMods"
@@ -2836,6 +2968,55 @@ def _create_archived_entry(archived_path: Path, *, unique_id: str, version: str)
         encoding="utf-8",
     )
     return archived_path
+
+
+def _install_operation_record(
+    tmp_path: Path,
+    *,
+    entries: tuple[InstallOperationEntryRecord, ...],
+    archived_targets: tuple[Path, ...] | None = None,
+) -> InstallOperationRecord:
+    installed_targets = tuple(entry.target_path for entry in entries)
+    recorded_archived_targets = (
+        archived_targets
+        if archived_targets is not None
+        else tuple(entry.archive_path for entry in entries if entry.archive_path is not None)
+    )
+    return InstallOperationRecord(
+        timestamp="2026-03-13T12:00:00Z",
+        package_path=tmp_path / "Downloads" / "sample.zip",
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        destination_mods_path=tmp_path / "SandboxMods",
+        archive_path=tmp_path / "SandboxArchive",
+        installed_targets=installed_targets,
+        archived_targets=recorded_archived_targets,
+        entries=entries,
+    )
+
+
+def _install_operation_entry(
+    tmp_path: Path,
+    *,
+    name: str,
+    unique_id: str,
+    action: str,
+    archive_path: Path | None = None,
+    can_install: bool = True,
+    warnings: tuple[str, ...] = tuple(),
+) -> InstallOperationEntryRecord:
+    return InstallOperationEntryRecord(
+        name=name,
+        unique_id=unique_id,
+        version="1.0.0",
+        action=action,
+        target_path=tmp_path / "SandboxMods" / name,
+        archive_path=archive_path,
+        source_manifest_path=str(tmp_path / "package" / name / "manifest.json"),
+        source_root_path=str(tmp_path / "package" / name),
+        target_exists_before=action == OVERWRITE_WITH_ARCHIVE,
+        can_install=can_install,
+        warnings=warnings,
+    )
 
 
 def _summary_action_counts(summary: InstallExecutionSummary) -> dict[str, int]:

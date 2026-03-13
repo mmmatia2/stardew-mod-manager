@@ -294,6 +294,12 @@ InstallExecutionDecisionCode = Literal[
     "blocked_entries_present",
 ]
 
+InstallRecoveryActionCode = Literal[
+    "remove_installed_target",
+    "restore_from_archive",
+    "not_recoverable",
+]
+
 
 @dataclass(frozen=True, slots=True)
 class DownloadsIntakeResult:
@@ -412,6 +418,35 @@ class InstallOperationRecord:
 @dataclass(frozen=True, slots=True)
 class InstallOperationHistory:
     operations: tuple[InstallOperationRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InstallRecoveryPlanEntry:
+    name: str
+    unique_id: str
+    version: str
+    action: InstallRecoveryActionCode
+    target_path: Path
+    archive_path: Path | None
+    recoverable: bool
+    message: str
+    warnings: tuple[str, ...] = tuple()
+
+
+@dataclass(frozen=True, slots=True)
+class InstallRecoveryPlanSummary:
+    total_recovery_entry_count: int
+    recoverable_entry_count: int
+    non_recoverable_entry_count: int
+    involves_archive_restore: bool
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InstallRecoveryPlan:
+    operation: InstallOperationRecord
+    entries: tuple[InstallRecoveryPlanEntry, ...]
+    summary: InstallRecoveryPlanSummary
 
 
 @dataclass(frozen=True, slots=True)
