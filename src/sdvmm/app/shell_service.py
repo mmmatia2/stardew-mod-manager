@@ -21,6 +21,7 @@ from sdvmm.domain.models import (
     DownloadsWatchPollResult,
     GameEnvironmentStatus,
     InstallExecutionActionCount,
+    InstallExecutionReview,
     InstallExecutionSummary,
     InstallOperationEntryRecord,
     InstallOperationHistory,
@@ -247,6 +248,46 @@ class AppShellService:
             has_archive_writes=any(entry.archive_path is not None for entry in plan.entries),
             requires_explicit_confirmation=requires_explicit_confirmation,
             review_warnings=review_warnings,
+        )
+
+    def review_install_execution(
+        self,
+        plan: SandboxInstallPlan,
+    ) -> InstallExecutionReview:
+        summary = self.build_install_execution_summary(plan)
+        blocked_count = next(
+            (item.count for item in summary.action_counts if item.action == BLOCKED),
+            0,
+        )
+
+        if blocked_count > 0:
+            entry_label = "entry" if blocked_count == 1 else "entries"
+            return InstallExecutionReview(
+                summary=summary,
+                allowed=False,
+                requires_explicit_approval=False,
+                decision_code="blocked_entries_present",
+                message=(
+                    f"Install plan is blocked: {blocked_count} {entry_label} cannot be executed. "
+                    "Resolve blocked entries before running install."
+                ),
+            )
+
+        if summary.requires_explicit_confirmation:
+            return InstallExecutionReview(
+                summary=summary,
+                allowed=True,
+                requires_explicit_approval=True,
+                decision_code="real_approval_required",
+                message=_build_real_install_review_message(summary),
+            )
+
+        return InstallExecutionReview(
+            summary=summary,
+            allowed=True,
+            requires_explicit_approval=False,
+            decision_code="sandbox_allowed",
+            message=_build_sandbox_install_review_message(summary),
         )
 
     def save_mods_directory(
@@ -2258,6 +2299,33 @@ def _collect_install_execution_review_warnings(
         seen.add(warning)
         deduped.append(warning)
     return tuple(deduped)
+
+
+def _build_sandbox_install_review_message(summary: InstallExecutionSummary) -> str:
+    message = (
+        f"Sandbox install can proceed for {summary.total_entry_count} "
+        f"{_entry_count_label(summary.total_entry_count)}."
+    )
+    if summary.has_existing_targets_to_replace or summary.has_archive_writes:
+        message += " Review archive/replace actions before execution."
+    else:
+        message += " No explicit approval is required."
+    return message
+
+
+def _build_real_install_review_message(summary: InstallExecutionSummary) -> str:
+    message = (
+        f"Real Mods install targets {summary.total_entry_count} "
+        f"{_entry_count_label(summary.total_entry_count)} in {summary.destination_mods_path}. "
+        "Explicit approval is required before execution."
+    )
+    if summary.has_existing_targets_to_replace or summary.has_archive_writes:
+        message += " Review archive/replace actions carefully."
+    return message
+
+
+def _entry_count_label(count: int) -> str:
+    return "entry" if count == 1 else "entries"
 
 
 def _build_intake_flow_messages(

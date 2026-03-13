@@ -288,6 +288,12 @@ IntakeClassification = Literal[
     "unusable_package",
 ]
 
+InstallExecutionDecisionCode = Literal[
+    "sandbox_allowed",
+    "real_approval_required",
+    "blocked_entries_present",
+]
+
 
 @dataclass(frozen=True, slots=True)
 class DownloadsIntakeResult:
@@ -365,6 +371,15 @@ class InstallExecutionSummary:
     has_archive_writes: bool
     requires_explicit_confirmation: bool
     review_warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InstallExecutionReview:
+    summary: InstallExecutionSummary
+    allowed: bool
+    requires_explicit_approval: bool
+    decision_code: InstallExecutionDecisionCode
+    message: str
 
 
 @dataclass(frozen=True, slots=True)

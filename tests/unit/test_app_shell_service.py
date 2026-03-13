@@ -650,6 +650,123 @@ def test_build_install_execution_summary_includes_blocked_entries_in_action_coun
     assert "Blocked Mod: Dependency missing." in summary.review_warnings
 
 
+def test_review_install_execution_allows_sandbox_plan_without_explicit_approval(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(tmp_path, destination_kind=INSTALL_TARGET_SANDBOX_MODS)
+
+    review = service.review_install_execution(plan)
+
+    assert review.allowed is True
+    assert review.requires_explicit_approval is False
+    assert review.decision_code == "sandbox_allowed"
+    assert "Sandbox install can proceed" in review.message
+    assert review.summary == service.build_install_execution_summary(plan)
+
+
+def test_review_install_execution_requires_explicit_approval_for_real_destination(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(tmp_path, destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS)
+
+    review = service.review_install_execution(plan)
+
+    assert review.allowed is True
+    assert review.requires_explicit_approval is True
+    assert review.decision_code == "real_approval_required"
+    assert "Explicit approval is required" in review.message
+    assert str(plan.sandbox_mods_path) in review.message
+    assert review.summary.requires_explicit_confirmation is True
+
+
+def test_review_install_execution_blocks_plan_with_blocked_entries(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(
+        tmp_path,
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        entries=(
+            _summary_entry(tmp_path, name="Install New", unique_id="Sample.New", action=INSTALL_NEW),
+            _summary_entry(
+                tmp_path,
+                name="Blocked Mod",
+                unique_id="Sample.Blocked",
+                action=BLOCKED,
+                can_install=False,
+                warnings=("Dependency missing.",),
+            ),
+        ),
+    )
+
+    review = service.review_install_execution(plan)
+
+    assert review.allowed is False
+    assert review.requires_explicit_approval is False
+    assert review.decision_code == "blocked_entries_present"
+    assert "blocked" in review.message.casefold()
+    assert review.summary.total_entry_count == 2
+    assert _summary_action_counts(review.summary)[BLOCKED] == 1
+
+
+def test_review_install_execution_allows_mixed_action_plan_when_no_entries_blocked(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(
+        tmp_path,
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        entries=(
+            _summary_entry(tmp_path, name="New Mod", unique_id="Sample.New", action=INSTALL_NEW),
+            _summary_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                target_exists=True,
+                archive_path=tmp_path / "SandboxArchive" / "Existing Mod-old",
+                warnings=("Archive existing target before overwrite.",),
+            ),
+        ),
+    )
+
+    review = service.review_install_execution(plan)
+
+    assert review.allowed is True
+    assert review.requires_explicit_approval is False
+    assert review.decision_code == "sandbox_allowed"
+    assert review.summary.has_existing_targets_to_replace is True
+    assert review.summary.has_archive_writes is True
+    assert "archive/replace actions" in review.message
+
+
+def test_review_install_execution_aligns_with_existing_summary_fields(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(
+        tmp_path,
+        destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        entries=(
+            _summary_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                target_exists=True,
+                archive_path=tmp_path / "RealArchive" / "Existing Mod-old",
+            ),
+        ),
+    )
+
+    summary = service.build_install_execution_summary(plan)
+    review = service.review_install_execution(plan)
+
+    assert review.summary == summary
+    assert review.requires_explicit_approval == summary.requires_explicit_confirmation
+    assert review.allowed is True
+    assert review.summary.has_existing_targets_to_replace is True
+    assert review.summary.has_archive_writes is True
+
+
 def test_execute_real_mods_plan_requires_explicit_confirmation(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     real_mods = tmp_path / "RealMods"
