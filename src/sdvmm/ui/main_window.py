@@ -74,12 +74,15 @@ from sdvmm.domain.models import (
     DownloadsIntakeResult,
     GameEnvironmentStatus,
     InstallExecutionReview,
+    InstallOperationRecord,
+    InstallRecoveryInspectionResult,
     ModDiscoveryResult,
     ArchiveRestoreResult,
     ArchiveDeleteResult,
     ArchivedModEntry,
     ModRemovalResult,
     ModRollbackResult,
+    RecoveryExecutionRecord,
     SmapiLogReport,
     ModUpdateStatus,
     ModUpdateReport,
@@ -135,6 +138,7 @@ class MainWindow(QMainWindow):
         self._detected_intakes: tuple[DownloadsIntakeResult, ...] = tuple()
         self._intake_correlations: tuple[IntakeUpdateCorrelation, ...] = tuple()
         self._archived_entries: tuple[ArchivedModEntry, ...] = tuple()
+        self._install_operation_history: tuple[InstallOperationRecord, ...] = tuple()
         self._guided_update_unique_ids: tuple[str, ...] = tuple()
         self._last_environment_status: GameEnvironmentStatus | None = None
         self._last_smapi_log_report: SmapiLogReport | None = None
@@ -224,6 +228,10 @@ class MainWindow(QMainWindow):
         self._plan_selected_intake_button = QPushButton("Plan selected intake")
         self._install_archive_label = QLabel("Archive path for selected install destination")
         self._install_archive_label.setObjectName("plan_install_archive_label")
+        self._install_history_combo = QComboBox()
+        self._install_history_combo.setObjectName("recovery_inspection_operation_combo")
+        self._inspect_recovery_button = QPushButton("Inspect recovery readiness")
+        self._inspect_recovery_button.setObjectName("recovery_inspection_button")
 
         for control in (
             self._game_path_input,
@@ -242,6 +250,7 @@ class MainWindow(QMainWindow):
             self._scan_target_combo,
             self._install_target_combo,
             self._intake_result_combo,
+            self._install_history_combo,
         ):
             control.setMinimumHeight(26)
 
@@ -717,6 +726,27 @@ class MainWindow(QMainWindow):
             findings_box=self._findings_box,
             setup_scroll=setup_scroll,
         )
+        summary_tab = bottom_details_region.findChild(QWidget, "bottom_summary_tab")
+        if summary_tab is not None:
+            summary_tab_layout = summary_tab.layout()
+            if isinstance(summary_tab_layout, QVBoxLayout):
+                recovery_group = QGroupBox("Recovery Inspection")
+                recovery_group.setObjectName("recovery_inspection_group")
+                recovery_group.setFlat(True)
+                recovery_group.setSizePolicy(
+                    QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+                )
+                recovery_layout = QHBoxLayout(recovery_group)
+                recovery_layout.setContentsMargins(6, 4, 6, 4)
+                recovery_layout.setSpacing(6)
+                recovery_layout.addWidget(QLabel("Recorded install"))
+                recovery_layout.addWidget(self._install_history_combo, 1)
+                self._inspect_recovery_button.clicked.connect(
+                    self._on_inspect_selected_install_recovery
+                )
+                _set_secondary_button_style(self._inspect_recovery_button)
+                recovery_layout.addWidget(self._inspect_recovery_button)
+                summary_tab_layout.insertWidget(2, recovery_group)
         self._guidance_group = bottom_details_region
         self._secondary_group = bottom_details_region
         self._details_group = bottom_details_region.details_group
@@ -744,6 +774,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(container)
         self._refresh_responsive_panel_bounds()
+        self._refresh_install_operation_selector()
 
     def _load_startup_state(self) -> None:
         state = self._shell_service.load_startup_config()
@@ -1039,6 +1070,7 @@ class MainWindow(QMainWindow):
             self._set_status(str(exc))
             return
 
+        self._refresh_install_operation_selector()
         self._render_inventory(result.inventory)
         self._set_details_text(build_sandbox_install_result_text(result))
         self._set_current_scan_target(result.destination_kind)
@@ -1060,6 +1092,71 @@ class MainWindow(QMainWindow):
             )
         )
         self._set_status(review.message)
+
+    def _refresh_install_operation_selector(self) -> None:
+        try:
+            history = self._shell_service.load_install_operation_history()
+        except AppShellError:
+            self._install_operation_history = tuple()
+            self._install_history_combo.clear()
+            self._install_history_combo.addItem("<install history unavailable>")
+            self._install_history_combo.setEnabled(False)
+            self._inspect_recovery_button.setEnabled(False)
+            return
+
+        self._install_operation_history = history.operations
+        self._install_history_combo.clear()
+        if not history.operations:
+            self._install_history_combo.addItem("<no recorded installs>")
+            self._install_history_combo.setEnabled(False)
+            self._inspect_recovery_button.setEnabled(False)
+            return
+
+        for index, operation in enumerate(history.operations):
+            self._install_history_combo.addItem(_install_operation_selector_text(operation), index)
+        self._install_history_combo.setEnabled(True)
+        self._inspect_recovery_button.setEnabled(True)
+
+    def _selected_install_operation(self) -> InstallOperationRecord | None:
+        index = self._install_history_combo.currentData()
+        if not isinstance(index, int):
+            return None
+        if not (0 <= index < len(self._install_operation_history)):
+            return None
+        return self._install_operation_history[index]
+
+    def _on_inspect_selected_install_recovery(self) -> None:
+        operation = self._selected_install_operation()
+        if operation is None:
+            message = "Select a recorded install operation first."
+            self._show_recovery_inspection_text(message, status_message=message)
+            return
+        if operation.operation_id is None:
+            message = (
+                "Selected install record is legacy and cannot be inspected through the "
+                "ID-based recovery path."
+            )
+            self._show_recovery_inspection_text(message, status_message=message)
+            return
+
+        try:
+            inspection = self._shell_service.inspect_install_recovery_by_operation_id(
+                operation.operation_id
+            )
+        except AppShellError as exc:
+            self._show_recovery_inspection_text(str(exc), status_message=str(exc))
+            return
+
+        self._show_recovery_inspection_text(
+            _build_install_recovery_inspection_text(inspection),
+            status_message=inspection.recovery_review.message,
+        )
+
+    def _show_recovery_inspection_text(self, text: str, *, status_message: str) -> None:
+        self._secondary_tabs.setCurrentIndex(self._summary_tab_index)
+        self._details_toggle.setChecked(True)
+        self._set_details_text(text)
+        self._set_status(status_message)
 
     def _build_install_confirmation_message(
         self,
@@ -2556,6 +2653,69 @@ class MainWindow(QMainWindow):
             ordered.append(merged_by_path[path_key])
             seen_paths.add(path_key)
         return tuple(ordered)
+
+
+def _install_operation_selector_text(operation: InstallOperationRecord) -> str:
+    destination_label = (
+        "REAL Mods" if operation.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS else "Sandbox"
+    )
+    if operation.operation_id is None:
+        return (
+            f"{operation.timestamp} | {operation.package_path.name} | "
+            f"{destination_label} | legacy record"
+        )
+    return f"{operation.timestamp} | {operation.package_path.name} | {destination_label}"
+
+
+def _build_install_recovery_inspection_text(
+    inspection: InstallRecoveryInspectionResult,
+) -> str:
+    operation = inspection.operation
+    plan_summary = inspection.recovery_plan.summary
+    review = inspection.recovery_review
+    lines = [
+        "Recovery readiness inspection",
+        f"Install operation ID: {operation.operation_id or '<legacy>'}",
+        f"Recorded at: {operation.timestamp}",
+        f"Package: {operation.package_path}",
+        f"Destination: {operation.destination_kind} -> {operation.destination_mods_path}",
+        "",
+        "Current recovery status",
+        f"Review: {review.message}",
+        (
+            "Recoverable vs non-executable: "
+            f"{plan_summary.recoverable_entry_count} recoverable / "
+            f"{review.summary.non_executable_entry_count} non-executable now"
+        ),
+        f"Archive restoration involved: {'yes' if plan_summary.involves_archive_restore else 'no'}",
+        f"Executable now: {review.summary.executable_entry_count}/{review.summary.total_entry_count}",
+        "",
+        "Linked prior recovery executions",
+    ]
+    if inspection.linked_recovery_history:
+        lines.extend(
+            _format_recovery_execution_record(record)
+            for record in inspection.linked_recovery_history
+        )
+    else:
+        lines.append("No linked recovery execution records.")
+    if review.summary.warnings:
+        lines.append("")
+        lines.append("Warnings")
+        lines.extend(f"- {warning}" for warning in review.summary.warnings)
+    return "\n".join(lines)
+
+
+def _format_recovery_execution_record(record: RecoveryExecutionRecord) -> str:
+    summary = (
+        f"- {record.timestamp} | {record.outcome_status} | "
+        f"executed={record.executed_entry_count} | "
+        f"removed={len(record.removed_target_paths)} | "
+        f"restored={len(record.restored_target_paths)}"
+    )
+    if record.failure_message:
+        return f"{summary} | failure={record.failure_message}"
+    return summary
 
 
 def _discovery_source_label(provider: str) -> str:

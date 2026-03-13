@@ -35,9 +35,12 @@ from sdvmm.domain.discovery_codes import SMAPI_COMPATIBILITY_LIST_PROVIDER
 from sdvmm.domain.install_codes import INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
 from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.domain.models import DownloadsIntakeResult
+from sdvmm.domain.models import InstallOperationEntryRecord
+from sdvmm.domain.models import InstallOperationRecord
 from sdvmm.domain.models import ModDiscoveryEntry
 from sdvmm.domain.models import ModDiscoveryResult
 from sdvmm.domain.models import PackageModEntry
+from sdvmm.domain.models import RecoveryExecutionRecord
 from sdvmm.domain.models import SandboxInstallPlan
 from sdvmm.domain.models import SandboxInstallPlanEntry
 from sdvmm.ui.main_window import MainWindow
@@ -99,6 +102,20 @@ def test_main_window_bottom_details_tabs_include_summary_and_setup(
     assert "Setup" in tab_labels
     assert bottom_tabs.indexOf(summary_tab) >= 0
     assert bottom_tabs.indexOf(setup_tab) >= 0
+
+
+def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow) -> None:
+    recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
+    recovery_combo = main_window.findChild(QComboBox, "recovery_inspection_operation_combo")
+    recovery_button = main_window.findChild(QPushButton, "recovery_inspection_button")
+
+    assert recovery_group is not None
+    assert recovery_combo is not None
+    assert recovery_button is not None
+    assert main_window._install_history_combo is recovery_combo
+    assert main_window._inspect_recovery_button is recovery_button
+    assert recovery_combo.isEnabled() is False
+    assert recovery_button.isEnabled() is False
 
 
 def test_main_window_bottom_details_start_hidden_by_default(main_window: MainWindow) -> None:
@@ -622,6 +639,107 @@ def test_main_window_run_install_confirm_flow_executes_successfully(
     assert main_window._status_strip_label.text() == "Sandbox install complete: 1 target(s)"
 
 
+def test_main_window_recovery_inspection_renders_composed_info_and_linked_history(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _install_operation_record_for_ui(operation_id="install_ui_record")
+    inspection = _install_recovery_inspection_for_ui(operation)
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(operation,)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_install_recovery_by_operation_id",
+        lambda operation_id: inspection,
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "execute_install_recovery_review",
+        lambda *args, **kwargs: pytest.fail("Recovery execution must not run during inspection."),
+    )
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_combo.setCurrentIndex(0)
+    main_window._on_inspect_selected_install_recovery()
+    qapp.processEvents()
+
+    details_text = main_window._findings_box.toPlainText()
+    assert main_window._status_strip_label.text() == inspection.recovery_review.message
+    assert main_window._details_group.isVisible() is True
+    assert "Recovery readiness inspection" in details_text
+    assert f"Install operation ID: {operation.operation_id}" in details_text
+    assert "Recoverable vs non-executable: 2 recoverable / 1 non-executable now" in details_text
+    assert "Archive restoration involved: yes" in details_text
+    assert "- 2026-03-13T15:00:00Z | completed | executed=1 | removed=1 | restored=0" in details_text
+    assert "- 2026-03-13T16:00:00Z | failed_partial | executed=1 | removed=1 | restored=0 | failure=Restore target already exists" in details_text
+
+
+def test_main_window_recovery_inspection_legacy_record_shows_expected_message(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_operation = _install_operation_record_for_ui(operation_id=None)
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(legacy_operation,)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_install_recovery_by_operation_id",
+        lambda operation_id: pytest.fail("Legacy records should not call ID-based inspection."),
+    )
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_combo.setCurrentIndex(0)
+    main_window._on_inspect_selected_install_recovery()
+    qapp.processEvents()
+
+    expected_message = (
+        "Selected install record is legacy and cannot be inspected through the "
+        "ID-based recovery path."
+    )
+    assert main_window._status_strip_label.text() == expected_message
+    assert main_window._findings_box.toPlainText() == expected_message
+
+
+def test_main_window_recovery_inspection_unknown_id_error_is_surfaced_cleanly(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _install_operation_record_for_ui(operation_id="install_missing")
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(operation,)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_install_recovery_by_operation_id",
+        lambda operation_id: (_ for _ in ()).throw(
+            AppShellError(f"Install operation ID not found: {operation_id}")
+        ),
+    )
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_combo.setCurrentIndex(0)
+    main_window._on_inspect_selected_install_recovery()
+    qapp.processEvents()
+
+    expected_message = "Install operation ID not found: install_missing"
+    assert main_window._status_strip_label.text() == expected_message
+    assert main_window._findings_box.toPlainText() == expected_message
+
+
 def test_main_window_discovery_surface_has_expected_structure(
     main_window: MainWindow,
 ) -> None:
@@ -1086,6 +1204,99 @@ def _archived_entry(folder_name: str, target_folder_name: str) -> ArchivedModEnt
         mod_name=folder_name,
         unique_id=f"Sample.{folder_name}",
         version="1.0.0",
+    )
+
+
+def _install_operation_record_for_ui(*, operation_id: str | None) -> InstallOperationRecord:
+    return InstallOperationRecord(
+        operation_id=operation_id,
+        timestamp="2026-03-13T12:00:00Z",
+        package_path=Path(r"C:\Packages\SamplePack.zip"),
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        destination_mods_path=Path(r"C:\Sandbox\Mods"),
+        archive_path=Path(r"C:\Sandbox\.sdvmm-sandbox-archive"),
+        installed_targets=(Path(r"C:\Sandbox\Mods\SampleMod"),),
+        archived_targets=(Path(r"C:\Sandbox\.sdvmm-sandbox-archive\SampleMod-old"),),
+        entries=(
+            InstallOperationEntryRecord(
+                name="Sample Mod",
+                unique_id="Sample.Mod",
+                version="1.0.0",
+                action=INSTALL_NEW,
+                target_path=Path(r"C:\Sandbox\Mods\SampleMod"),
+                archive_path=None,
+                source_manifest_path=r"C:\Packages\Sample\manifest.json",
+                source_root_path=r"C:\Packages\Sample",
+                target_exists_before=False,
+                can_install=True,
+                warnings=tuple(),
+            ),
+        ),
+    )
+
+
+def _install_recovery_inspection_for_ui(
+    operation: InstallOperationRecord,
+) -> SimpleNamespace:
+    recovery_plan = SimpleNamespace(
+        operation=operation,
+        summary=SimpleNamespace(
+            total_recovery_entry_count=3,
+            recoverable_entry_count=2,
+            non_recoverable_entry_count=1,
+            involves_archive_restore=True,
+            warnings=("Unsupported entry cannot be recovered.",),
+        ),
+    )
+    recovery_review = SimpleNamespace(
+        plan=recovery_plan,
+        allowed=False,
+        decision_code="recovery_blocked",
+        message="Recovery plan is blocked: 1 entry cannot be executed safely.",
+        summary=SimpleNamespace(
+            total_entry_count=3,
+            executable_entry_count=2,
+            non_executable_entry_count=1,
+            stale_entry_count=1,
+            involves_archive_restore=True,
+            warnings=("Archive source is missing for restoring Existing Mod.",),
+        ),
+    )
+    linked_history = (
+        RecoveryExecutionRecord(
+            recovery_execution_id="recovery_1",
+            timestamp="2026-03-13T15:00:00Z",
+            related_install_operation_id=operation.operation_id,
+            related_install_operation_timestamp=operation.timestamp,
+            related_install_package_path=operation.package_path,
+            destination_kind=operation.destination_kind,
+            destination_mods_path=operation.destination_mods_path,
+            executed_entry_count=1,
+            removed_target_paths=(Path(r"C:\Sandbox\Mods\SampleMod"),),
+            restored_target_paths=tuple(),
+            outcome_status="completed",
+            failure_message=None,
+        ),
+        RecoveryExecutionRecord(
+            recovery_execution_id="recovery_2",
+            timestamp="2026-03-13T16:00:00Z",
+            related_install_operation_id=operation.operation_id,
+            related_install_operation_timestamp=operation.timestamp,
+            related_install_package_path=operation.package_path,
+            destination_kind=operation.destination_kind,
+            destination_mods_path=operation.destination_mods_path,
+            executed_entry_count=1,
+            removed_target_paths=(Path(r"C:\Sandbox\Mods\SampleMod"),),
+            restored_target_paths=tuple(),
+            outcome_status="failed_partial",
+            failure_message="Restore target already exists",
+        ),
+    )
+    return SimpleNamespace(
+        operation=operation,
+        recovery_plan=recovery_plan,
+        recovery_review=recovery_review,
+        linked_recovery_history=linked_history,
     )
 
 
