@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from collections.abc import Iterable
 from collections import Counter
+import shutil
 from typing import Literal
 import zipfile
 
@@ -27,6 +28,7 @@ from sdvmm.domain.models import (
     InstallOperationHistory,
     InstallOperationRecord,
     InstallRecoveryExecutionReview,
+    InstallRecoveryExecutionResult,
     InstallRecoveryExecutionReviewEntry,
     InstallRecoveryExecutionReviewSummary,
     InstallRecoveryPlan,
@@ -295,6 +297,71 @@ class AppShellService:
                 ),
                 warnings=warnings,
             ),
+        )
+
+    def execute_install_recovery_review(
+        self,
+        review: InstallRecoveryExecutionReview,
+    ) -> InstallRecoveryExecutionResult:
+        if not review.allowed:
+            raise AppShellError(review.message)
+
+        removed_target_paths: list[Path] = []
+        restored_target_paths: list[Path] = []
+        destination_mods_path = review.plan.operation.destination_mods_path
+        destination_kind = review.plan.operation.destination_kind
+        archive_path = review.plan.operation.archive_path
+
+        for entry_review in review.entries:
+            if not entry_review.executable:
+                raise AppShellError(entry_review.message)
+
+            plan_entry = entry_review.plan_entry
+            try:
+                if plan_entry.action == "remove_installed_target":
+                    _remove_recovery_target(plan_entry.target_path)
+                    removed_target_paths.append(plan_entry.target_path)
+                    continue
+
+                if plan_entry.action == "restore_from_archive":
+                    if plan_entry.archive_path is None:
+                        raise AppShellError(
+                            f"Archive source is missing for restoring {plan_entry.name}."
+                        )
+                    restored_target = restore_archived_mod_entry(
+                        archive_root=archive_path,
+                        archived_path=plan_entry.archive_path,
+                        destination_mods_root=destination_mods_path,
+                        destination_folder_name=plan_entry.target_path.name,
+                    )
+                    restored_target_paths.append(restored_target)
+                    continue
+            except ArchiveManagerError as exc:
+                raise AppShellError(f"Recovery execution failed: {exc}") from exc
+            except OSError as exc:
+                raise AppShellError(f"Recovery execution failed: {exc}") from exc
+
+            raise AppShellError(
+                f"Recovery execution failed: unsupported action {plan_entry.action!r}."
+            )
+
+        try:
+            inventory = scan_mods_directory(
+                destination_mods_path,
+                excluded_paths=(archive_path, destination_mods_path / _LEGACY_ARCHIVE_DIRNAME),
+            )
+        except OSError as exc:
+            raise AppShellError(f"Recovery execution scan failed: {exc}") from exc
+
+        return InstallRecoveryExecutionResult(
+            review=review,
+            executed_entry_count=len(review.entries),
+            removed_target_paths=tuple(removed_target_paths),
+            restored_target_paths=tuple(restored_target_paths),
+            destination_kind=destination_kind,
+            destination_mods_path=destination_mods_path,
+            scan_context_path=destination_mods_path,
+            inventory=inventory,
         )
 
     def build_install_execution_summary(
@@ -2536,6 +2603,13 @@ def _review_install_recovery_entry(
         decision_code="entry_not_recoverable",
         message=entry.message,
     )
+
+
+def _remove_recovery_target(target_path: Path) -> None:
+    if target_path.is_dir():
+        shutil.rmtree(target_path)
+        return
+    target_path.unlink()
 
 
 def _build_intake_flow_messages(

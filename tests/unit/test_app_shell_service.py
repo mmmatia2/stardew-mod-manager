@@ -2266,6 +2266,144 @@ def test_review_install_recovery_execution_reports_mixed_counts_and_blocked_stat
     assert any("not safely recoverable" in warning for warning in review.summary.warnings)
 
 
+def test_execute_install_recovery_review_blocks_when_review_not_allowed(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="Missing Mod",
+                unique_id="Sample.Missing",
+                action=INSTALL_NEW,
+            ),
+        ),
+    )
+    recovery_plan = service.derive_install_operation_recovery_plan(operation)
+    review = service.review_install_recovery_execution(recovery_plan)
+
+    with pytest.raises(AppShellError, match=re.escape(review.message)):
+        service.execute_install_recovery_review(review)
+
+
+def test_execute_install_recovery_review_removes_existing_target(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    destination_mods = tmp_path / "SandboxMods"
+    archive_root = tmp_path / "SandboxArchive"
+    destination_mods.mkdir()
+    archive_root.mkdir()
+    target_path = _create_mod(destination_mods, "New Mod", "Sample.New")
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="New Mod",
+                unique_id="Sample.New",
+                action=INSTALL_NEW,
+            ),
+        ),
+    )
+    recovery_plan = service.derive_install_operation_recovery_plan(operation)
+    review = service.review_install_recovery_execution(recovery_plan)
+
+    result = service.execute_install_recovery_review(review)
+
+    assert result.executed_entry_count == 1
+    assert result.removed_target_paths == (target_path,)
+    assert result.restored_target_paths == tuple()
+    assert result.destination_kind == INSTALL_TARGET_SANDBOX_MODS
+    assert result.destination_mods_path == destination_mods
+    assert result.scan_context_path == destination_mods
+    assert target_path.exists() is False
+    assert len(result.inventory.mods) == 0
+
+
+def test_execute_install_recovery_review_restores_existing_archive_source(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    destination_mods = tmp_path / "SandboxMods"
+    archive_root = tmp_path / "SandboxArchive"
+    destination_mods.mkdir()
+    archive_root.mkdir()
+    archived_path = _create_archived_entry(
+        archive_root / "Existing Mod__sdvmm_archive_001",
+        unique_id="Sample.Exists",
+        version="1.0.0",
+    )
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                archive_path=archived_path,
+            ),
+        ),
+    )
+    recovery_plan = service.derive_install_operation_recovery_plan(operation)
+    review = service.review_install_recovery_execution(recovery_plan)
+
+    result = service.execute_install_recovery_review(review)
+
+    restored_target = destination_mods / "Existing Mod"
+    assert result.executed_entry_count == 1
+    assert result.removed_target_paths == tuple()
+    assert result.restored_target_paths == (restored_target,)
+    assert restored_target.exists() is True
+    assert archived_path.exists() is False
+    assert len(result.inventory.mods) == 1
+    assert result.inventory.mods[0].unique_id == "Sample.Exists"
+
+
+def test_execute_install_recovery_review_runs_mixed_executable_plan(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    destination_mods = tmp_path / "SandboxMods"
+    archive_root = tmp_path / "SandboxArchive"
+    destination_mods.mkdir()
+    archive_root.mkdir()
+    removable_target = _create_mod(destination_mods, "New Mod", "Sample.New")
+    archived_path = _create_archived_entry(
+        archive_root / "Existing Mod__sdvmm_archive_001",
+        unique_id="Sample.Exists",
+        version="1.0.0",
+    )
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="New Mod",
+                unique_id="Sample.New",
+                action=INSTALL_NEW,
+            ),
+            _install_operation_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                archive_path=archived_path,
+            ),
+        ),
+    )
+    recovery_plan = service.derive_install_operation_recovery_plan(operation)
+    review = service.review_install_recovery_execution(recovery_plan)
+
+    result = service.execute_install_recovery_review(review)
+
+    restored_target = destination_mods / "Existing Mod"
+    assert result.executed_entry_count == 2
+    assert result.removed_target_paths == (removable_target,)
+    assert result.restored_target_paths == (restored_target,)
+    assert result.destination_kind == INSTALL_TARGET_SANDBOX_MODS
+    assert result.destination_mods_path == destination_mods
+    assert removable_target.exists() is False
+    assert restored_target.exists() is True
+    assert len(result.inventory.mods) == 1
+    assert result.inventory.mods[0].unique_id == "Sample.Exists"
+
+
 def test_build_sandbox_plan_defaults_archive_path_when_empty(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     sandbox = tmp_path / "SandboxMods"

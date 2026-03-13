@@ -486,6 +486,18 @@ class InstallRecoveryExecutionReview:
 
 
 @dataclass(frozen=True, slots=True)
+class InstallRecoveryExecutionResult:
+    review: InstallRecoveryExecutionReview
+    executed_entry_count: int
+    removed_target_paths: tuple[Path, ...]
+    restored_target_paths: tuple[Path, ...]
+    destination_kind: str
+    destination_mods_path: Path
+    scan_context_path: Path
+    inventory: ModsInventory
+
+
+@dataclass(frozen=True, slots=True)
 class ModRemovalPlan:
     destination_kind: str
     mods_path: Path
