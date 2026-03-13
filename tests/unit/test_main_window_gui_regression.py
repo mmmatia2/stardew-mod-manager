@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PySide6.QtWidgets import (
@@ -31,7 +32,7 @@ from sdvmm.domain.install_codes import BLOCKED
 from sdvmm.domain.discovery_codes import COMPATIBLE
 from sdvmm.domain.discovery_codes import DISCOVERY_SOURCE_NEXUS
 from sdvmm.domain.discovery_codes import SMAPI_COMPATIBILITY_LIST_PROVIDER
-from sdvmm.domain.install_codes import INSTALL_NEW
+from sdvmm.domain.install_codes import INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
 from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.domain.models import DownloadsIntakeResult
 from sdvmm.domain.models import ModDiscoveryEntry
@@ -525,6 +526,100 @@ def test_main_window_run_install_uses_confirmation_flow_and_service_gate(
     assert question_calls["count"] == 1
     assert execute_calls == [True]
     assert main_window._status_strip_label.text() == "Execution blocked by review gate."
+
+
+def test_main_window_real_install_confirmation_dialog_includes_review_and_summary(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_plan = _sandbox_install_plan(
+        destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        action=OVERWRITE_WITH_ARCHIVE,
+        target_exists=True,
+        archive_path=Path(r"C:\Game\.sdvmm-real-archive\SampleMod-old"),
+    )
+    review = main_window._shell_service.review_install_execution(real_plan)
+    captured: dict[str, str] = {}
+
+    def fake_question(parent: object, title: str, text: str) -> QMessageBox.StandardButton:
+        captured["title"] = title
+        captured["text"] = text
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.question", fake_question)
+    main_window._pending_install_plan = real_plan
+
+    main_window._on_run_install()
+
+    assert captured["title"] == "Confirm REAL Mods install"
+    assert review.message in captured["text"]
+    assert f"Target: {review.summary.destination_mods_path}" in captured["text"]
+    assert f"Archive: {review.summary.archive_path}" in captured["text"]
+    assert f"Entries: {review.summary.total_entry_count}" in captured["text"]
+    assert "Replace existing targets: yes" in captured["text"]
+    assert "Archive writes in plan: yes" in captured["text"]
+    assert main_window._status_strip_label.text() == "Install cancelled."
+
+
+def test_main_window_sandbox_install_confirmation_does_not_use_real_mods_dialog(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox_plan = _sandbox_install_plan(destination_kind=INSTALL_TARGET_SANDBOX_MODS)
+    captured: dict[str, str] = {}
+
+    def fake_question(parent: object, title: str, text: str) -> QMessageBox.StandardButton:
+        captured["title"] = title
+        captured["text"] = text
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.question", fake_question)
+    main_window._pending_install_plan = sandbox_plan
+
+    main_window._on_run_install()
+
+    assert captured["title"] == "Confirm sandbox install"
+    assert "REAL game Mods directory" not in captured["text"]
+    assert main_window._status_strip_label.text() == "Install cancelled."
+
+
+def test_main_window_run_install_confirm_flow_executes_successfully(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox_plan = _sandbox_install_plan(destination_kind=INSTALL_TARGET_SANDBOX_MODS)
+    execute_calls: list[bool] = []
+
+    def fake_question(*args: object, **kwargs: object) -> QMessageBox.StandardButton:
+        return QMessageBox.StandardButton.Yes
+
+    def fake_execute(
+        plan: SandboxInstallPlan,
+        *,
+        confirm_real_destination: bool = False,
+    ) -> object:
+        assert plan is sandbox_plan
+        execute_calls.append(confirm_real_destination)
+        return SimpleNamespace(
+            inventory=object(),
+            destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+            installed_targets=(Path(r"C:\Sandbox\Mods\SampleMod"),),
+            archived_targets=tuple(),
+            scan_context_path=Path(r"C:\Sandbox\Mods"),
+        )
+
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.question", fake_question)
+    monkeypatch.setattr("sdvmm.ui.main_window.build_sandbox_install_result_text", lambda result: "install ok")
+    monkeypatch.setattr(main_window, "_render_inventory", lambda inventory: None)
+    monkeypatch.setattr(main_window, "_set_current_scan_target", lambda destination_kind: None)
+    monkeypatch.setattr(main_window, "_set_scan_context", lambda path, label: None)
+    monkeypatch.setattr(main_window._shell_service, "execute_sandbox_install_plan", fake_execute)
+    main_window._pending_install_plan = sandbox_plan
+
+    main_window._on_run_install()
+
+    assert execute_calls == [False]
+    assert main_window._status_strip_label.text() == "Sandbox install complete: 1 target(s)"
 
 
 def test_main_window_discovery_surface_has_expected_structure(

@@ -73,6 +73,7 @@ from sdvmm.domain.models import (
     AppConfig,
     DownloadsIntakeResult,
     GameEnvironmentStatus,
+    InstallExecutionReview,
     ModDiscoveryResult,
     ArchiveRestoreResult,
     ArchiveDeleteResult,
@@ -1014,6 +1015,7 @@ class MainWindow(QMainWindow):
             self._set_status(message)
             return
 
+        review = self._shell_service.review_install_execution(self._pending_install_plan)
         is_real_destination = (
             self._pending_install_plan.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
         )
@@ -1021,15 +1023,7 @@ class MainWindow(QMainWindow):
         yes = QMessageBox.question(
             self,
             ("Confirm REAL Mods install" if is_real_destination else "Confirm sandbox install"),
-            (
-                ("You are about to write to the REAL game Mods directory.\n\n" if is_real_destination else "")
-                + "Execute install now?\n"
-                + f"Target: {self._pending_install_plan.sandbox_mods_path}\n"
-                + f"Archive: {self._pending_install_plan.sandbox_archive_path}\n"
-                "Overwrite operations in plan: "
-                f"{'yes' if any(entry.action == 'overwrite_with_archive' for entry in self._pending_install_plan.entries) else 'no'}\n"
-                f"Entries: {len(self._pending_install_plan.entries)}"
-            ),
+            self._build_install_confirmation_message(review, is_real_destination=is_real_destination),
         )
         if yes != QMessageBox.StandardButton.Yes:
             self._set_status("Install cancelled.")
@@ -1066,6 +1060,36 @@ class MainWindow(QMainWindow):
             )
         )
         self._set_status(review.message)
+
+    def _build_install_confirmation_message(
+        self,
+        review: InstallExecutionReview,
+        *,
+        is_real_destination: bool,
+    ) -> str:
+        if is_real_destination:
+            summary = review.summary
+            return (
+                "You are about to write to the REAL game Mods directory.\n\n"
+                f"{review.message}\n\n"
+                "Execute install now?\n"
+                f"Target: {summary.destination_mods_path}\n"
+                f"Archive: {summary.archive_path}\n"
+                f"Entries: {summary.total_entry_count}\n"
+                f"Replace existing targets: {'yes' if summary.has_existing_targets_to_replace else 'no'}\n"
+                f"Archive writes in plan: {'yes' if summary.has_archive_writes else 'no'}"
+            )
+
+        plan = self._pending_install_plan
+        assert plan is not None
+        return (
+            "Execute install now?\n"
+            f"Target: {plan.sandbox_mods_path}\n"
+            f"Archive: {plan.sandbox_archive_path}\n"
+            "Overwrite operations in plan: "
+            f"{'yes' if any(entry.action == 'overwrite_with_archive' for entry in plan.entries) else 'no'}\n"
+            f"Entries: {len(plan.entries)}"
+        )
 
     def _on_check_updates(self) -> None:
         if self._current_inventory is None:
