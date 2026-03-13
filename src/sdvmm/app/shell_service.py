@@ -1036,13 +1036,11 @@ class AppShellService:
         *,
         confirm_real_destination: bool = False,
     ) -> SandboxInstallResult:
-        if (
-            plan.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
-            and not confirm_real_destination
-        ):
-            raise AppShellError(
-                "Real Mods destination selected. Explicit confirmation is required before execution."
-            )
+        review = self.review_install_execution(plan)
+        if not review.allowed:
+            raise AppShellError(review.message)
+        if review.requires_explicit_approval and not confirm_real_destination:
+            raise AppShellError(review.message)
 
         try:
             result = execute_sandbox_install_plan_service(plan)

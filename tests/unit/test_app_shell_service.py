@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from zipfile import ZipFile
 from typing import Literal
 
@@ -767,6 +768,32 @@ def test_review_install_execution_aligns_with_existing_summary_fields(tmp_path: 
     assert review.summary.has_archive_writes is True
 
 
+def test_execute_sandbox_install_plan_blocks_blocked_entry_plan_using_review_message(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(
+        tmp_path,
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        entries=(
+            _summary_entry(tmp_path, name="Install New", unique_id="Sample.New", action=INSTALL_NEW),
+            _summary_entry(
+                tmp_path,
+                name="Blocked Mod",
+                unique_id="Sample.Blocked",
+                action=BLOCKED,
+                can_install=False,
+                warnings=("Dependency missing.",),
+            ),
+        ),
+    )
+    review = service.review_install_execution(plan)
+    assert review.allowed is False
+
+    with pytest.raises(AppShellError, match=re.escape(review.message)):
+        service.execute_sandbox_install_plan(plan)
+
+
 def test_execute_real_mods_plan_requires_explicit_confirmation(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     real_mods = tmp_path / "RealMods"
@@ -793,7 +820,11 @@ def test_execute_real_mods_plan_requires_explicit_confirmation(tmp_path: Path) -
         configured_real_mods_path=real_mods,
     )
 
-    with pytest.raises(AppShellError, match="Explicit confirmation is required"):
+    review = service.review_install_execution(plan)
+    assert review.allowed is True
+    assert review.requires_explicit_approval is True
+
+    with pytest.raises(AppShellError, match=re.escape(review.message)):
         service.execute_sandbox_install_plan(plan)
 
     result = service.execute_sandbox_install_plan(
@@ -803,6 +834,81 @@ def test_execute_real_mods_plan_requires_explicit_confirmation(tmp_path: Path) -
     assert result.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
     assert result.scan_context_path == real_mods
     assert (real_mods / "Mod" / "file.txt").read_text(encoding="utf-8") == "hello"
+
+
+def test_execute_sandbox_install_plan_matches_review_for_allowed_sandbox_plan(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    sandbox = tmp_path / "SandboxMods"
+    archive_root = tmp_path / "SandboxArchive"
+    sandbox.mkdir()
+    archive_root.mkdir()
+    package = tmp_path / "single.zip"
+
+    with ZipFile(package, "w") as archive:
+        archive.writestr(
+            "Mod/manifest.json",
+            '{"Name":"Zip Mod","UniqueID":"Pkg.Zip","Version":"1.0.0"}',
+        )
+        archive.writestr("Mod/file.txt", "hello")
+
+    plan = service.build_sandbox_install_plan(
+        str(package),
+        str(sandbox),
+        str(archive_root),
+        allow_overwrite=False,
+    )
+    review = service.review_install_execution(plan)
+
+    assert review.allowed is True
+    assert review.requires_explicit_approval is False
+
+    result = service.execute_sandbox_install_plan(plan)
+
+    assert result.destination_kind == INSTALL_TARGET_SANDBOX_MODS
+    assert result.scan_context_path == sandbox
+
+
+def test_execute_real_mods_plan_with_approval_matches_review_and_executes(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox.mkdir()
+    package = tmp_path / "single.zip"
+
+    with ZipFile(package, "w") as archive:
+        archive.writestr(
+            "Mod/manifest.json",
+            '{"Name":"Zip Mod","UniqueID":"Pkg.Zip","Version":"1.0.0"}',
+        )
+        archive.writestr("Mod/file.txt", "hello")
+
+    plan = service.build_install_plan(
+        package_path_text=str(package),
+        install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox),
+        real_archive_path_text="",
+        sandbox_archive_path_text="",
+        allow_overwrite=False,
+        configured_real_mods_path=real_mods,
+    )
+    review = service.review_install_execution(plan)
+
+    assert review.allowed is True
+    assert review.requires_explicit_approval is True
+
+    result = service.execute_sandbox_install_plan(
+        plan,
+        confirm_real_destination=True,
+    )
+
+    assert result.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert result.scan_context_path == real_mods
 
 
 def test_build_mod_removal_plan_for_sandbox_destination(tmp_path: Path) -> None:
