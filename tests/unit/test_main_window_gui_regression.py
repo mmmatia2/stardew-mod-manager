@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QTableWidget,
@@ -105,17 +106,30 @@ def test_main_window_bottom_details_tabs_include_summary_and_setup(
 
 
 def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow) -> None:
+    plan_tab = main_window.findChild(QWidget, "plan_install_tab")
+    summary_tab = main_window.findChild(QWidget, "bottom_summary_tab")
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
+    recovery_output_box = main_window.findChild(QPlainTextEdit, "recovery_local_output_box")
     recovery_combo = main_window.findChild(QComboBox, "recovery_inspection_operation_combo")
     recovery_button = main_window.findChild(QPushButton, "recovery_inspection_button")
+    run_recovery_button = main_window.findChild(QPushButton, "recovery_execute_button")
 
+    assert plan_tab is not None
+    assert summary_tab is not None
     assert recovery_group is not None
+    assert recovery_output_box is not None
     assert recovery_combo is not None
     assert recovery_button is not None
+    assert run_recovery_button is not None
+    assert recovery_group.parentWidget() is plan_tab
+    assert summary_tab.findChild(QGroupBox, "recovery_inspection_group") is None
+    assert main_window._recovery_output_box is recovery_output_box
     assert main_window._install_history_combo is recovery_combo
     assert main_window._inspect_recovery_button is recovery_button
+    assert main_window._run_recovery_button is run_recovery_button
     assert recovery_combo.isEnabled() is False
     assert recovery_button.isEnabled() is False
+    assert run_recovery_button.isEnabled() is False
 
 
 def test_main_window_bottom_details_start_hidden_by_default(main_window: MainWindow) -> None:
@@ -150,6 +164,46 @@ def test_main_window_bottom_details_toggle_shows_and_hides_details_group(
 
     assert details_group.isVisible() is False
     assert main_window._details_toggle.text() == "Show detailed output"
+
+
+def test_main_window_recovery_controls_remain_visible_when_details_toggle_changes(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _install_operation_record_for_ui(operation_id="install_visibility")
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(operation,)),
+    )
+    main_window._refresh_install_operation_selector()
+    plan_tab = main_window.findChild(QWidget, "plan_install_tab")
+    recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
+    details_group = main_window.findChild(QGroupBox, "bottom_summary_details_group")
+
+    assert plan_tab is not None
+    assert recovery_group is not None
+    assert details_group is not None
+
+    main_window._context_tabs.setCurrentWidget(plan_tab)
+    qapp.processEvents()
+    assert recovery_group.isVisible() is True
+    assert main_window._install_history_combo.isEnabled() is True
+    assert main_window._inspect_recovery_button.isEnabled() is True
+
+    main_window._details_toggle.setChecked(True)
+    qapp.processEvents()
+    assert recovery_group.isVisible() is True
+    assert main_window._install_history_combo.isEnabled() is True
+    assert main_window._inspect_recovery_button.isEnabled() is True
+
+    main_window._details_toggle.setChecked(False)
+    qapp.processEvents()
+    assert recovery_group.isVisible() is True
+    assert main_window._install_history_combo.isEnabled() is True
+    assert main_window._inspect_recovery_button.isEnabled() is True
 
 
 def test_main_window_status_strip_labels_do_not_use_hardcoded_color_stylesheets(
@@ -668,9 +722,8 @@ def test_main_window_recovery_inspection_renders_composed_info_and_linked_histor
     main_window._on_inspect_selected_install_recovery()
     qapp.processEvents()
 
-    details_text = main_window._findings_box.toPlainText()
+    details_text = main_window._recovery_output_box.toPlainText()
     assert main_window._status_strip_label.text() == inspection.recovery_review.message
-    assert main_window._details_group.isVisible() is True
     assert "Recovery readiness inspection" in details_text
     assert f"Install operation ID: {operation.operation_id}" in details_text
     assert "Recoverable vs non-executable: 2 recoverable / 1 non-executable now" in details_text
@@ -707,7 +760,7 @@ def test_main_window_recovery_inspection_legacy_record_shows_expected_message(
         "ID-based recovery path."
     )
     assert main_window._status_strip_label.text() == expected_message
-    assert main_window._findings_box.toPlainText() == expected_message
+    assert main_window._recovery_output_box.toPlainText() == expected_message
 
 
 def test_main_window_recovery_inspection_unknown_id_error_is_surfaced_cleanly(
@@ -737,7 +790,191 @@ def test_main_window_recovery_inspection_unknown_id_error_is_surfaced_cleanly(
 
     expected_message = "Install operation ID not found: install_missing"
     assert main_window._status_strip_label.text() == expected_message
-    assert main_window._findings_box.toPlainText() == expected_message
+    assert main_window._recovery_output_box.toPlainText() == expected_message
+
+
+def test_main_window_allowed_recovery_inspection_enables_run_and_executes(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _install_operation_record_for_ui(operation_id="install_allowed")
+    inspection = _install_recovery_inspection_for_ui(
+        operation,
+        allowed=True,
+        review_message="Recovery plan is ready: 2 entries can be executed.",
+        executable_count=2,
+        non_executable_count=0,
+    )
+    execute_calls: list[object] = []
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(operation,)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_install_recovery_by_operation_id",
+        lambda operation_id: inspection,
+    )
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(main_window, "_render_inventory", lambda inventory: None)
+    monkeypatch.setattr(main_window, "_set_current_scan_target", lambda destination_kind: None)
+    monkeypatch.setattr(main_window, "_set_scan_context", lambda path, label: None)
+
+    def fake_execute(review: object) -> object:
+        execute_calls.append(review)
+        return SimpleNamespace(
+            review=inspection.recovery_review,
+            executed_entry_count=2,
+            removed_target_paths=(Path(r"C:\Sandbox\Mods\SampleMod"),),
+            restored_target_paths=(Path(r"C:\Sandbox\Mods\ExistingMod"),),
+            destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+            destination_mods_path=Path(r"C:\Sandbox\Mods"),
+            scan_context_path=Path(r"C:\Sandbox\Mods"),
+            inventory=object(),
+        )
+
+    monkeypatch.setattr(main_window._shell_service, "execute_install_recovery_review", fake_execute)
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_combo.setCurrentIndex(0)
+    main_window._on_inspect_selected_install_recovery()
+    assert main_window._run_recovery_button.isEnabled() is True
+
+    main_window._on_run_selected_install_recovery()
+    qapp.processEvents()
+
+    assert execute_calls == [inspection.recovery_review]
+    assert main_window._status_strip_label.text() == "Recovery execution complete: 2 action(s)."
+    details_text = main_window._recovery_output_box.toPlainText()
+    assert "Recovery execution result" in details_text
+    assert "Executed actions: 2" in details_text
+    assert "Removed targets: 1" in details_text
+    assert "Restored targets: 1" in details_text
+    assert main_window._run_recovery_button.isEnabled() is False
+
+
+def test_main_window_blocked_recovery_does_not_execute_and_surfaces_message(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _install_operation_record_for_ui(operation_id="install_blocked")
+    inspection = _install_recovery_inspection_for_ui(operation)
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(operation,)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_install_recovery_by_operation_id",
+        lambda operation_id: inspection,
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "execute_install_recovery_review",
+        lambda *args, **kwargs: pytest.fail("Blocked recovery must not execute."),
+    )
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_combo.setCurrentIndex(0)
+    main_window._on_inspect_selected_install_recovery()
+    assert main_window._run_recovery_button.isEnabled() is False
+
+    main_window._on_run_selected_install_recovery()
+    qapp.processEvents()
+
+    assert main_window._status_strip_label.text() == inspection.recovery_review.message
+    assert "Recovery readiness inspection" in main_window._recovery_output_box.toPlainText()
+
+
+def test_main_window_legacy_record_cannot_execute_recovery(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_operation = _install_operation_record_for_ui(operation_id=None)
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(legacy_operation,)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "execute_install_recovery_review",
+        lambda *args, **kwargs: pytest.fail("Legacy records must not execute recovery."),
+    )
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_combo.setCurrentIndex(0)
+    main_window._on_run_selected_install_recovery()
+    qapp.processEvents()
+
+    expected_message = (
+        "Selected install record is legacy and cannot be inspected through the "
+        "ID-based recovery path."
+    )
+    assert main_window._status_strip_label.text() == expected_message
+    assert main_window._recovery_output_box.toPlainText() == expected_message
+
+
+def test_main_window_recovery_confirmation_cancel_leaves_execution_unrun(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _install_operation_record_for_ui(operation_id="install_cancel")
+    inspection = _install_recovery_inspection_for_ui(
+        operation,
+        allowed=True,
+        review_message="Recovery plan is ready: 2 entries can be executed.",
+        executable_count=2,
+        non_executable_count=0,
+    )
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(operation,)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_install_recovery_by_operation_id",
+        lambda operation_id: inspection,
+    )
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QMessageBox.question",
+        lambda parent, title, text: (
+            captured.update({"title": title, "text": text}) or QMessageBox.StandardButton.No
+        ),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "execute_install_recovery_review",
+        lambda *args, **kwargs: pytest.fail("Cancelled recovery must not execute."),
+    )
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_combo.setCurrentIndex(0)
+    main_window._on_inspect_selected_install_recovery()
+    main_window._on_run_selected_install_recovery()
+    qapp.processEvents()
+
+    assert captured["title"] == "Confirm recovery execution"
+    assert inspection.recovery_review.message in captured["text"]
+    assert "Executable now: 2/3" in captured["text"]
+    assert "Non-executable now: 0" in captured["text"]
+    assert "Archive restoration involved: yes" in captured["text"]
+    assert main_window._status_strip_label.text() == "Recovery execution cancelled."
 
 
 def test_main_window_discovery_surface_has_expected_structure(
@@ -1237,6 +1474,11 @@ def _install_operation_record_for_ui(*, operation_id: str | None) -> InstallOper
 
 def _install_recovery_inspection_for_ui(
     operation: InstallOperationRecord,
+    *,
+    allowed: bool = False,
+    review_message: str = "Recovery plan is blocked: 1 entry cannot be executed safely.",
+    executable_count: int = 2,
+    non_executable_count: int = 1,
 ) -> SimpleNamespace:
     recovery_plan = SimpleNamespace(
         operation=operation,
@@ -1250,16 +1492,16 @@ def _install_recovery_inspection_for_ui(
     )
     recovery_review = SimpleNamespace(
         plan=recovery_plan,
-        allowed=False,
-        decision_code="recovery_blocked",
-        message="Recovery plan is blocked: 1 entry cannot be executed safely.",
+        allowed=allowed,
+        decision_code=("recovery_ready" if allowed else "recovery_blocked"),
+        message=review_message,
         summary=SimpleNamespace(
             total_entry_count=3,
-            executable_entry_count=2,
-            non_executable_entry_count=1,
-            stale_entry_count=1,
+            executable_entry_count=executable_count,
+            non_executable_entry_count=non_executable_count,
+            stale_entry_count=0 if allowed else 1,
             involves_archive_restore=True,
-            warnings=("Archive source is missing for restoring Existing Mod.",),
+            warnings=(tuple() if allowed else ("Archive source is missing for restoring Existing Mod.",)),
         ),
     )
     linked_history = (

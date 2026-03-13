@@ -75,6 +75,7 @@ from sdvmm.domain.models import (
     GameEnvironmentStatus,
     InstallExecutionReview,
     InstallOperationRecord,
+    InstallRecoveryExecutionResult,
     InstallRecoveryInspectionResult,
     ModDiscoveryResult,
     ArchiveRestoreResult,
@@ -139,6 +140,7 @@ class MainWindow(QMainWindow):
         self._intake_correlations: tuple[IntakeUpdateCorrelation, ...] = tuple()
         self._archived_entries: tuple[ArchivedModEntry, ...] = tuple()
         self._install_operation_history: tuple[InstallOperationRecord, ...] = tuple()
+        self._current_recovery_inspection: InstallRecoveryInspectionResult | None = None
         self._guided_update_unique_ids: tuple[str, ...] = tuple()
         self._last_environment_status: GameEnvironmentStatus | None = None
         self._last_smapi_log_report: SmapiLogReport | None = None
@@ -232,6 +234,8 @@ class MainWindow(QMainWindow):
         self._install_history_combo.setObjectName("recovery_inspection_operation_combo")
         self._inspect_recovery_button = QPushButton("Inspect recovery readiness")
         self._inspect_recovery_button.setObjectName("recovery_inspection_button")
+        self._run_recovery_button = QPushButton("Run recovery")
+        self._run_recovery_button.setObjectName("recovery_execute_button")
 
         for control in (
             self._game_path_input,
@@ -335,6 +339,13 @@ class MainWindow(QMainWindow):
         self._package_inspection_result_box.setReadOnly(True)
         self._package_inspection_result_box.setMinimumHeight(92)
         self._package_inspection_result_box.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self._recovery_output_box = QPlainTextEdit()
+        self._recovery_output_box.setObjectName("recovery_local_output_box")
+        self._recovery_output_box.setReadOnly(True)
+        self._recovery_output_box.setMinimumHeight(92)
+        self._recovery_output_box.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
 
@@ -709,6 +720,34 @@ class MainWindow(QMainWindow):
             plan_install_button=plan_install_button,
             run_install_button=run_install_button,
         )
+        plan_tab_layout = plan_tab.layout()
+        if isinstance(plan_tab_layout, QVBoxLayout):
+            recovery_group = QGroupBox("Recovery")
+            recovery_group.setObjectName("recovery_inspection_group")
+            recovery_group.setFlat(True)
+            recovery_group.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+            )
+            recovery_layout = QVBoxLayout(recovery_group)
+            recovery_layout.setContentsMargins(8, 6, 8, 6)
+            recovery_layout.setSpacing(6)
+            recovery_controls = QHBoxLayout()
+            recovery_controls.setSpacing(6)
+            recovery_controls.addWidget(QLabel("Recorded install"))
+            recovery_controls.addWidget(self._install_history_combo, 1)
+            self._install_history_combo.currentIndexChanged.connect(
+                self._on_selected_install_operation_changed
+            )
+            self._inspect_recovery_button.clicked.connect(self._on_inspect_selected_install_recovery)
+            _set_secondary_button_style(self._inspect_recovery_button)
+            recovery_controls.addWidget(self._inspect_recovery_button)
+            self._run_recovery_button.clicked.connect(self._on_run_selected_install_recovery)
+            _set_primary_button_style(self._run_recovery_button)
+            self._run_recovery_button.setEnabled(False)
+            recovery_controls.addWidget(self._run_recovery_button)
+            recovery_layout.addLayout(recovery_controls)
+            recovery_layout.addWidget(self._recovery_output_box)
+            plan_tab_layout.insertWidget(2, recovery_group)
         context_tabs.addTab(plan_tab, "Plan & Install")
 
         workspace_splitter.addWidget(context_tabs)
@@ -726,27 +765,6 @@ class MainWindow(QMainWindow):
             findings_box=self._findings_box,
             setup_scroll=setup_scroll,
         )
-        summary_tab = bottom_details_region.findChild(QWidget, "bottom_summary_tab")
-        if summary_tab is not None:
-            summary_tab_layout = summary_tab.layout()
-            if isinstance(summary_tab_layout, QVBoxLayout):
-                recovery_group = QGroupBox("Recovery Inspection")
-                recovery_group.setObjectName("recovery_inspection_group")
-                recovery_group.setFlat(True)
-                recovery_group.setSizePolicy(
-                    QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
-                )
-                recovery_layout = QHBoxLayout(recovery_group)
-                recovery_layout.setContentsMargins(6, 4, 6, 4)
-                recovery_layout.setSpacing(6)
-                recovery_layout.addWidget(QLabel("Recorded install"))
-                recovery_layout.addWidget(self._install_history_combo, 1)
-                self._inspect_recovery_button.clicked.connect(
-                    self._on_inspect_selected_install_recovery
-                )
-                _set_secondary_button_style(self._inspect_recovery_button)
-                recovery_layout.addWidget(self._inspect_recovery_button)
-                summary_tab_layout.insertWidget(2, recovery_group)
         self._guidance_group = bottom_details_region
         self._secondary_group = bottom_details_region
         self._details_group = bottom_details_region.details_group
@@ -1098,24 +1116,29 @@ class MainWindow(QMainWindow):
             history = self._shell_service.load_install_operation_history()
         except AppShellError:
             self._install_operation_history = tuple()
+            self._current_recovery_inspection = None
             self._install_history_combo.clear()
             self._install_history_combo.addItem("<install history unavailable>")
             self._install_history_combo.setEnabled(False)
             self._inspect_recovery_button.setEnabled(False)
+            self._run_recovery_button.setEnabled(False)
             return
 
         self._install_operation_history = history.operations
+        self._current_recovery_inspection = None
         self._install_history_combo.clear()
         if not history.operations:
             self._install_history_combo.addItem("<no recorded installs>")
             self._install_history_combo.setEnabled(False)
             self._inspect_recovery_button.setEnabled(False)
+            self._run_recovery_button.setEnabled(False)
             return
 
         for index, operation in enumerate(history.operations):
             self._install_history_combo.addItem(_install_operation_selector_text(operation), index)
         self._install_history_combo.setEnabled(True)
         self._inspect_recovery_button.setEnabled(True)
+        self._run_recovery_button.setEnabled(False)
 
     def _selected_install_operation(self) -> InstallOperationRecord | None:
         index = self._install_history_combo.currentData()
@@ -1125,7 +1148,47 @@ class MainWindow(QMainWindow):
             return None
         return self._install_operation_history[index]
 
+    def _on_selected_install_operation_changed(self, *_: object) -> None:
+        self._current_recovery_inspection = None
+        self._run_recovery_button.setEnabled(False)
+
     def _on_inspect_selected_install_recovery(self) -> None:
+        operation = self._selected_install_operation()
+        if operation is None:
+            message = "Select a recorded install operation first."
+            self._current_recovery_inspection = None
+            self._show_recovery_inspection_text(message, status_message=message)
+            return
+        if operation.operation_id is None:
+            message = (
+                "Selected install record is legacy and cannot be inspected through the "
+                "ID-based recovery path."
+            )
+            self._current_recovery_inspection = None
+            self._show_recovery_inspection_text(message, status_message=message)
+            return
+
+        try:
+            inspection = self._shell_service.inspect_install_recovery_by_operation_id(
+                operation.operation_id
+            )
+        except AppShellError as exc:
+            self._current_recovery_inspection = None
+            self._show_recovery_inspection_text(str(exc), status_message=str(exc))
+            return
+
+        self._current_recovery_inspection = inspection
+        self._run_recovery_button.setEnabled(inspection.recovery_review.allowed)
+        self._show_recovery_inspection_text(
+            _build_install_recovery_inspection_text(inspection),
+            status_message=inspection.recovery_review.message,
+        )
+
+    def _show_recovery_inspection_text(self, text: str, *, status_message: str) -> None:
+        self._set_recovery_output_text(text)
+        self._set_status(status_message)
+
+    def _on_run_selected_install_recovery(self) -> None:
         operation = self._selected_install_operation()
         if operation is None:
             message = "Select a recorded install operation first."
@@ -1139,24 +1202,58 @@ class MainWindow(QMainWindow):
             self._show_recovery_inspection_text(message, status_message=message)
             return
 
-        try:
-            inspection = self._shell_service.inspect_install_recovery_by_operation_id(
-                operation.operation_id
-            )
-        except AppShellError as exc:
-            self._show_recovery_inspection_text(str(exc), status_message=str(exc))
+        inspection = self._current_recovery_inspection
+        if (
+            inspection is None
+            or inspection.operation.operation_id != operation.operation_id
+        ):
+            message = "Inspect recovery readiness first."
+            self._show_recovery_inspection_text(message, status_message=message)
             return
 
-        self._show_recovery_inspection_text(
-            _build_install_recovery_inspection_text(inspection),
-            status_message=inspection.recovery_review.message,
-        )
+        review = inspection.recovery_review
+        if not review.allowed:
+            self._show_recovery_inspection_text(
+                _build_install_recovery_inspection_text(inspection),
+                status_message=review.message,
+            )
+            return
 
-    def _show_recovery_inspection_text(self, text: str, *, status_message: str) -> None:
-        self._secondary_tabs.setCurrentIndex(self._summary_tab_index)
-        self._details_toggle.setChecked(True)
-        self._set_details_text(text)
-        self._set_status(status_message)
+        yes = QMessageBox.question(
+            self,
+            "Confirm recovery execution",
+            _build_install_recovery_confirmation_message(review),
+        )
+        if yes != QMessageBox.StandardButton.Yes:
+            self._set_status("Recovery execution cancelled.")
+            return
+
+        try:
+            result = self._shell_service.execute_install_recovery_review(review)
+        except AppShellError as exc:
+            self._set_status(str(exc))
+            self._set_recovery_output_text(str(exc))
+            self._run_recovery_button.setEnabled(False)
+            return
+
+        self._on_run_selected_install_recovery_completed(result)
+
+    def _on_run_selected_install_recovery_completed(
+        self,
+        result: InstallRecoveryExecutionResult,
+    ) -> None:
+        self._render_inventory(result.inventory)
+        self._set_current_scan_target(result.destination_kind)
+        self._set_scan_context(
+            result.scan_context_path,
+            self._scan_target_label(result.destination_kind),
+        )
+        self._set_recovery_output_text(_build_install_recovery_execution_result_text(result))
+        self._set_status(
+            f"Recovery execution complete: {result.executed_entry_count} action(s)."
+        )
+        self._refresh_install_operation_selector()
+        self._current_recovery_inspection = None
 
     def _build_install_confirmation_message(
         self,
@@ -2205,6 +2302,14 @@ class MainWindow(QMainWindow):
         self._blocking_issues_strip_label.setToolTip(blocking_issue)
         self._next_step_strip_label.setToolTip(next_step)
 
+    def _set_recovery_output_text(self, text: str) -> None:
+        self._recovery_output_box.setPlainText(text)
+        blocking_issue, next_step = _summarize_details_text(text)
+        self._blocking_issues_strip_label.setText(blocking_issue)
+        self._next_step_strip_label.setText(next_step)
+        self._blocking_issues_strip_label.setToolTip(blocking_issue)
+        self._next_step_strip_label.setToolTip(next_step)
+
     def _set_package_inspection_result_text(self, text: str | None) -> None:
         has_text = bool(text and text.strip())
         self._package_inspection_result_box.setPlainText(text or "")
@@ -2703,6 +2808,36 @@ def _build_install_recovery_inspection_text(
         lines.append("")
         lines.append("Warnings")
         lines.extend(f"- {warning}" for warning in review.summary.warnings)
+    return "\n".join(lines)
+
+
+def _build_install_recovery_confirmation_message(review: object) -> str:
+    return (
+        f"{review.message}\n\n"
+        "Execute recovery now?\n"
+        f"Executable now: {review.summary.executable_entry_count}/{review.summary.total_entry_count}\n"
+        f"Non-executable now: {review.summary.non_executable_entry_count}\n"
+        f"Archive restoration involved: {'yes' if review.summary.involves_archive_restore else 'no'}"
+    )
+
+
+def _build_install_recovery_execution_result_text(
+    result: InstallRecoveryExecutionResult,
+) -> str:
+    lines = [
+        "Recovery execution result",
+        f"Outcome: completed",
+        f"Executed actions: {result.executed_entry_count}",
+        f"Destination: {result.destination_kind} -> {result.destination_mods_path}",
+        f"Removed targets: {len(result.removed_target_paths)}",
+        f"Restored targets: {len(result.restored_target_paths)}",
+    ]
+    if result.removed_target_paths:
+        lines.append("Removed target paths")
+        lines.extend(f"- {path}" for path in result.removed_target_paths)
+    if result.restored_target_paths:
+        lines.append("Restored target paths")
+        lines.extend(f"- {path}" for path in result.restored_target_paths)
     return "\n".join(lines)
 
 
