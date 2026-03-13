@@ -415,6 +415,7 @@ class InstallOperationEntryRecord:
 
 @dataclass(frozen=True, slots=True)
 class InstallOperationRecord:
+    operation_id: str | None
     timestamp: str
     package_path: Path
     destination_kind: str
@@ -501,7 +502,9 @@ class InstallRecoveryExecutionResult:
 
 @dataclass(frozen=True, slots=True)
 class RecoveryExecutionRecord:
+    recovery_execution_id: str | None
     timestamp: str
+    related_install_operation_id: str | None
     related_install_operation_timestamp: str | None
     related_install_package_path: Path | None
     destination_kind: str

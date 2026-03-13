@@ -213,6 +213,7 @@ def _load_json_object(*, history_file: Path, subject: str) -> dict[str, object]:
 
 def _serialize_install_operation(operation: InstallOperationRecord) -> dict[str, object]:
     return {
+        "operation_id": operation.operation_id,
         "timestamp": operation.timestamp,
         "package_path": str(operation.package_path),
         "destination_kind": operation.destination_kind,
@@ -248,6 +249,7 @@ def _parse_install_operation(data: object, index: int) -> InstallOperationRecord
         raise AppStateStoreError(f"operations[{index}].entries must be an array")
 
     return InstallOperationRecord(
+        operation_id=_optional_non_empty_string(data, "operation_id", prefix=f"operations[{index}]"),
         timestamp=_require_non_empty_string(data, "timestamp", prefix=f"operations[{index}]"),
         package_path=Path(
             _require_non_empty_string(data, "package_path", prefix=f"operations[{index}]")
@@ -314,7 +316,9 @@ def _parse_install_operation_entry(
 
 def _serialize_recovery_execution_record(operation: RecoveryExecutionRecord) -> dict[str, object]:
     return {
+        "recovery_execution_id": operation.recovery_execution_id,
         "timestamp": operation.timestamp,
+        "related_install_operation_id": operation.related_install_operation_id,
         "related_install_operation_timestamp": operation.related_install_operation_timestamp,
         "related_install_package_path": (
             str(operation.related_install_package_path)
@@ -352,7 +356,17 @@ def _parse_recovery_execution_record(data: object, index: int) -> RecoveryExecut
     )
 
     return RecoveryExecutionRecord(
+        recovery_execution_id=_optional_non_empty_string(
+            data,
+            "recovery_execution_id",
+            prefix=f"operations[{index}]",
+        ),
         timestamp=_require_non_empty_string(data, "timestamp", prefix=f"operations[{index}]"),
+        related_install_operation_id=_optional_non_empty_string(
+            data,
+            "related_install_operation_id",
+            prefix=f"operations[{index}]",
+        ),
         related_install_operation_timestamp=_optional_non_empty_string(
             data,
             "related_install_operation_timestamp",

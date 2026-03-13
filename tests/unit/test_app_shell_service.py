@@ -1910,6 +1910,7 @@ def test_build_and_execute_sandbox_install_plan(tmp_path: Path) -> None:
     history = service.load_install_operation_history()
     assert len(history.operations) == 1
     operation = history.operations[0]
+    assert operation.operation_id is not None
     assert operation.package_path == package
     assert operation.destination_kind == INSTALL_TARGET_SANDBOX_MODS
     assert operation.destination_mods_path == sandbox
@@ -1932,6 +1933,7 @@ def test_build_and_execute_sandbox_install_plan(tmp_path: Path) -> None:
 def test_load_install_operation_history_returns_preexisting_records(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
     operation = InstallOperationRecord(
+        operation_id="install_existing",
         timestamp="2026-03-13T12:00:00Z",
         package_path=tmp_path / "Downloads" / "sample.zip",
         destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
@@ -1968,7 +1970,9 @@ def test_load_install_operation_history_returns_preexisting_records(tmp_path: Pa
 def test_load_recovery_execution_history_returns_preexisting_records(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
     operation = shell_service_module.RecoveryExecutionRecord(
+        recovery_execution_id="recovery_existing",
         timestamp="2026-03-13T15:00:00Z",
+        related_install_operation_id="install_existing",
         related_install_operation_timestamp="2026-03-13T12:00:00Z",
         related_install_package_path=tmp_path / "Downloads" / "sample.zip",
         destination_kind=INSTALL_TARGET_SANDBOX_MODS,
@@ -2311,6 +2315,8 @@ def test_execute_install_recovery_review_blocks_when_review_not_allowed(tmp_path
 
     history = service.load_recovery_execution_history()
     assert len(history.operations) == 1
+    assert history.operations[0].recovery_execution_id is not None
+    assert history.operations[0].related_install_operation_id == operation.operation_id
     assert history.operations[0].outcome_status == "failed"
     assert history.operations[0].executed_entry_count == 0
     assert history.operations[0].failure_message == review.message
@@ -2350,6 +2356,8 @@ def test_execute_install_recovery_review_removes_existing_target(tmp_path: Path)
 
     history = service.load_recovery_execution_history()
     assert len(history.operations) == 1
+    assert history.operations[0].recovery_execution_id is not None
+    assert history.operations[0].related_install_operation_id == operation.operation_id
     assert history.operations[0].related_install_operation_timestamp == operation.timestamp
     assert history.operations[0].related_install_package_path == operation.package_path
     assert history.operations[0].outcome_status == "completed"
@@ -2398,6 +2406,8 @@ def test_execute_install_recovery_review_restores_existing_archive_source(tmp_pa
 
     history = service.load_recovery_execution_history()
     assert len(history.operations) == 1
+    assert history.operations[0].recovery_execution_id is not None
+    assert history.operations[0].related_install_operation_id == operation.operation_id
     assert history.operations[0].outcome_status == "completed"
     assert history.operations[0].executed_entry_count == 1
     assert history.operations[0].restored_target_paths == (restored_target,)
@@ -2491,6 +2501,8 @@ def test_execute_install_recovery_review_records_partial_failure_after_first_act
 
     history = service.load_recovery_execution_history()
     assert len(history.operations) == 1
+    assert history.operations[0].recovery_execution_id is not None
+    assert history.operations[0].related_install_operation_id == operation.operation_id
     assert history.operations[0].outcome_status == "failed_partial"
     assert history.operations[0].executed_entry_count == 1
     assert history.operations[0].removed_target_paths == (removable_target,)
@@ -3385,6 +3397,7 @@ def _install_operation_record(
         else tuple(entry.archive_path for entry in entries if entry.archive_path is not None)
     )
     return InstallOperationRecord(
+        operation_id="install_test_record",
         timestamp="2026-03-13T12:00:00Z",
         package_path=tmp_path / "Downloads" / "sample.zip",
         destination_kind=INSTALL_TARGET_SANDBOX_MODS,

@@ -137,6 +137,7 @@ def test_install_operation_history_round_trip(tmp_path: Path) -> None:
 
     payload = json.loads(history_file.read_text(encoding="utf-8"))
     assert payload["version"] == INSTALL_OPERATION_HISTORY_VERSION
+    assert payload["operations"][0]["operation_id"] == operation.operation_id
     assert payload["operations"][0]["package_path"] == str(operation.package_path)
     assert payload["operations"][0]["entries"][0]["action"] == INSTALL_NEW
 
@@ -190,6 +191,49 @@ def test_load_install_operation_history_rejects_unsupported_version(tmp_path: Pa
         load_install_operation_history(history_file)
 
 
+def test_load_install_operation_history_without_ids_still_loads_compatibly(tmp_path: Path) -> None:
+    history_file = tmp_path / INSTALL_OPERATION_HISTORY_FILENAME
+    history_file.write_text(
+        json.dumps(
+            {
+                "version": INSTALL_OPERATION_HISTORY_VERSION,
+                "operations": [
+                    {
+                        "timestamp": "2026-03-13T12:00:00Z",
+                        "package_path": str(tmp_path / "sample.zip"),
+                        "destination_kind": "sandbox_mods",
+                        "destination_mods_path": str(tmp_path / "SandboxMods"),
+                        "archive_path": str(tmp_path / "SandboxArchive"),
+                        "installed_targets": [str(tmp_path / "SandboxMods" / "SampleMod")],
+                        "archived_targets": [str(tmp_path / "SandboxArchive" / "OldSampleMod")],
+                        "entries": [
+                            {
+                                "name": "Sample Mod",
+                                "unique_id": "Sample.Mod",
+                                "version": "1.0.0",
+                                "action": INSTALL_NEW,
+                                "target_path": str(tmp_path / "SandboxMods" / "SampleMod"),
+                                "archive_path": None,
+                                "source_manifest_path": "/tmp/package/SampleMod/manifest.json",
+                                "source_root_path": "/tmp/package/SampleMod",
+                                "target_exists_before": False,
+                                "can_install": True,
+                                "warnings": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_install_operation_history(history_file)
+
+    assert len(loaded.operations) == 1
+    assert loaded.operations[0].operation_id is None
+
+
 def test_recovery_execution_history_round_trip(tmp_path: Path) -> None:
     history_file = tmp_path / "state" / RECOVERY_EXECUTION_HISTORY_FILENAME
     operation = _recovery_execution_record(tmp_path)
@@ -202,6 +246,8 @@ def test_recovery_execution_history_round_trip(tmp_path: Path) -> None:
 
     payload = json.loads(history_file.read_text(encoding="utf-8"))
     assert payload["version"] == RECOVERY_EXECUTION_HISTORY_VERSION
+    assert payload["operations"][0]["recovery_execution_id"] == operation.recovery_execution_id
+    assert payload["operations"][0]["related_install_operation_id"] == operation.related_install_operation_id
     assert payload["operations"][0]["destination_kind"] == operation.destination_kind
     assert payload["operations"][0]["outcome_status"] == "completed"
 
@@ -286,8 +332,41 @@ def test_load_recovery_execution_history_rejects_invalid_data(tmp_path: Path) ->
         load_recovery_execution_history(history_file)
 
 
+def test_load_recovery_execution_history_without_ids_still_loads_compatibly(tmp_path: Path) -> None:
+    history_file = tmp_path / RECOVERY_EXECUTION_HISTORY_FILENAME
+    history_file.write_text(
+        json.dumps(
+            {
+                "version": RECOVERY_EXECUTION_HISTORY_VERSION,
+                "operations": [
+                    {
+                        "timestamp": "2026-03-13T14:00:00Z",
+                        "related_install_operation_timestamp": "2026-03-13T12:00:00Z",
+                        "related_install_package_path": str(tmp_path / "sample.zip"),
+                        "destination_kind": "sandbox_mods",
+                        "destination_mods_path": str(tmp_path / "SandboxMods"),
+                        "executed_entry_count": 1,
+                        "removed_target_paths": [str(tmp_path / "SandboxMods" / "SampleMod")],
+                        "restored_target_paths": [],
+                        "outcome_status": "completed",
+                        "failure_message": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_recovery_execution_history(history_file)
+
+    assert len(loaded.operations) == 1
+    assert loaded.operations[0].recovery_execution_id is None
+    assert loaded.operations[0].related_install_operation_id is None
+
+
 def _install_operation_record(tmp_path: Path, *, package_name: str = "sample.zip") -> InstallOperationRecord:
     return InstallOperationRecord(
+        operation_id="install_123",
         timestamp="2026-03-13T12:00:00Z",
         package_path=tmp_path / package_name,
         destination_kind="sandbox_mods",
@@ -321,7 +400,9 @@ def _recovery_execution_record(
     failure_message: str | None = None,
 ) -> RecoveryExecutionRecord:
     return RecoveryExecutionRecord(
+        recovery_execution_id="recovery_123",
         timestamp=timestamp,
+        related_install_operation_id="install_123",
         related_install_operation_timestamp="2026-03-13T12:00:00Z",
         related_install_package_path=tmp_path / "sample.zip",
         destination_kind="sandbox_mods",

@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from collections import Counter
 import shutil
 from typing import Literal
+from uuid import uuid4
 import zipfile
 
 from sdvmm.domain.models import (
@@ -2256,6 +2257,7 @@ class AppShellService:
         result: SandboxInstallResult,
     ) -> None:
         operation = InstallOperationRecord(
+            operation_id=_new_operation_id("install"),
             timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             package_path=plan.package_path,
             destination_kind=plan.destination_kind,
@@ -2296,7 +2298,9 @@ class AppShellService:
         failure_message: str | None,
     ) -> None:
         record = RecoveryExecutionRecord(
+            recovery_execution_id=_new_operation_id("recovery"),
             timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            related_install_operation_id=review.plan.operation.operation_id,
             related_install_operation_timestamp=review.plan.operation.timestamp,
             related_install_package_path=review.plan.operation.package_path,
             destination_kind=review.plan.operation.destination_kind,
@@ -2679,6 +2683,10 @@ def _remove_recovery_target(target_path: Path) -> None:
         shutil.rmtree(target_path)
         return
     target_path.unlink()
+
+
+def _new_operation_id(prefix: str) -> str:
+    return f"{prefix}_{uuid4().hex}"
 
 
 def _build_intake_flow_messages(
