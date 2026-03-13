@@ -236,6 +236,12 @@ class MainWindow(QMainWindow):
         self._staged_package_label.setReadOnly(True)
         self._install_history_combo = QComboBox()
         self._install_history_combo.setObjectName("recovery_inspection_operation_combo")
+        self._install_history_filter_combo = QComboBox()
+        self._install_history_filter_combo.setObjectName("recovery_selector_filter_combo")
+        self._install_history_filter_combo.addItem("all", "all")
+        self._install_history_filter_combo.addItem("ready", "ready")
+        self._install_history_filter_combo.addItem("blocked", "blocked")
+        self._install_history_filter_combo.addItem("legacy", "legacy")
         self._recovery_selection_summary_label = QLabel(
             "Select a recorded install to inspect recovery readiness."
         )
@@ -267,6 +273,7 @@ class MainWindow(QMainWindow):
             self._install_target_combo,
             self._intake_result_combo,
             self._install_history_combo,
+            self._install_history_filter_combo,
         ):
             control.setMinimumHeight(26)
 
@@ -816,8 +823,13 @@ class MainWindow(QMainWindow):
             recovery_controls.setSpacing(6)
             recovery_controls.addWidget(QLabel("Recorded install"))
             recovery_controls.addWidget(self._install_history_combo, 1)
+            recovery_controls.addWidget(QLabel("Filter"))
+            recovery_controls.addWidget(self._install_history_filter_combo)
             self._install_history_combo.currentIndexChanged.connect(
                 self._on_selected_install_operation_changed
+            )
+            self._install_history_filter_combo.currentIndexChanged.connect(
+                self._refresh_install_operation_selector
             )
             self._inspect_recovery_button.clicked.connect(self._on_inspect_selected_install_recovery)
             _set_secondary_button_style(self._inspect_recovery_button)
@@ -1214,6 +1226,7 @@ class MainWindow(QMainWindow):
         self._set_status(review.message)
 
     def _refresh_install_operation_selector(self) -> None:
+        selected_before = self._selected_install_operation()
         try:
             history = self._shell_service.load_install_operation_history()
         except AppShellError:
@@ -1246,9 +1259,40 @@ class MainWindow(QMainWindow):
             self._refresh_recovery_selection_summary()
             return
 
+        filter_code = self._current_install_history_filter_code()
+        visible_indexes = [
+            index
+            for index in self._install_operation_display_indexes
+            if self._matches_install_history_filter(history.operations[index], filter_code)
+        ]
+        if not visible_indexes:
+            self._install_history_combo.addItem("<no recorded installs match filter>")
+            self._install_history_combo.setEnabled(False)
+            self._inspect_recovery_button.setEnabled(False)
+            self._run_recovery_button.setEnabled(False)
+            self._refresh_recovery_selection_summary()
+            return
+
         for index in self._install_operation_display_indexes:
+            if index not in visible_indexes:
+                continue
             operation = history.operations[index]
-            self._install_history_combo.addItem(_install_operation_selector_text(operation), index)
+            self._install_history_combo.addItem(
+                _install_operation_selector_text(operation),
+                index,
+            )
+        selected_after = -1
+        if selected_before is not None:
+            try:
+                selected_before_index = self._install_operation_history.index(selected_before)
+            except ValueError:
+                selected_before_index = -1
+            if selected_before_index >= 0:
+                selected_after = self._install_history_combo.findData(selected_before_index)
+        if selected_after >= 0:
+            self._install_history_combo.setCurrentIndex(selected_after)
+        else:
+            self._install_history_combo.setCurrentIndex(0)
         self._install_history_combo.setEnabled(True)
         self._inspect_recovery_button.setEnabled(True)
         self._run_recovery_button.setEnabled(False)
@@ -1291,6 +1335,29 @@ class MainWindow(QMainWindow):
         self._current_recovery_inspection = None
         self._run_recovery_button.setEnabled(False)
         self._refresh_recovery_selection_summary()
+
+    def _current_install_history_filter_code(self) -> str:
+        data = self._install_history_filter_combo.currentData()
+        if isinstance(data, str):
+            return data
+        return "all"
+
+    def _matches_install_history_filter(
+        self,
+        operation: InstallOperationRecord,
+        filter_code: str,
+    ) -> bool:
+        if filter_code == "legacy":
+            return operation.operation_id is None
+        if filter_code == "ready":
+            return operation.operation_id is not None and all(
+                entry.can_install for entry in operation.entries
+            )
+        if filter_code == "blocked":
+            return operation.operation_id is not None and any(
+                not entry.can_install for entry in operation.entries
+            )
+        return True
 
     def _on_inspect_selected_install_recovery(self) -> None:
         operation = self._selected_install_operation()

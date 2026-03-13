@@ -112,6 +112,7 @@ def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow)
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
     recovery_output_box = main_window.findChild(QPlainTextEdit, "recovery_local_output_box")
     recovery_combo = main_window.findChild(QComboBox, "recovery_inspection_operation_combo")
+    recovery_filter_combo = main_window.findChild(QComboBox, "recovery_selector_filter_combo")
     recovery_summary_label = main_window.findChild(QLabel, "recovery_selection_summary_label")
     recovery_button = main_window.findChild(QPushButton, "recovery_inspection_button")
     run_recovery_button = main_window.findChild(QPushButton, "recovery_execute_button")
@@ -122,6 +123,7 @@ def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow)
     assert recovery_group is not None
     assert recovery_output_box is not None
     assert recovery_combo is not None
+    assert recovery_filter_combo is not None
     assert recovery_summary_label is not None
     assert recovery_button is not None
     assert run_recovery_button is not None
@@ -129,6 +131,7 @@ def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow)
     assert summary_tab.findChild(QGroupBox, "recovery_inspection_group") is None
     assert main_window._recovery_output_box is recovery_output_box
     assert main_window._install_history_combo is recovery_combo
+    assert main_window._install_history_filter_combo is recovery_filter_combo
     assert main_window._recovery_selection_summary_label is recovery_summary_label
     assert main_window._inspect_recovery_button is recovery_button
     assert main_window._run_recovery_button is run_recovery_button
@@ -1379,6 +1382,179 @@ def test_main_window_recovery_selector_labels_mark_legacy_records_clearly(
     )
 
 
+def test_main_window_recovery_selector_filter_modes_show_expected_subsets_and_order(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready_new = _install_operation_record_for_ui(
+        operation_id="ready_new",
+        package_name="ReadyNew.zip",
+        timestamp="2026-03-13T13:00:00Z",
+    )
+    blocked_mid = _install_operation_record_for_ui(
+        operation_id="blocked_mid",
+        package_name="BlockedMid.zip",
+        timestamp="2026-03-13T12:00:00Z",
+        entry_can_install=False,
+    )
+    legacy_old = _install_operation_record_for_ui(
+        operation_id=None,
+        package_name="LegacyOld.zip",
+        timestamp="2026-03-13T11:00:00Z",
+    )
+    ready_old = _install_operation_record_for_ui(
+        operation_id="ready_old",
+        package_name="ReadyOld.zip",
+        timestamp="2026-03-13T10:00:00Z",
+    )
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(ready_old, legacy_old, blocked_mid, ready_new)),
+    )
+
+    main_window._refresh_install_operation_selector()
+    qapp.processEvents()
+    assert main_window._install_history_combo.itemText(0).startswith("ReadyNew.zip | 2026-03-13T13:00:00Z")
+    assert main_window._install_history_combo.itemText(1).startswith("BlockedMid.zip | 2026-03-13T12:00:00Z")
+    assert main_window._install_history_combo.itemText(2).startswith("LegacyOld.zip | 2026-03-13T11:00:00Z")
+    assert main_window._install_history_combo.itemText(3).startswith("ReadyOld.zip | 2026-03-13T10:00:00Z")
+
+    main_window._install_history_filter_combo.setCurrentText("ready")
+    qapp.processEvents()
+    assert main_window._install_history_combo.count() == 2
+    assert main_window._install_history_combo.itemText(0).startswith("ReadyNew.zip | 2026-03-13T13:00:00Z")
+    assert main_window._install_history_combo.itemText(1).startswith("ReadyOld.zip | 2026-03-13T10:00:00Z")
+
+    main_window._install_history_filter_combo.setCurrentText("blocked")
+    qapp.processEvents()
+    assert main_window._install_history_combo.count() == 1
+    assert main_window._install_history_combo.itemText(0).startswith("BlockedMid.zip | 2026-03-13T12:00:00Z")
+
+    main_window._install_history_filter_combo.setCurrentText("legacy")
+    qapp.processEvents()
+    assert main_window._install_history_combo.count() == 1
+    assert main_window._install_history_combo.itemText(0).startswith("LegacyOld.zip | 2026-03-13T11:00:00Z")
+    assert "legacy record" in main_window._install_history_combo.itemText(0)
+
+
+def test_main_window_recovery_selector_filter_fail_soft_when_current_selection_is_hidden(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready_new = _install_operation_record_for_ui(
+        operation_id="ready_new",
+        package_name="ReadyNew.zip",
+        timestamp="2026-03-13T13:00:00Z",
+    )
+    blocked_mid = _install_operation_record_for_ui(
+        operation_id="blocked_mid",
+        package_name="BlockedMid.zip",
+        timestamp="2026-03-13T12:00:00Z",
+        entry_can_install=False,
+    )
+    legacy_old = _install_operation_record_for_ui(
+        operation_id=None,
+        package_name="LegacyOld.zip",
+        timestamp="2026-03-13T11:00:00Z",
+    )
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(legacy_old, blocked_mid, ready_new)),
+    )
+
+    main_window._refresh_install_operation_selector()
+    blocked_index = main_window._install_history_combo.findData(1)
+    assert blocked_index >= 0
+    main_window._install_history_combo.setCurrentIndex(blocked_index)
+    qapp.processEvents()
+    assert main_window._selected_install_operation() is blocked_mid
+
+    main_window._install_history_filter_combo.setCurrentText("legacy")
+    qapp.processEvents()
+
+    assert main_window._selected_install_operation() is legacy_old
+    summary_text = main_window._recovery_selection_summary_label.text()
+    assert "Selected install: LegacyOld.zip" in summary_text
+    assert "Legacy record: recovery inspection is unavailable because this entry has no operation ID." in summary_text
+
+
+def test_main_window_recovery_inspect_run_behavior_remains_intact_for_filtered_visible_entries(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready_operation = _install_operation_record_for_ui(
+        operation_id="ready_visible",
+        package_name="ReadyVisible.zip",
+        timestamp="2026-03-13T13:00:00Z",
+    )
+    blocked_operation = _install_operation_record_for_ui(
+        operation_id="blocked_hidden",
+        package_name="BlockedHidden.zip",
+        timestamp="2026-03-13T12:00:00Z",
+        entry_can_install=False,
+    )
+    inspection = _install_recovery_inspection_for_ui(
+        ready_operation,
+        allowed=True,
+        review_message="Recovery plan is ready: 2 entries can be executed.",
+        executable_count=2,
+        non_executable_count=0,
+    )
+    execute_calls: list[object] = []
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "load_install_operation_history",
+        lambda: SimpleNamespace(operations=(blocked_operation, ready_operation)),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_install_recovery_by_operation_id",
+        lambda operation_id: inspection,
+    )
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QMessageBox.question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    monkeypatch.setattr(main_window, "_render_inventory", lambda inventory: None)
+    monkeypatch.setattr(main_window, "_set_current_scan_target", lambda destination_kind: None)
+    monkeypatch.setattr(main_window, "_set_scan_context", lambda path, label: None)
+
+    def fake_execute(review: object) -> object:
+        execute_calls.append(review)
+        return SimpleNamespace(
+            review=inspection.recovery_review,
+            executed_entry_count=1,
+            removed_target_paths=(Path(r"C:\Sandbox\Mods\SampleMod"),),
+            restored_target_paths=tuple(),
+            destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+            destination_mods_path=Path(r"C:\Sandbox\Mods"),
+            scan_context_path=Path(r"C:\Sandbox\Mods"),
+            inventory=object(),
+        )
+
+    monkeypatch.setattr(main_window._shell_service, "execute_install_recovery_review", fake_execute)
+
+    main_window._refresh_install_operation_selector()
+    main_window._install_history_filter_combo.setCurrentText("ready")
+    qapp.processEvents()
+    main_window._on_inspect_selected_install_recovery()
+    assert main_window._run_recovery_button.isEnabled() is True
+
+    main_window._on_run_selected_install_recovery()
+    qapp.processEvents()
+
+    assert execute_calls == [inspection.recovery_review]
+    assert main_window._status_strip_label.text() == "Recovery execution complete: 1 action(s)."
+
+
 def test_main_window_recovery_summary_updates_for_selection_and_legacy_state(
     main_window: MainWindow,
     qapp: QApplication,
@@ -2180,6 +2356,7 @@ def _install_operation_record_for_ui(
     package_name: str = "SamplePack.zip",
     timestamp: str = "2026-03-13T12:00:00Z",
     destination_kind: str = INSTALL_TARGET_SANDBOX_MODS,
+    entry_can_install: bool = True,
 ) -> InstallOperationRecord:
     destination_mods_path = (
         Path(r"C:\Game\Mods")
@@ -2205,13 +2382,13 @@ def _install_operation_record_for_ui(
                 name="Sample Mod",
                 unique_id="Sample.Mod",
                 version="1.0.0",
-                action=INSTALL_NEW,
+                action=INSTALL_NEW if entry_can_install else BLOCKED,
                 target_path=destination_mods_path / "SampleMod",
                 archive_path=None,
                 source_manifest_path=r"C:\Packages\Sample\manifest.json",
                 source_root_path=r"C:\Packages\Sample",
                 target_exists_before=False,
-                can_install=True,
+                can_install=entry_can_install,
                 warnings=tuple(),
             ),
         ),
