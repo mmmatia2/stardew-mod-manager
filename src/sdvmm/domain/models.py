@@ -349,6 +349,38 @@ class SandboxInstallResult:
 
 
 @dataclass(frozen=True, slots=True)
+class InstallOperationEntryRecord:
+    name: str
+    unique_id: str
+    version: str
+    action: SandboxInstallAction
+    target_path: Path
+    archive_path: Path | None
+    source_manifest_path: str
+    source_root_path: str
+    target_exists_before: bool
+    can_install: bool
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InstallOperationRecord:
+    timestamp: str
+    package_path: Path
+    destination_kind: str
+    destination_mods_path: Path
+    archive_path: Path
+    installed_targets: tuple[Path, ...]
+    archived_targets: tuple[Path, ...]
+    entries: tuple[InstallOperationEntryRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InstallOperationHistory:
+    operations: tuple[InstallOperationRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ModRemovalPlan:
     destination_kind: str
     mods_path: Path

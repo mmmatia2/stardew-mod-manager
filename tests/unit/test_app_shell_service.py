@@ -19,6 +19,8 @@ from sdvmm.app.shell_service import (
 )
 from sdvmm.domain.models import (
     AppConfig,
+    InstallOperationEntryRecord,
+    InstallOperationRecord,
     ModDiscoveryEntry,
     ModDiscoveryResult,
     ModUpdateReport,
@@ -1580,12 +1582,62 @@ def test_build_and_execute_sandbox_install_plan(tmp_path: Path) -> None:
     assert (sandbox / "Mod" / "file.txt").read_text(encoding="utf-8") == "hello"
     assert len(result.inventory.mods) == 1
 
+    history = service.load_install_operation_history()
+    assert len(history.operations) == 1
+    operation = history.operations[0]
+    assert operation.package_path == package
+    assert operation.destination_kind == INSTALL_TARGET_SANDBOX_MODS
+    assert operation.destination_mods_path == sandbox
+    assert operation.archive_path == archive_root
+    assert operation.installed_targets == result.installed_targets
+    assert operation.archived_targets == result.archived_targets
+    assert operation.timestamp.endswith("Z")
+    assert len(operation.entries) == 1
+    assert operation.entries[0].action == "install_new"
+    assert operation.entries[0].target_path == sandbox / "Mod"
+
     follow_up_scan = service.scan_with_target(
         scan_target=SCAN_TARGET_SANDBOX_MODS,
         configured_mods_path_text=str(tmp_path / "ConfiguredMods"),
         sandbox_mods_path_text=str(sandbox),
     )
     assert follow_up_scan.scan_path == result.scan_context_path
+
+
+def test_load_install_operation_history_returns_preexisting_records(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    operation = InstallOperationRecord(
+        timestamp="2026-03-13T12:00:00Z",
+        package_path=tmp_path / "Downloads" / "sample.zip",
+        destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        destination_mods_path=tmp_path / "RealMods",
+        archive_path=tmp_path / "RealArchive",
+        installed_targets=(tmp_path / "RealMods" / "SampleMod",),
+        archived_targets=(tmp_path / "RealArchive" / "SampleMod-old",),
+        entries=(
+            InstallOperationEntryRecord(
+                name="Sample Mod",
+                unique_id="Sample.Mod",
+                version="2.0.0",
+                action="overwrite_with_archive",
+                target_path=tmp_path / "RealMods" / "SampleMod",
+                archive_path=tmp_path / "RealArchive" / "SampleMod-old",
+                source_manifest_path=r"C:\package\SampleMod\manifest.json",
+                source_root_path=r"C:\package\SampleMod",
+                target_exists_before=True,
+                can_install=True,
+                warnings=("Archived previous version before overwrite.",),
+            ),
+        ),
+    )
+    shell_service_module.append_install_operation_record(
+        shell_service_module.install_operation_history_file(service.state_file),
+        operation,
+    )
+
+    history = service.load_install_operation_history()
+
+    assert history.operations == (operation,)
 
 
 def test_build_sandbox_plan_defaults_archive_path_when_empty(tmp_path: Path) -> None:

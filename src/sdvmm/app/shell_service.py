@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 from collections.abc import Iterable
@@ -18,6 +19,9 @@ from sdvmm.domain.models import (
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
     GameEnvironmentStatus,
+    InstallOperationEntryRecord,
+    InstallOperationHistory,
+    InstallOperationRecord,
     ModDiscoveryEntry,
     ModDiscoveryResult,
     ModRemovalPlan,
@@ -47,6 +51,9 @@ from sdvmm.domain.dependency_codes import (
 from sdvmm.domain.unique_id import canonicalize_unique_id
 from sdvmm.services.app_state_store import (
     AppStateStoreError,
+    append_install_operation_record,
+    install_operation_history_file,
+    load_install_operation_history,
     load_app_config,
     save_app_config,
 )
@@ -202,6 +209,12 @@ class AppShellService:
             )
 
         return StartupConfigState(config=config, message=None)
+
+    def load_install_operation_history(self) -> InstallOperationHistory:
+        try:
+            return load_install_operation_history(self._install_operation_history_file)
+        except AppStateStoreError as exc:
+            raise AppShellError(f"Could not load install history: {exc}") from exc
 
     def save_mods_directory(
         self,
@@ -959,7 +972,9 @@ class AppShellService:
 
         try:
             result = execute_sandbox_install_plan_service(plan)
-            return replace(result, destination_kind=plan.destination_kind)
+            completed_result = replace(result, destination_kind=plan.destination_kind)
+            self._record_completed_install_operation(plan=plan, result=completed_result)
+            return completed_result
         except SandboxInstallError as exc:
             raise AppShellError(str(exc)) from exc
         except OSError as exc:
@@ -1972,6 +1987,47 @@ class AppShellService:
                 f"Real archive parent directory is not accessible: {path.parent}"
             )
         return path
+
+    @property
+    def _install_operation_history_file(self) -> Path:
+        return install_operation_history_file(self._state_file)
+
+    def _record_completed_install_operation(
+        self,
+        *,
+        plan: SandboxInstallPlan,
+        result: SandboxInstallResult,
+    ) -> None:
+        operation = InstallOperationRecord(
+            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            package_path=plan.package_path,
+            destination_kind=plan.destination_kind,
+            destination_mods_path=plan.sandbox_mods_path,
+            archive_path=plan.sandbox_archive_path,
+            installed_targets=result.installed_targets,
+            archived_targets=result.archived_targets,
+            entries=tuple(
+                InstallOperationEntryRecord(
+                    name=entry.name,
+                    unique_id=entry.unique_id,
+                    version=entry.version,
+                    action=entry.action,
+                    target_path=entry.target_path,
+                    archive_path=entry.archive_path,
+                    source_manifest_path=entry.source_manifest_path,
+                    source_root_path=entry.source_root_path,
+                    target_exists_before=entry.target_exists,
+                    can_install=entry.can_install,
+                    warnings=entry.warnings,
+                )
+                for entry in plan.entries
+            ),
+        )
+        try:
+            append_install_operation_record(self._install_operation_history_file, operation)
+        except (AppStateStoreError, OSError):
+            # History recording is best-effort so a completed install does not surface as failed.
+            return
 
 
 def _paths_deterministically_match(path_a: Path, path_b: Path) -> bool:

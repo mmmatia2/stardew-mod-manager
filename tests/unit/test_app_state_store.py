@@ -5,12 +5,24 @@ from pathlib import Path
 
 import pytest
 
-from sdvmm.domain.models import AppConfig
+from sdvmm.domain.models import (
+    AppConfig,
+    InstallOperationEntryRecord,
+    InstallOperationHistory,
+    InstallOperationRecord,
+)
+from sdvmm.domain.install_codes import INSTALL_NEW
 from sdvmm.services.app_state_store import (
     APP_STATE_VERSION,
+    INSTALL_OPERATION_HISTORY_FILENAME,
+    INSTALL_OPERATION_HISTORY_VERSION,
     AppStateStoreError,
+    append_install_operation_record,
+    install_operation_history_file,
     load_app_config,
+    load_install_operation_history,
     save_app_config,
+    save_install_operation_history,
 )
 
 
@@ -103,3 +115,95 @@ def test_load_app_config_defaults_optional_fields_when_missing(tmp_path: Path) -
     assert loaded.nexus_api_key is None
     assert loaded.scan_target == "configured_real_mods"
     assert loaded.install_target == "sandbox_mods"
+
+
+def test_install_operation_history_round_trip(tmp_path: Path) -> None:
+    history_file = tmp_path / "state" / INSTALL_OPERATION_HISTORY_FILENAME
+    operation = _install_operation_record(tmp_path)
+    history = InstallOperationHistory(operations=(operation,))
+
+    save_install_operation_history(history_file, history)
+    loaded = load_install_operation_history(history_file)
+
+    assert loaded == history
+
+    payload = json.loads(history_file.read_text(encoding="utf-8"))
+    assert payload["version"] == INSTALL_OPERATION_HISTORY_VERSION
+    assert payload["operations"][0]["package_path"] == str(operation.package_path)
+    assert payload["operations"][0]["entries"][0]["action"] == INSTALL_NEW
+
+
+def test_load_install_operation_history_returns_empty_when_file_missing(tmp_path: Path) -> None:
+    history_file = tmp_path / "state" / INSTALL_OPERATION_HISTORY_FILENAME
+
+    loaded = load_install_operation_history(history_file)
+
+    assert loaded == InstallOperationHistory(operations=tuple())
+
+
+def test_append_install_operation_record_appends_in_order(tmp_path: Path) -> None:
+    history_file = tmp_path / "state" / INSTALL_OPERATION_HISTORY_FILENAME
+    first = _install_operation_record(tmp_path, package_name="first.zip")
+    second = _install_operation_record(tmp_path, package_name="second.zip")
+
+    append_install_operation_record(history_file, first)
+    updated = append_install_operation_record(history_file, second)
+
+    assert updated.operations == (first, second)
+
+
+def test_install_operation_history_file_uses_state_directory(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+
+    assert install_operation_history_file(state_file) == tmp_path / "state" / INSTALL_OPERATION_HISTORY_FILENAME
+
+
+def test_load_install_operation_history_rejects_invalid_json(tmp_path: Path) -> None:
+    history_file = tmp_path / INSTALL_OPERATION_HISTORY_FILENAME
+    history_file.write_text("{invalid", encoding="utf-8")
+
+    with pytest.raises(AppStateStoreError, match="Invalid JSON"):
+        load_install_operation_history(history_file)
+
+
+def test_load_install_operation_history_rejects_unsupported_version(tmp_path: Path) -> None:
+    history_file = tmp_path / INSTALL_OPERATION_HISTORY_FILENAME
+    history_file.write_text(
+        json.dumps(
+            {
+                "version": 999,
+                "operations": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AppStateStoreError, match="Unsupported install-operation history version"):
+        load_install_operation_history(history_file)
+
+
+def _install_operation_record(tmp_path: Path, *, package_name: str = "sample.zip") -> InstallOperationRecord:
+    return InstallOperationRecord(
+        timestamp="2026-03-13T12:00:00Z",
+        package_path=tmp_path / package_name,
+        destination_kind="sandbox_mods",
+        destination_mods_path=tmp_path / "SandboxMods",
+        archive_path=tmp_path / "SandboxArchive",
+        installed_targets=(tmp_path / "SandboxMods" / "SampleMod",),
+        archived_targets=(tmp_path / "SandboxArchive" / "OldSampleMod",),
+        entries=(
+            InstallOperationEntryRecord(
+                name="Sample Mod",
+                unique_id="Sample.Mod",
+                version="1.0.0",
+                action=INSTALL_NEW,
+                target_path=tmp_path / "SandboxMods" / "SampleMod",
+                archive_path=None,
+                source_manifest_path="/tmp/package/SampleMod/manifest.json",
+                source_root_path="/tmp/package/SampleMod",
+                target_exists_before=False,
+                can_install=True,
+                warnings=tuple(),
+            ),
+        ),
+    )
