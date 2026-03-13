@@ -23,6 +23,7 @@ from sdvmm.app.shell_service import INSTALL_TARGET_CONFIGURED_REAL_MODS
 from sdvmm.app.shell_service import INSTALL_TARGET_SANDBOX_MODS
 from sdvmm.app.shell_service import SCAN_TARGET_CONFIGURED_REAL_MODS
 from sdvmm.app.shell_service import SCAN_TARGET_SANDBOX_MODS
+from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.ui.main_window import MainWindow
 
 
@@ -453,6 +454,66 @@ def test_main_window_archive_surface_key_controls_exist(
     assert main_window._delete_archived_button is delete_button
 
 
+def test_main_window_archive_buttons_toggle_with_row_selection(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    restore_button = main_window._restore_archived_button
+    delete_button = main_window._delete_archived_button
+
+    assert restore_button.isEnabled() is False
+    assert delete_button.isEnabled() is False
+
+    entries = (
+        _archived_entry("AlphaMod", "mods/AlphaMod"),
+        _archived_entry("BetaMod", "mods/BetaMod"),
+    )
+    main_window._archived_entries = entries
+    main_window._render_archive_entries(entries)
+    qapp.processEvents()
+
+    main_window._archive_table.selectRow(0)
+    qapp.processEvents()
+    assert restore_button.isEnabled() is True
+    assert delete_button.isEnabled() is True
+
+    main_window._archive_table.clearSelection()
+    main_window._archive_table.setCurrentCell(-1, -1)
+    main_window._on_archive_selection_changed()
+    qapp.processEvents()
+    assert restore_button.isEnabled() is False
+    assert delete_button.isEnabled() is False
+
+
+def test_main_window_archive_filter_updates_stats_label(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    entries = (
+        _archived_entry("AlphaMod", "mods/AlphaMod"),
+        _archived_entry("BetaMod", "mods/BetaMod"),
+        _archived_entry("GammaMod", "mods/GammaMod"),
+    )
+    main_window._archived_entries = entries
+    main_window._render_archive_entries(entries)
+    qapp.processEvents()
+
+    stats_label = main_window._archive_filter_stats_label
+    assert stats_label.text() == "3/3 shown"
+
+    main_window._archive_filter_input.setText("BetaMod")
+    qapp.processEvents()
+    assert stats_label.text() == "1/3 shown"
+
+    main_window._archive_filter_input.setText("NoSuchMod")
+    qapp.processEvents()
+    assert stats_label.text() == "0/3 shown"
+
+    main_window._archive_filter_input.clear()
+    qapp.processEvents()
+    assert stats_label.text() == "3/3 shown"
+
+
 def test_main_window_package_inspection_result_text_controls_visibility(
     main_window: MainWindow,
     qapp: QApplication,
@@ -490,3 +551,16 @@ def test_main_window_package_inspection_result_text_controls_visibility(
 
     assert inspection_group.isVisible() is False
     assert inspection_box.toPlainText() == ""
+
+
+def _archived_entry(folder_name: str, target_folder_name: str) -> ArchivedModEntry:
+    return ArchivedModEntry(
+        source_kind="sandbox",
+        archive_root=Path(r"C:\ArchiveRoot"),
+        archived_path=Path(r"C:\ArchiveRoot") / folder_name,
+        archived_folder_name=folder_name,
+        target_folder_name=target_folder_name,
+        mod_name=folder_name,
+        unique_id=f"Sample.{folder_name}",
+        version="1.0.0",
+    )
