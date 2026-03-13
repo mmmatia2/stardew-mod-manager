@@ -34,6 +34,8 @@ from sdvmm.domain.models import (
     InstallRecoveryPlan,
     InstallRecoveryPlanEntry,
     InstallRecoveryPlanSummary,
+    RecoveryExecutionHistory,
+    RecoveryExecutionRecord,
     ModDiscoveryEntry,
     ModDiscoveryResult,
     ModRemovalPlan,
@@ -65,9 +67,12 @@ from sdvmm.domain.unique_id import canonicalize_unique_id
 from sdvmm.services.app_state_store import (
     AppStateStoreError,
     append_install_operation_record,
+    append_recovery_execution_record,
     install_operation_history_file,
     load_install_operation_history,
+    load_recovery_execution_history,
     load_app_config,
+    recovery_execution_history_file,
     save_app_config,
 )
 from sdvmm.services.mod_scanner import scan_mods_directory
@@ -229,6 +234,12 @@ class AppShellService:
         except AppStateStoreError as exc:
             raise AppShellError(f"Could not load install history: {exc}") from exc
 
+    def load_recovery_execution_history(self) -> RecoveryExecutionHistory:
+        try:
+            return load_recovery_execution_history(self._recovery_execution_history_file)
+        except AppStateStoreError as exc:
+            raise AppShellError(f"Could not load recovery history: {exc}") from exc
+
     def derive_install_operation_recovery_plan(
         self,
         operation: InstallOperationRecord,
@@ -304,6 +315,13 @@ class AppShellService:
         review: InstallRecoveryExecutionReview,
     ) -> InstallRecoveryExecutionResult:
         if not review.allowed:
+            self._record_recovery_execution_attempt(
+                review=review,
+                outcome_status="failed",
+                removed_target_paths=tuple(),
+                restored_target_paths=tuple(),
+                failure_message=review.message,
+            )
             raise AppShellError(review.message)
 
         removed_target_paths: list[Path] = []
@@ -312,57 +330,77 @@ class AppShellService:
         destination_kind = review.plan.operation.destination_kind
         archive_path = review.plan.operation.archive_path
 
-        for entry_review in review.entries:
-            if not entry_review.executable:
-                raise AppShellError(entry_review.message)
-
-            plan_entry = entry_review.plan_entry
-            try:
-                if plan_entry.action == "remove_installed_target":
-                    _remove_recovery_target(plan_entry.target_path)
-                    removed_target_paths.append(plan_entry.target_path)
-                    continue
-
-                if plan_entry.action == "restore_from_archive":
-                    if plan_entry.archive_path is None:
-                        raise AppShellError(
-                            f"Archive source is missing for restoring {plan_entry.name}."
-                        )
-                    restored_target = restore_archived_mod_entry(
-                        archive_root=archive_path,
-                        archived_path=plan_entry.archive_path,
-                        destination_mods_root=destination_mods_path,
-                        destination_folder_name=plan_entry.target_path.name,
-                    )
-                    restored_target_paths.append(restored_target)
-                    continue
-            except ArchiveManagerError as exc:
-                raise AppShellError(f"Recovery execution failed: {exc}") from exc
-            except OSError as exc:
-                raise AppShellError(f"Recovery execution failed: {exc}") from exc
-
-            raise AppShellError(
-                f"Recovery execution failed: unsupported action {plan_entry.action!r}."
-            )
-
         try:
-            inventory = scan_mods_directory(
-                destination_mods_path,
-                excluded_paths=(archive_path, destination_mods_path / _LEGACY_ARCHIVE_DIRNAME),
-            )
-        except OSError as exc:
-            raise AppShellError(f"Recovery execution scan failed: {exc}") from exc
+            for entry_review in review.entries:
+                if not entry_review.executable:
+                    raise AppShellError(entry_review.message)
 
-        return InstallRecoveryExecutionResult(
+                plan_entry = entry_review.plan_entry
+                try:
+                    if plan_entry.action == "remove_installed_target":
+                        _remove_recovery_target(plan_entry.target_path)
+                        removed_target_paths.append(plan_entry.target_path)
+                        continue
+
+                    if plan_entry.action == "restore_from_archive":
+                        if plan_entry.archive_path is None:
+                            raise AppShellError(
+                                f"Archive source is missing for restoring {plan_entry.name}."
+                            )
+                        restored_target = restore_archived_mod_entry(
+                            archive_root=archive_path,
+                            archived_path=plan_entry.archive_path,
+                            destination_mods_root=destination_mods_path,
+                            destination_folder_name=plan_entry.target_path.name,
+                        )
+                        restored_target_paths.append(restored_target)
+                        continue
+                except ArchiveManagerError as exc:
+                    raise AppShellError(f"Recovery execution failed: {exc}") from exc
+                except OSError as exc:
+                    raise AppShellError(f"Recovery execution failed: {exc}") from exc
+
+                raise AppShellError(
+                    f"Recovery execution failed: unsupported action {plan_entry.action!r}."
+                )
+
+            try:
+                inventory = scan_mods_directory(
+                    destination_mods_path,
+                    excluded_paths=(archive_path, destination_mods_path / _LEGACY_ARCHIVE_DIRNAME),
+                )
+            except OSError as exc:
+                raise AppShellError(f"Recovery execution scan failed: {exc}") from exc
+
+            result = InstallRecoveryExecutionResult(
+                review=review,
+                executed_entry_count=len(review.entries),
+                removed_target_paths=tuple(removed_target_paths),
+                restored_target_paths=tuple(restored_target_paths),
+                destination_kind=destination_kind,
+                destination_mods_path=destination_mods_path,
+                scan_context_path=destination_mods_path,
+                inventory=inventory,
+            )
+        except AppShellError as exc:
+            outcome_status = "failed_partial" if (removed_target_paths or restored_target_paths) else "failed"
+            self._record_recovery_execution_attempt(
+                review=review,
+                outcome_status=outcome_status,
+                removed_target_paths=tuple(removed_target_paths),
+                restored_target_paths=tuple(restored_target_paths),
+                failure_message=str(exc),
+            )
+            raise
+
+        self._record_recovery_execution_attempt(
             review=review,
-            executed_entry_count=len(review.entries),
-            removed_target_paths=tuple(removed_target_paths),
-            restored_target_paths=tuple(restored_target_paths),
-            destination_kind=destination_kind,
-            destination_mods_path=destination_mods_path,
-            scan_context_path=destination_mods_path,
-            inventory=inventory,
+            outcome_status="completed",
+            removed_target_paths=result.removed_target_paths,
+            restored_target_paths=result.restored_target_paths,
+            failure_message=None,
         )
+        return result
 
     def build_install_execution_summary(
         self,
@@ -2207,6 +2245,10 @@ class AppShellService:
     def _install_operation_history_file(self) -> Path:
         return install_operation_history_file(self._state_file)
 
+    @property
+    def _recovery_execution_history_file(self) -> Path:
+        return recovery_execution_history_file(self._state_file)
+
     def _record_completed_install_operation(
         self,
         *,
@@ -2242,6 +2284,33 @@ class AppShellService:
             append_install_operation_record(self._install_operation_history_file, operation)
         except (AppStateStoreError, OSError):
             # History recording is best-effort so a completed install does not surface as failed.
+            return
+
+    def _record_recovery_execution_attempt(
+        self,
+        *,
+        review: InstallRecoveryExecutionReview,
+        outcome_status: str,
+        removed_target_paths: tuple[Path, ...],
+        restored_target_paths: tuple[Path, ...],
+        failure_message: str | None,
+    ) -> None:
+        record = RecoveryExecutionRecord(
+            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            related_install_operation_timestamp=review.plan.operation.timestamp,
+            related_install_package_path=review.plan.operation.package_path,
+            destination_kind=review.plan.operation.destination_kind,
+            destination_mods_path=review.plan.operation.destination_mods_path,
+            executed_entry_count=len(removed_target_paths) + len(restored_target_paths),
+            removed_target_paths=removed_target_paths,
+            restored_target_paths=restored_target_paths,
+            outcome_status=outcome_status,
+            failure_message=failure_message,
+        )
+        try:
+            append_recovery_execution_record(self._recovery_execution_history_file, record)
+        except (AppStateStoreError, OSError):
+            # Recovery audit recording is best-effort so it does not hide the primary recovery outcome.
             return
 
 

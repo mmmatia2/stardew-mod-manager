@@ -308,6 +308,8 @@ InstallRecoveryReviewDecisionCode = Literal[
     "entry_not_recoverable",
 ]
 
+RecoveryExecutionOutcome = Literal["completed", "failed", "failed_partial"]
+
 
 @dataclass(frozen=True, slots=True)
 class DownloadsIntakeResult:
@@ -495,6 +497,25 @@ class InstallRecoveryExecutionResult:
     destination_mods_path: Path
     scan_context_path: Path
     inventory: ModsInventory
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryExecutionRecord:
+    timestamp: str
+    related_install_operation_timestamp: str | None
+    related_install_package_path: Path | None
+    destination_kind: str
+    destination_mods_path: Path
+    executed_entry_count: int
+    removed_target_paths: tuple[Path, ...]
+    restored_target_paths: tuple[Path, ...]
+    outcome_status: RecoveryExecutionOutcome
+    failure_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryExecutionHistory:
+    operations: tuple[RecoveryExecutionRecord, ...]
 
 
 @dataclass(frozen=True, slots=True)

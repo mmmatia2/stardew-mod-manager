@@ -1965,6 +1965,30 @@ def test_load_install_operation_history_returns_preexisting_records(tmp_path: Pa
     assert history.operations == (operation,)
 
 
+def test_load_recovery_execution_history_returns_preexisting_records(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    operation = shell_service_module.RecoveryExecutionRecord(
+        timestamp="2026-03-13T15:00:00Z",
+        related_install_operation_timestamp="2026-03-13T12:00:00Z",
+        related_install_package_path=tmp_path / "Downloads" / "sample.zip",
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        destination_mods_path=tmp_path / "SandboxMods",
+        executed_entry_count=1,
+        removed_target_paths=(tmp_path / "SandboxMods" / "SampleMod",),
+        restored_target_paths=tuple(),
+        outcome_status="completed",
+        failure_message=None,
+    )
+    shell_service_module.append_recovery_execution_record(
+        shell_service_module.recovery_execution_history_file(service.state_file),
+        operation,
+    )
+
+    history = service.load_recovery_execution_history()
+
+    assert history.operations == (operation,)
+
+
 def test_derive_install_operation_recovery_plan_maps_install_new_to_remove_action(
     tmp_path: Path,
 ) -> None:
@@ -2285,6 +2309,12 @@ def test_execute_install_recovery_review_blocks_when_review_not_allowed(tmp_path
     with pytest.raises(AppShellError, match=re.escape(review.message)):
         service.execute_install_recovery_review(review)
 
+    history = service.load_recovery_execution_history()
+    assert len(history.operations) == 1
+    assert history.operations[0].outcome_status == "failed"
+    assert history.operations[0].executed_entry_count == 0
+    assert history.operations[0].failure_message == review.message
+
 
 def test_execute_install_recovery_review_removes_existing_target(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
@@ -2317,6 +2347,16 @@ def test_execute_install_recovery_review_removes_existing_target(tmp_path: Path)
     assert result.scan_context_path == destination_mods
     assert target_path.exists() is False
     assert len(result.inventory.mods) == 0
+
+    history = service.load_recovery_execution_history()
+    assert len(history.operations) == 1
+    assert history.operations[0].related_install_operation_timestamp == operation.timestamp
+    assert history.operations[0].related_install_package_path == operation.package_path
+    assert history.operations[0].outcome_status == "completed"
+    assert history.operations[0].executed_entry_count == 1
+    assert history.operations[0].removed_target_paths == (target_path,)
+    assert history.operations[0].restored_target_paths == tuple()
+    assert history.operations[0].failure_message is None
 
 
 def test_execute_install_recovery_review_restores_existing_archive_source(tmp_path: Path) -> None:
@@ -2355,6 +2395,12 @@ def test_execute_install_recovery_review_restores_existing_archive_source(tmp_pa
     assert archived_path.exists() is False
     assert len(result.inventory.mods) == 1
     assert result.inventory.mods[0].unique_id == "Sample.Exists"
+
+    history = service.load_recovery_execution_history()
+    assert len(history.operations) == 1
+    assert history.operations[0].outcome_status == "completed"
+    assert history.operations[0].executed_entry_count == 1
+    assert history.operations[0].restored_target_paths == (restored_target,)
 
 
 def test_execute_install_recovery_review_runs_mixed_executable_plan(tmp_path: Path) -> None:
@@ -2402,6 +2448,55 @@ def test_execute_install_recovery_review_runs_mixed_executable_plan(tmp_path: Pa
     assert restored_target.exists() is True
     assert len(result.inventory.mods) == 1
     assert result.inventory.mods[0].unique_id == "Sample.Exists"
+
+
+def test_execute_install_recovery_review_records_partial_failure_after_first_action(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    destination_mods = tmp_path / "SandboxMods"
+    archive_root = tmp_path / "SandboxArchive"
+    destination_mods.mkdir()
+    archive_root.mkdir()
+    removable_target = _create_mod(destination_mods, "New Mod", "Sample.New")
+    archived_path = _create_archived_entry(
+        archive_root / "Existing Mod__sdvmm_archive_001",
+        unique_id="Sample.Exists",
+        version="1.0.0",
+    )
+    _create_mod(destination_mods, "Existing Mod", "Sample.DestinationConflict")
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="New Mod",
+                unique_id="Sample.New",
+                action=INSTALL_NEW,
+            ),
+            _install_operation_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                archive_path=archived_path,
+            ),
+        ),
+    )
+    recovery_plan = service.derive_install_operation_recovery_plan(operation)
+    review = service.review_install_recovery_execution(recovery_plan)
+
+    with pytest.raises(AppShellError, match="Restore target already exists"):
+        service.execute_install_recovery_review(review)
+
+    history = service.load_recovery_execution_history()
+    assert len(history.operations) == 1
+    assert history.operations[0].outcome_status == "failed_partial"
+    assert history.operations[0].executed_entry_count == 1
+    assert history.operations[0].removed_target_paths == (removable_target,)
+    assert history.operations[0].restored_target_paths == tuple()
+    assert history.operations[0].failure_message is not None
+    assert "Restore target already exists" in history.operations[0].failure_message
 
 
 def test_build_sandbox_plan_defaults_archive_path_when_empty(tmp_path: Path) -> None:

@@ -9,11 +9,15 @@ from sdvmm.domain.models import (
     InstallOperationEntryRecord,
     InstallOperationHistory,
     InstallOperationRecord,
+    RecoveryExecutionHistory,
+    RecoveryExecutionRecord,
 )
 
 APP_STATE_VERSION = 1
 INSTALL_OPERATION_HISTORY_VERSION = 1
 INSTALL_OPERATION_HISTORY_FILENAME = "install-operation-history.json"
+RECOVERY_EXECUTION_HISTORY_VERSION = 1
+RECOVERY_EXECUTION_HISTORY_FILENAME = "recovery-execution-history.json"
 
 
 class AppStateStoreError(ValueError):
@@ -100,6 +104,10 @@ def install_operation_history_file(state_file: Path) -> Path:
     return state_file.parent / INSTALL_OPERATION_HISTORY_FILENAME
 
 
+def recovery_execution_history_file(state_file: Path) -> Path:
+    return state_file.parent / RECOVERY_EXECUTION_HISTORY_FILENAME
+
+
 def load_install_operation_history(history_file: Path) -> InstallOperationHistory:
     if not history_file.exists():
         return InstallOperationHistory(operations=tuple())
@@ -140,6 +148,53 @@ def append_install_operation_record(
     history = load_install_operation_history(history_file)
     updated = InstallOperationHistory(operations=(*history.operations, operation))
     save_install_operation_history(history_file, updated)
+    return updated
+
+
+def load_recovery_execution_history(history_file: Path) -> RecoveryExecutionHistory:
+    if not history_file.exists():
+        return RecoveryExecutionHistory(operations=tuple())
+
+    raw = _load_json_object(history_file=history_file, subject="recovery-execution history")
+    version = raw.get("version")
+    if version != RECOVERY_EXECUTION_HISTORY_VERSION:
+        raise AppStateStoreError(
+            "Unsupported recovery-execution history version: "
+            f"{version!r}; expected {RECOVERY_EXECUTION_HISTORY_VERSION}"
+        )
+
+    operations_raw = raw.get("operations")
+    if not isinstance(operations_raw, list):
+        raise AppStateStoreError("operations must be an array")
+
+    operations = tuple(
+        _parse_recovery_execution_record(item, index) for index, item in enumerate(operations_raw)
+    )
+    return RecoveryExecutionHistory(operations=operations)
+
+
+def save_recovery_execution_history(
+    history_file: Path,
+    history: RecoveryExecutionHistory,
+) -> None:
+    payload = {
+        "version": RECOVERY_EXECUTION_HISTORY_VERSION,
+        "operations": [
+            _serialize_recovery_execution_record(operation) for operation in history.operations
+        ],
+    }
+
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    history_file.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def append_recovery_execution_record(
+    history_file: Path,
+    operation: RecoveryExecutionRecord,
+) -> RecoveryExecutionHistory:
+    history = load_recovery_execution_history(history_file)
+    updated = RecoveryExecutionHistory(operations=(*history.operations, operation))
+    save_recovery_execution_history(history_file, updated)
     return updated
 
 
@@ -257,6 +312,85 @@ def _parse_install_operation_entry(
     )
 
 
+def _serialize_recovery_execution_record(operation: RecoveryExecutionRecord) -> dict[str, object]:
+    return {
+        "timestamp": operation.timestamp,
+        "related_install_operation_timestamp": operation.related_install_operation_timestamp,
+        "related_install_package_path": (
+            str(operation.related_install_package_path)
+            if operation.related_install_package_path is not None
+            else None
+        ),
+        "destination_kind": operation.destination_kind,
+        "destination_mods_path": str(operation.destination_mods_path),
+        "executed_entry_count": operation.executed_entry_count,
+        "removed_target_paths": [str(path) for path in operation.removed_target_paths],
+        "restored_target_paths": [str(path) for path in operation.restored_target_paths],
+        "outcome_status": operation.outcome_status,
+        "failure_message": operation.failure_message,
+    }
+
+
+def _parse_recovery_execution_record(data: object, index: int) -> RecoveryExecutionRecord:
+    if not isinstance(data, dict):
+        raise AppStateStoreError(f"operations[{index}] must be an object")
+
+    related_install_package_path = _optional_non_empty_string(
+        data,
+        "related_install_package_path",
+        prefix=f"operations[{index}]",
+    )
+    failure_message = _optional_non_empty_string(
+        data,
+        "failure_message",
+        prefix=f"operations[{index}]",
+    )
+    executed_entry_count = _require_int(
+        data,
+        "executed_entry_count",
+        prefix=f"operations[{index}]",
+    )
+
+    return RecoveryExecutionRecord(
+        timestamp=_require_non_empty_string(data, "timestamp", prefix=f"operations[{index}]"),
+        related_install_operation_timestamp=_optional_non_empty_string(
+            data,
+            "related_install_operation_timestamp",
+            prefix=f"operations[{index}]",
+        ),
+        related_install_package_path=(
+            Path(related_install_package_path) if related_install_package_path else None
+        ),
+        destination_kind=_require_non_empty_string(
+            data,
+            "destination_kind",
+            prefix=f"operations[{index}]",
+        ),
+        destination_mods_path=Path(
+            _require_non_empty_string(
+                data,
+                "destination_mods_path",
+                prefix=f"operations[{index}]",
+            )
+        ),
+        executed_entry_count=executed_entry_count,
+        removed_target_paths=_parse_path_array(
+            data.get("removed_target_paths"),
+            prefix=f"operations[{index}].removed_target_paths",
+        ),
+        restored_target_paths=_parse_path_array(
+            data.get("restored_target_paths"),
+            prefix=f"operations[{index}].restored_target_paths",
+        ),
+        outcome_status=_require_non_empty_string(
+            data,
+            "outcome_status",
+            prefix=f"operations[{index}]",
+        ),
+        failure_message=failure_message,
+    )
+
+
 def _parse_path_array(value: object, *, prefix: str) -> tuple[Path, ...]:
     if not isinstance(value, list):
         raise AppStateStoreError(f"{prefix} must be an array")
@@ -266,6 +400,19 @@ def _parse_path_array(value: object, *, prefix: str) -> tuple[Path, ...]:
             raise AppStateStoreError(f"{prefix}[{index}] must be a non-empty string")
         paths.append(Path(item))
     return tuple(paths)
+
+
+def _require_int(
+    data: dict[str, object],
+    key: str,
+    *,
+    prefix: str | None = None,
+) -> int:
+    value = data.get(key)
+    if not isinstance(value, int):
+        field_name = f"{prefix}.{key}" if prefix else key
+        raise AppStateStoreError(f"{field_name} must be an integer")
+    return value
 
 
 def _require_non_empty_string(

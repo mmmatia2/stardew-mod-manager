@@ -10,19 +10,27 @@ from sdvmm.domain.models import (
     InstallOperationEntryRecord,
     InstallOperationHistory,
     InstallOperationRecord,
+    RecoveryExecutionHistory,
+    RecoveryExecutionRecord,
 )
 from sdvmm.domain.install_codes import INSTALL_NEW
 from sdvmm.services.app_state_store import (
     APP_STATE_VERSION,
     INSTALL_OPERATION_HISTORY_FILENAME,
     INSTALL_OPERATION_HISTORY_VERSION,
+    RECOVERY_EXECUTION_HISTORY_FILENAME,
+    RECOVERY_EXECUTION_HISTORY_VERSION,
     AppStateStoreError,
     append_install_operation_record,
+    append_recovery_execution_record,
     install_operation_history_file,
     load_app_config,
     load_install_operation_history,
+    load_recovery_execution_history,
+    recovery_execution_history_file,
     save_app_config,
     save_install_operation_history,
+    save_recovery_execution_history,
 )
 
 
@@ -182,6 +190,102 @@ def test_load_install_operation_history_rejects_unsupported_version(tmp_path: Pa
         load_install_operation_history(history_file)
 
 
+def test_recovery_execution_history_round_trip(tmp_path: Path) -> None:
+    history_file = tmp_path / "state" / RECOVERY_EXECUTION_HISTORY_FILENAME
+    operation = _recovery_execution_record(tmp_path)
+    history = RecoveryExecutionHistory(operations=(operation,))
+
+    save_recovery_execution_history(history_file, history)
+    loaded = load_recovery_execution_history(history_file)
+
+    assert loaded == history
+
+    payload = json.loads(history_file.read_text(encoding="utf-8"))
+    assert payload["version"] == RECOVERY_EXECUTION_HISTORY_VERSION
+    assert payload["operations"][0]["destination_kind"] == operation.destination_kind
+    assert payload["operations"][0]["outcome_status"] == "completed"
+
+
+def test_load_recovery_execution_history_returns_empty_when_file_missing(tmp_path: Path) -> None:
+    history_file = tmp_path / "state" / RECOVERY_EXECUTION_HISTORY_FILENAME
+
+    loaded = load_recovery_execution_history(history_file)
+
+    assert loaded == RecoveryExecutionHistory(operations=tuple())
+
+
+def test_append_recovery_execution_record_appends_in_order(tmp_path: Path) -> None:
+    history_file = tmp_path / "state" / RECOVERY_EXECUTION_HISTORY_FILENAME
+    first = _recovery_execution_record(tmp_path, timestamp="2026-03-13T12:00:00Z")
+    second = _recovery_execution_record(tmp_path, timestamp="2026-03-13T13:00:00Z")
+
+    append_recovery_execution_record(history_file, first)
+    updated = append_recovery_execution_record(history_file, second)
+
+    assert updated.operations == (first, second)
+
+
+def test_recovery_execution_history_file_uses_state_directory(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+
+    assert recovery_execution_history_file(state_file) == (
+        tmp_path / "state" / RECOVERY_EXECUTION_HISTORY_FILENAME
+    )
+
+
+def test_load_recovery_execution_history_rejects_invalid_json(tmp_path: Path) -> None:
+    history_file = tmp_path / RECOVERY_EXECUTION_HISTORY_FILENAME
+    history_file.write_text("{invalid", encoding="utf-8")
+
+    with pytest.raises(AppStateStoreError, match="Invalid JSON"):
+        load_recovery_execution_history(history_file)
+
+
+def test_load_recovery_execution_history_rejects_unsupported_version(tmp_path: Path) -> None:
+    history_file = tmp_path / RECOVERY_EXECUTION_HISTORY_FILENAME
+    history_file.write_text(
+        json.dumps(
+            {
+                "version": 999,
+                "operations": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AppStateStoreError, match="Unsupported recovery-execution history version"):
+        load_recovery_execution_history(history_file)
+
+
+def test_load_recovery_execution_history_rejects_invalid_data(tmp_path: Path) -> None:
+    history_file = tmp_path / RECOVERY_EXECUTION_HISTORY_FILENAME
+    history_file.write_text(
+        json.dumps(
+            {
+                "version": RECOVERY_EXECUTION_HISTORY_VERSION,
+                "operations": [
+                    {
+                        "timestamp": "2026-03-13T12:00:00Z",
+                        "related_install_operation_timestamp": "2026-03-13T11:00:00Z",
+                        "related_install_package_path": str(tmp_path / "sample.zip"),
+                        "destination_kind": "sandbox_mods",
+                        "destination_mods_path": str(tmp_path / "SandboxMods"),
+                        "executed_entry_count": "bad",
+                        "removed_target_paths": [],
+                        "restored_target_paths": [],
+                        "outcome_status": "completed",
+                        "failure_message": None,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AppStateStoreError, match="executed_entry_count must be an integer"):
+        load_recovery_execution_history(history_file)
+
+
 def _install_operation_record(tmp_path: Path, *, package_name: str = "sample.zip") -> InstallOperationRecord:
     return InstallOperationRecord(
         timestamp="2026-03-13T12:00:00Z",
@@ -206,4 +310,25 @@ def _install_operation_record(tmp_path: Path, *, package_name: str = "sample.zip
                 warnings=tuple(),
             ),
         ),
+    )
+
+
+def _recovery_execution_record(
+    tmp_path: Path,
+    *,
+    timestamp: str = "2026-03-13T14:00:00Z",
+    outcome_status: str = "completed",
+    failure_message: str | None = None,
+) -> RecoveryExecutionRecord:
+    return RecoveryExecutionRecord(
+        timestamp=timestamp,
+        related_install_operation_timestamp="2026-03-13T12:00:00Z",
+        related_install_package_path=tmp_path / "sample.zip",
+        destination_kind="sandbox_mods",
+        destination_mods_path=tmp_path / "SandboxMods",
+        executed_entry_count=1,
+        removed_target_paths=(tmp_path / "SandboxMods" / "SampleMod",),
+        restored_target_paths=tuple(),
+        outcome_status=outcome_status,
+        failure_message=failure_message,
     )
