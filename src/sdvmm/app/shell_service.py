@@ -30,6 +30,7 @@ from sdvmm.domain.models import (
     InstallOperationRecord,
     InstallRecoveryExecutionReview,
     InstallRecoveryExecutionResult,
+    InstallRecoveryInspectionResult,
     InstallRecoveryExecutionReviewEntry,
     InstallRecoveryExecutionReviewSummary,
     InstallRecoveryPlan,
@@ -240,6 +241,42 @@ class AppShellService:
             return load_recovery_execution_history(self._recovery_execution_history_file)
         except AppStateStoreError as exc:
             raise AppShellError(f"Could not load recovery history: {exc}") from exc
+
+    def inspect_install_recovery_by_operation_id(
+        self,
+        operation_id: str,
+    ) -> InstallRecoveryInspectionResult:
+        requested_operation_id = operation_id.strip()
+        if not requested_operation_id:
+            raise AppShellError("Install operation ID is required.")
+
+        history = self.load_install_operation_history()
+        operation = next(
+            (
+                item
+                for item in history.operations
+                if item.operation_id is not None and item.operation_id == requested_operation_id
+            ),
+            None,
+        )
+        if operation is None:
+            raise AppShellError(
+                f"Install operation ID not found: {requested_operation_id}"
+            )
+
+        recovery_plan = self.derive_install_operation_recovery_plan(operation)
+        recovery_review = self.review_install_recovery_execution(recovery_plan)
+        linked_recovery_history = tuple(
+            record
+            for record in self.load_recovery_execution_history().operations
+            if record.related_install_operation_id == requested_operation_id
+        )
+        return InstallRecoveryInspectionResult(
+            operation=operation,
+            recovery_plan=recovery_plan,
+            recovery_review=recovery_review,
+            linked_recovery_history=linked_recovery_history,
+        )
 
     def derive_install_operation_recovery_plan(
         self,

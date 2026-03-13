@@ -1993,6 +1993,115 @@ def test_load_recovery_execution_history_returns_preexisting_records(tmp_path: P
     assert history.operations == (operation,)
 
 
+def test_inspect_install_recovery_by_operation_id_returns_composed_result(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    operation = _install_operation_record(
+        tmp_path,
+        entries=(
+            _install_operation_entry(
+                tmp_path,
+                name="New Mod",
+                unique_id="Sample.New",
+                action=INSTALL_NEW,
+            ),
+        ),
+    )
+    shell_service_module.append_install_operation_record(
+        shell_service_module.install_operation_history_file(service.state_file),
+        operation,
+    )
+    linked_record = shell_service_module.RecoveryExecutionRecord(
+        recovery_execution_id="recovery_linked",
+        timestamp="2026-03-13T15:00:00Z",
+        related_install_operation_id=operation.operation_id,
+        related_install_operation_timestamp=operation.timestamp,
+        related_install_package_path=operation.package_path,
+        destination_kind=operation.destination_kind,
+        destination_mods_path=operation.destination_mods_path,
+        executed_entry_count=1,
+        removed_target_paths=(operation.entries[0].target_path,),
+        restored_target_paths=tuple(),
+        outcome_status="completed",
+        failure_message=None,
+    )
+    unrelated_record = shell_service_module.RecoveryExecutionRecord(
+        recovery_execution_id="recovery_unrelated",
+        timestamp="2026-03-13T16:00:00Z",
+        related_install_operation_id="install_other",
+        related_install_operation_timestamp="2026-03-13T14:00:00Z",
+        related_install_package_path=tmp_path / "Downloads" / "other.zip",
+        destination_kind=operation.destination_kind,
+        destination_mods_path=operation.destination_mods_path,
+        executed_entry_count=0,
+        removed_target_paths=tuple(),
+        restored_target_paths=tuple(),
+        outcome_status="failed",
+        failure_message="other",
+    )
+    shell_service_module.append_recovery_execution_record(
+        shell_service_module.recovery_execution_history_file(service.state_file),
+        linked_record,
+    )
+    shell_service_module.append_recovery_execution_record(
+        shell_service_module.recovery_execution_history_file(service.state_file),
+        unrelated_record,
+    )
+
+    inspection = service.inspect_install_recovery_by_operation_id(operation.operation_id or "")
+
+    assert inspection.operation == operation
+    assert inspection.recovery_plan.operation == operation
+    assert inspection.recovery_review.plan == inspection.recovery_plan
+    assert inspection.recovery_plan.summary.total_recovery_entry_count == 1
+    assert inspection.recovery_review.summary.total_entry_count == 1
+    assert inspection.linked_recovery_history == (linked_record,)
+
+
+def test_inspect_install_recovery_by_operation_id_fails_for_missing_id(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+
+    with pytest.raises(AppShellError, match="Install operation ID not found"):
+        service.inspect_install_recovery_by_operation_id("install_missing")
+
+
+def test_inspect_install_recovery_by_operation_id_ignores_legacy_records_without_ids(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    legacy_operation = InstallOperationRecord(
+        operation_id=None,
+        timestamp="2026-03-13T12:00:00Z",
+        package_path=tmp_path / "Downloads" / "legacy.zip",
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        destination_mods_path=tmp_path / "SandboxMods",
+        archive_path=tmp_path / "SandboxArchive",
+        installed_targets=(tmp_path / "SandboxMods" / "LegacyMod",),
+        archived_targets=tuple(),
+        entries=(
+            InstallOperationEntryRecord(
+                name="Legacy Mod",
+                unique_id="Sample.Legacy",
+                version="1.0.0",
+                action=INSTALL_NEW,
+                target_path=tmp_path / "SandboxMods" / "LegacyMod",
+                archive_path=None,
+                source_manifest_path=r"C:\package\LegacyMod\manifest.json",
+                source_root_path=r"C:\package\LegacyMod",
+                target_exists_before=False,
+                can_install=True,
+                warnings=tuple(),
+            ),
+        ),
+    )
+    shell_service_module.append_install_operation_record(
+        shell_service_module.install_operation_history_file(service.state_file),
+        legacy_operation,
+    )
+
+    with pytest.raises(AppShellError, match="Install operation ID not found"):
+        service.inspect_install_recovery_by_operation_id("install_legacy_missing")
+
+
 def test_derive_install_operation_recovery_plan_maps_install_new_to_remove_action(
     tmp_path: Path,
 ) -> None:

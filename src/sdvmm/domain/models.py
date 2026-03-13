@@ -501,6 +501,14 @@ class InstallRecoveryExecutionResult:
 
 
 @dataclass(frozen=True, slots=True)
+class InstallRecoveryInspectionResult:
+    operation: InstallOperationRecord
+    recovery_plan: InstallRecoveryPlan
+    recovery_review: InstallRecoveryExecutionReview
+    linked_recovery_history: tuple[RecoveryExecutionRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class RecoveryExecutionRecord:
     recovery_execution_id: str | None
     timestamp: str
