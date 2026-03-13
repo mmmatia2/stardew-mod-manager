@@ -349,6 +349,25 @@ class SandboxInstallResult:
 
 
 @dataclass(frozen=True, slots=True)
+class InstallExecutionActionCount:
+    action: SandboxInstallAction
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class InstallExecutionSummary:
+    destination_kind: str
+    destination_mods_path: Path
+    archive_path: Path
+    total_entry_count: int
+    action_counts: tuple[InstallExecutionActionCount, ...]
+    has_existing_targets_to_replace: bool
+    has_archive_writes: bool
+    requires_explicit_confirmation: bool
+    review_warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class InstallOperationEntryRecord:
     name: str
     unique_id: str

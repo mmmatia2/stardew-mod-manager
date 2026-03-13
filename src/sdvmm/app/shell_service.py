@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 from collections.abc import Iterable
+from collections import Counter
 from typing import Literal
 import zipfile
 
@@ -19,6 +20,8 @@ from sdvmm.domain.models import (
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
     GameEnvironmentStatus,
+    InstallExecutionActionCount,
+    InstallExecutionSummary,
     InstallOperationEntryRecord,
     InstallOperationHistory,
     InstallOperationRecord,
@@ -42,6 +45,7 @@ from sdvmm.domain.nexus_codes import (
     NEXUS_CONFIGURED,
     NEXUS_NOT_CONFIGURED,
 )
+from sdvmm.domain.install_codes import BLOCKED, INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
 from sdvmm.domain.dependency_codes import (
     MISSING_REQUIRED_DEPENDENCY,
     OPTIONAL_DEPENDENCY_MISSING,
@@ -215,6 +219,35 @@ class AppShellService:
             return load_install_operation_history(self._install_operation_history_file)
         except AppStateStoreError as exc:
             raise AppShellError(f"Could not load install history: {exc}") from exc
+
+    def build_install_execution_summary(
+        self,
+        plan: SandboxInstallPlan,
+    ) -> InstallExecutionSummary:
+        action_order = (INSTALL_NEW, OVERWRITE_WITH_ARCHIVE, BLOCKED)
+        action_totals = Counter(entry.action for entry in plan.entries)
+        action_counts = tuple(
+            InstallExecutionActionCount(action=action, count=action_totals.get(action, 0))
+            for action in action_order
+        )
+        review_warnings = _collect_install_execution_review_warnings(plan)
+        requires_explicit_confirmation = (
+            plan.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+        )
+        return InstallExecutionSummary(
+            destination_kind=plan.destination_kind,
+            destination_mods_path=plan.sandbox_mods_path,
+            archive_path=plan.sandbox_archive_path,
+            total_entry_count=len(plan.entries),
+            action_counts=action_counts,
+            has_existing_targets_to_replace=any(
+                entry.target_exists and entry.action == OVERWRITE_WITH_ARCHIVE
+                for entry in plan.entries
+            ),
+            has_archive_writes=any(entry.archive_path is not None for entry in plan.entries),
+            requires_explicit_confirmation=requires_explicit_confirmation,
+            review_warnings=review_warnings,
+        )
 
     def save_mods_directory(
         self,
@@ -2194,6 +2227,37 @@ def _provider_label(provider: str) -> str:
         "custom_url": "Custom URL",
     }
     return labels.get(provider, provider)
+
+
+def _collect_install_execution_review_warnings(
+    plan: SandboxInstallPlan,
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+
+    for warning in plan.plan_warnings:
+        text = warning.strip()
+        if text:
+            warnings.append(text)
+
+    for warning in plan.package_warnings:
+        text = warning.message.strip()
+        if text:
+            warnings.append(text)
+
+    for entry in plan.entries:
+        for warning in entry.warnings:
+            text = warning.strip()
+            if text:
+                warnings.append(f"{entry.name}: {text}")
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for warning in warnings:
+        if warning in seen:
+            continue
+        seen.add(warning)
+        deduped.append(warning)
+    return tuple(deduped)
 
 
 def _build_intake_flow_messages(

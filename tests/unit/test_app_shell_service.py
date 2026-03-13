@@ -19,6 +19,7 @@ from sdvmm.app.shell_service import (
 )
 from sdvmm.domain.models import (
     AppConfig,
+    InstallExecutionSummary,
     InstallOperationEntryRecord,
     InstallOperationRecord,
     ModDiscoveryEntry,
@@ -26,11 +27,18 @@ from sdvmm.domain.models import (
     ModUpdateReport,
     ModUpdateStatus,
     NexusIntegrationStatus,
+    PackageFinding,
+    PackageWarning,
     RemoteModLink,
+    SandboxInstallPlan,
+    SandboxInstallPlanEntry,
     SmapiLogReport,
     SmapiUpdateStatus,
 )
+from sdvmm.domain.install_codes import BLOCKED, INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
+from sdvmm.domain.package_codes import DIRECT_SINGLE_MOD_PACKAGE
 from sdvmm.domain.update_codes import UpdateState
+from sdvmm.domain.warning_codes import INVALID_MANIFEST
 from sdvmm.services.app_state_store import save_app_config
 
 
@@ -546,6 +554,100 @@ def test_build_install_plan_uses_archive_overwrite_for_real_mods_destination(tmp
     assert plan.entries[0].action == "overwrite_with_archive"
     assert plan.entries[0].archive_path is not None
     assert plan.entries[0].archive_path.parent == real_mods.parent / ".sdvmm-real-archive"
+
+
+def test_build_install_execution_summary_for_sandbox_destination(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(tmp_path, destination_kind=INSTALL_TARGET_SANDBOX_MODS)
+
+    summary = service.build_install_execution_summary(plan)
+
+    assert summary.destination_kind == INSTALL_TARGET_SANDBOX_MODS
+    assert summary.destination_mods_path == plan.sandbox_mods_path
+    assert summary.archive_path == plan.sandbox_archive_path
+    assert summary.total_entry_count == 1
+    assert _summary_action_counts(summary) == {
+        INSTALL_NEW: 1,
+        OVERWRITE_WITH_ARCHIVE: 0,
+        BLOCKED: 0,
+    }
+    assert summary.has_existing_targets_to_replace is False
+    assert summary.has_archive_writes is False
+    assert summary.requires_explicit_confirmation is False
+    assert summary.review_warnings == ("Plan review warning", "Package warning message")
+
+
+def test_build_install_execution_summary_for_real_destination_requires_confirmation(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(tmp_path, destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS)
+
+    summary = service.build_install_execution_summary(plan)
+
+    assert summary.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert summary.requires_explicit_confirmation is True
+    assert summary.destination_mods_path == plan.sandbox_mods_path
+    assert summary.archive_path == plan.sandbox_archive_path
+
+
+def test_build_install_execution_summary_marks_overwrite_and_archive_behavior(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(
+        tmp_path,
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        entries=(
+            _summary_entry(
+                tmp_path,
+                name="Existing Mod",
+                unique_id="Sample.Exists",
+                action=OVERWRITE_WITH_ARCHIVE,
+                target_exists=True,
+                archive_path=tmp_path / "SandboxArchive" / "Existing Mod-old",
+                warnings=("Archive existing target before overwrite.",),
+            ),
+        ),
+    )
+
+    summary = service.build_install_execution_summary(plan)
+
+    assert _summary_action_counts(summary)[OVERWRITE_WITH_ARCHIVE] == 1
+    assert summary.has_existing_targets_to_replace is True
+    assert summary.has_archive_writes is True
+    assert "Existing Mod: Archive existing target before overwrite." in summary.review_warnings
+
+
+def test_build_install_execution_summary_includes_blocked_entries_in_action_counts(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    plan = _summary_plan(
+        tmp_path,
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        entries=(
+            _summary_entry(tmp_path, name="Install New", unique_id="Sample.New", action=INSTALL_NEW),
+            _summary_entry(
+                tmp_path,
+                name="Blocked Mod",
+                unique_id="Sample.Blocked",
+                action=BLOCKED,
+                can_install=False,
+                warnings=("Dependency missing.",),
+            ),
+        ),
+    )
+
+    summary = service.build_install_execution_summary(plan)
+
+    assert summary.total_entry_count == 2
+    assert _summary_action_counts(summary) == {
+        INSTALL_NEW: 1,
+        OVERWRITE_WITH_ARCHIVE: 0,
+        BLOCKED: 1,
+    }
+    assert "Blocked Mod: Dependency missing." in summary.review_warnings
 
 
 def test_execute_real_mods_plan_requires_explicit_confirmation(tmp_path: Path) -> None:
@@ -2511,3 +2613,83 @@ def _create_archived_entry(archived_path: Path, *, unique_id: str, version: str)
         encoding="utf-8",
     )
     return archived_path
+
+
+def _summary_action_counts(summary: InstallExecutionSummary) -> dict[str, int]:
+    return {item.action: item.count for item in summary.action_counts}
+
+
+def _summary_plan(
+    tmp_path: Path,
+    *,
+    destination_kind: str,
+    entries: tuple[SandboxInstallPlanEntry, ...] | None = None,
+) -> SandboxInstallPlan:
+    mods_path = (
+        tmp_path / "RealMods"
+        if destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+        else tmp_path / "SandboxMods"
+    )
+    archive_path = (
+        tmp_path / "RealArchive"
+        if destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+        else tmp_path / "SandboxArchive"
+    )
+    default_entries = (
+        _summary_entry(
+            tmp_path,
+            name="Sample Mod",
+            unique_id="Sample.Mod",
+            action=INSTALL_NEW,
+        ),
+    )
+    return SandboxInstallPlan(
+        package_path=tmp_path / "sample.zip",
+        sandbox_mods_path=mods_path,
+        sandbox_archive_path=archive_path,
+        entries=entries if entries is not None else default_entries,
+        package_findings=(
+            PackageFinding(
+                kind=DIRECT_SINGLE_MOD_PACKAGE,
+                message="Single mod package",
+                related_paths=("sample.zip",),
+            ),
+        ),
+        package_warnings=(
+            PackageWarning(
+                code=INVALID_MANIFEST,
+                message="Package warning message",
+                manifest_path="sample/manifest.json",
+            ),
+        ),
+        plan_warnings=("Plan review warning",),
+        dependency_findings=tuple(),
+        remote_requirements=tuple(),
+        destination_kind=destination_kind,
+    )
+
+
+def _summary_entry(
+    tmp_path: Path,
+    *,
+    name: str,
+    unique_id: str,
+    action: str,
+    target_exists: bool = False,
+    archive_path: Path | None = None,
+    can_install: bool = True,
+    warnings: tuple[str, ...] = tuple(),
+) -> SandboxInstallPlanEntry:
+    return SandboxInstallPlanEntry(
+        name=name,
+        unique_id=unique_id,
+        version="1.0.0",
+        source_manifest_path=str(tmp_path / "package" / name / "manifest.json"),
+        source_root_path=str(tmp_path / "package" / name),
+        target_path=tmp_path / "target-root" / name,
+        action=action,
+        target_exists=target_exists,
+        archive_path=archive_path,
+        can_install=can_install,
+        warnings=warnings,
+    )
