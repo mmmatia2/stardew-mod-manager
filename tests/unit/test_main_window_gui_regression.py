@@ -488,6 +488,39 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert staged_package_label.isReadOnly() is True
 
 
+def test_main_window_packages_intake_local_output_box_exists(main_window: MainWindow) -> None:
+    intake_output_group = main_window.findChild(QGroupBox, "packages_intake_output_group")
+    intake_output_box = main_window.findChild(QPlainTextEdit, "packages_intake_output_box")
+
+    assert intake_output_group is not None
+    assert intake_output_box is not None
+    assert main_window._intake_output_box is intake_output_box
+    assert intake_output_box.isReadOnly() is True
+
+
+def test_main_window_package_inspection_writes_to_packages_intake_local_output(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inspection = SimpleNamespace(mods=(object(), object()))
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_zip_with_inventory_context",
+        lambda *args, **kwargs: inspection,
+    )
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.build_package_inspection_text",
+        lambda payload: "Inspection narrative output",
+    )
+
+    main_window._zip_path_input.setText(r"C:\Downloads\InspectMe.zip")
+    main_window._on_inspect_zip()
+
+    assert main_window._intake_output_box.toPlainText() == "Inspection narrative output"
+    assert main_window._status_strip_label.text() == "Zip inspection complete: 2 mod(s) detected"
+
+
 def test_main_window_staging_valid_intake_switches_to_plan_install_and_updates_display(
     main_window: MainWindow,
     qapp: QApplication,
@@ -526,6 +559,7 @@ def test_main_window_staging_valid_intake_switches_to_plan_install_and_updates_d
     assert main_window._zip_path_input.text() == str(intake.package_path)
     assert main_window._staged_package_label.toolTip() == str(intake.package_path)
     assert main_window._staged_package_label.text() == str(intake.package_path)
+    assert main_window._intake_output_box.toPlainText() == "Staged package for planning: AlphaPack.zip"
     assert main_window._status_strip_label.text() == "Staged package for planning: AlphaPack.zip"
     assert main_window._pending_install_plan is None
 
@@ -585,6 +619,7 @@ def test_main_window_staging_without_valid_package_surfaces_message_and_keeps_st
 
     expected_message = "Select a detected package or inspect a zip package before staging for install."
     assert warnings == [expected_message]
+    assert main_window._intake_output_box.toPlainText() == expected_message
     assert main_window._status_strip_label.text() == expected_message
     assert main_window._zip_path_input.text() == r"C:\Packages\Existing.zip"
     assert main_window._pending_install_plan is existing_plan

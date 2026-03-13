@@ -344,6 +344,13 @@ class MainWindow(QMainWindow):
         self._package_inspection_result_box.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        self._intake_output_box = QPlainTextEdit()
+        self._intake_output_box.setObjectName("packages_intake_output_box")
+        self._intake_output_box.setReadOnly(True)
+        self._intake_output_box.setMinimumHeight(92)
+        self._intake_output_box.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._plan_install_output_box = QPlainTextEdit()
         self._plan_install_output_box.setObjectName("plan_install_output_box")
         self._plan_install_output_box.setReadOnly(True)
@@ -687,6 +694,19 @@ class MainWindow(QMainWindow):
         _set_primary_button_style(self._plan_selected_intake_button)
         detected_layout.addWidget(self._plan_selected_intake_button, 1, 3)
         intake_layout.addWidget(detected_group)
+
+        intake_output_group = QGroupBox("Packages & Intake Output")
+        intake_output_group.setObjectName("packages_intake_output_group")
+        intake_output_group.setFlat(True)
+        intake_output_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
+        )
+        intake_output_layout = QVBoxLayout(intake_output_group)
+        intake_output_layout.setContentsMargins(8, 6, 8, 6)
+        intake_output_layout.setSpacing(6)
+        intake_output_layout.addWidget(self._intake_output_box)
+        intake_layout.addWidget(intake_output_group)
+
         intake_layout.addStretch(1)
         context_tabs.addTab(intake_tab, "Packages & Intake")
 
@@ -1074,13 +1094,14 @@ class MainWindow(QMainWindow):
             )
         except AppShellError as exc:
             QMessageBox.critical(self, "Zip inspection failed", str(exc))
+            self._set_intake_output_text(str(exc))
             self._set_status(str(exc))
             return
 
         self._pending_install_plan = None
         inspection_text = build_package_inspection_text(inspection)
         self._set_package_inspection_result_text(inspection_text)
-        self._set_details_text(inspection_text)
+        self._set_intake_output_text(inspection_text)
         self._set_status(f"Zip inspection complete: {len(inspection.mods)} mod(s) detected")
 
     def _on_plan_install(self) -> None:
@@ -2360,6 +2381,14 @@ class MainWindow(QMainWindow):
         self._blocking_issues_strip_label.setToolTip(blocking_issue)
         self._next_step_strip_label.setToolTip(next_step)
 
+    def _set_intake_output_text(self, text: str) -> None:
+        self._intake_output_box.setPlainText(text)
+        blocking_issue, next_step = _summarize_details_text(text)
+        self._blocking_issues_strip_label.setText(blocking_issue)
+        self._next_step_strip_label.setText(next_step)
+        self._blocking_issues_strip_label.setToolTip(blocking_issue)
+        self._next_step_strip_label.setToolTip(next_step)
+
     def _set_plan_install_output_text(self, text: str) -> None:
         self._plan_install_output_box.setPlainText(text)
         blocking_issue, next_step = _summarize_details_text(text)
@@ -2422,6 +2451,7 @@ class MainWindow(QMainWindow):
                 )
             except AppShellError as exc:
                 QMessageBox.warning(self, "No package selected", str(exc))
+                self._set_intake_output_text(str(exc))
                 self._set_status(str(exc))
                 return
 
@@ -2431,6 +2461,7 @@ class MainWindow(QMainWindow):
                     f"({intake.classification})."
                 )
                 QMessageBox.information(self, "Package not actionable", message)
+                self._set_intake_output_text(message)
                 self._set_status(message)
                 return
 
@@ -2450,6 +2481,7 @@ class MainWindow(QMainWindow):
 
         message = "Select a detected package or inspect a zip package before staging for install."
         QMessageBox.warning(self, "No package to stage", message)
+        self._set_intake_output_text(message)
         self._set_status(message)
 
     def _on_intake_selection_changed(self, *_: object) -> None:
@@ -2708,6 +2740,7 @@ class MainWindow(QMainWindow):
         self._zip_path_input.setText(package_path)
         self._refresh_staged_package_preview()
         self._refresh_stage_package_action_state()
+        self._set_intake_output_text(status_message)
         self._context_tabs.setCurrentWidget(self._plan_install_tab)
         self._set_status(status_message)
 
