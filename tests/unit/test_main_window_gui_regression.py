@@ -820,6 +820,204 @@ def test_main_window_inventory_selected_row_can_disable_tracking(
     )
 
 
+def test_main_window_inventory_manual_source_action_is_available_only_for_selected_blocked_row(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    actions_widget = main_window.findChild(QWidget, "inventory_update_source_intent_actions")
+    manual_source_button = main_window.findChild(
+        QPushButton, "inventory_manual_source_association_button"
+    )
+
+    assert actions_widget is not None
+    assert manual_source_button is not None
+    assert actions_widget.isVisible() is False
+
+    main_window._render_inventory(inventory)
+
+    not_checked_row = _find_mod_row(main_window._mods_table, "Gamma Mod")
+    assert not_checked_row >= 0
+    main_window._mods_table.setCurrentCell(not_checked_row, 0)
+    qapp.processEvents()
+    assert actions_widget.isVisible() is True
+    assert manual_source_button.isEnabled() is False
+
+    main_window._apply_update_report(report)
+
+    actionable_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert actionable_row >= 0
+    assert blocked_row >= 0
+
+    main_window._mods_table.setCurrentCell(actionable_row, 0)
+    qapp.processEvents()
+    assert actions_widget.isVisible() is True
+    assert manual_source_button.isEnabled() is False
+
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+    assert manual_source_button.isEnabled() is True
+
+
+def test_main_window_inventory_selected_row_can_save_manual_source_association(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    manual_source_button = main_window.findChild(
+        QPushButton, "inventory_manual_source_association_button"
+    )
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+    open_remote_button = main_window.findChild(
+        QPushButton, "inventory_open_remote_page_button"
+    )
+
+    assert manual_source_button is not None
+    assert blocked_detail_label is not None
+    assert open_remote_button is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    monkeypatch.setattr(
+        main_window,
+        "_prompt_selected_mod_manual_source_intent",
+        lambda **_: ("nexus", "12345", "https://example.test/mods/12345"),
+    )
+
+    manual_source_button.click()
+    qapp.processEvents()
+
+    saved_intent = main_window._shell_service.get_update_source_intent("Sample.Beta")
+    assert saved_intent is not None
+    assert saved_intent.intent_state == "manual_source_association"
+    assert saved_intent.manual_provider == "nexus"
+    assert saved_intent.manual_source_key == "12345"
+    assert saved_intent.manual_source_page_url == "https://example.test/mods/12345"
+    assert (
+        main_window._inventory_update_guidance_label.text()
+        == "Beta Mod: manual source association is recorded in saved update-source intent. "
+        "Open remote page is unavailable for this row."
+    )
+    assert blocked_detail_label.isVisible() is True
+    assert (
+        blocked_detail_label.text()
+        == "Update source intent: manual source association is recorded in app state (provider: nexus)."
+    )
+    assert open_remote_button.isEnabled() is False
+    assert (
+        main_window._status_strip_label.text()
+        == "Saved manual source association for Sample.Beta (provider: nexus)."
+    )
+
+
+def test_main_window_inventory_manual_source_association_rejects_empty_required_fields(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    manual_source_button = main_window.findChild(
+        QPushButton, "inventory_manual_source_association_button"
+    )
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+
+    assert manual_source_button is not None
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    monkeypatch.setattr(
+        main_window,
+        "_prompt_selected_mod_manual_source_intent",
+        lambda **_: ("", "12345", None),
+    )
+
+    manual_source_button.click()
+    qapp.processEvents()
+
+    assert main_window._shell_service.get_update_source_intent("Sample.Beta") is None
+    assert (
+        main_window._status_strip_label.text()
+        == "Manual source association requires provider and source key."
+    )
+    assert (
+        main_window._inventory_update_guidance_label.text()
+        == "Beta Mod: No remote link available. Open remote page is unavailable for this row."
+    )
+    assert blocked_detail_label.isVisible() is True
+    assert blocked_detail_label.text() == "Update source diagnostics: missing update key."
+
+
+def test_main_window_inventory_manual_source_association_can_be_cleared_back_to_typed_diagnostics(
+    main_window: MainWindow,
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    manual_source_button = main_window.findChild(
+        QPushButton, "inventory_manual_source_association_button"
+    )
+    clear_source_intent_button = main_window.findChild(
+        QPushButton, "inventory_clear_source_intent_button"
+    )
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+
+    assert manual_source_button is not None
+    assert clear_source_intent_button is not None
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    monkeypatch.setattr(
+        main_window,
+        "_prompt_selected_mod_manual_source_intent",
+        lambda **_: ("nexus", "12345", None),
+    )
+
+    manual_source_button.click()
+    qapp.processEvents()
+    assert clear_source_intent_button.isEnabled() is True
+
+    clear_source_intent_button.click()
+    qapp.processEvents()
+
+    assert main_window._shell_service.get_update_source_intent("Sample.Beta") is None
+    assert (
+        main_window._inventory_update_guidance_label.text()
+        == "Beta Mod: No remote link available. Open remote page is unavailable for this row."
+    )
+    assert blocked_detail_label.isVisible() is True
+    assert blocked_detail_label.text() == "Update source diagnostics: missing update key."
+    assert clear_source_intent_button.isEnabled() is False
+
+
 def test_main_window_inventory_clearing_saved_source_intent_restores_typed_diagnostics(
     main_window: MainWindow,
     qapp: QApplication,

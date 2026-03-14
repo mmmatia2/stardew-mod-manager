@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QGroupBox,
     QGridLayout,
@@ -248,11 +250,16 @@ class MainWindow(QMainWindow):
         self._mark_local_private_button.setObjectName("inventory_mark_local_private_button")
         self._disable_tracking_button = QPushButton("Disable tracking")
         self._disable_tracking_button.setObjectName("inventory_disable_tracking_button")
+        self._manual_source_intent_button = QPushButton("Manual source...")
+        self._manual_source_intent_button.setObjectName(
+            "inventory_manual_source_association_button"
+        )
         self._clear_source_intent_button = QPushButton("Clear saved intent")
         self._clear_source_intent_button.setObjectName("inventory_clear_source_intent_button")
         for button in (
             self._mark_local_private_button,
             self._disable_tracking_button,
+            self._manual_source_intent_button,
             self._clear_source_intent_button,
         ):
             _set_secondary_button_style(button)
@@ -266,6 +273,7 @@ class MainWindow(QMainWindow):
         inventory_source_intent_actions_layout.addWidget(self._inventory_source_intent_actions_label)
         inventory_source_intent_actions_layout.addWidget(self._mark_local_private_button)
         inventory_source_intent_actions_layout.addWidget(self._disable_tracking_button)
+        inventory_source_intent_actions_layout.addWidget(self._manual_source_intent_button)
         inventory_source_intent_actions_layout.addWidget(self._clear_source_intent_button)
         inventory_source_intent_actions_layout.addStretch(1)
         self._inventory_source_intent_actions_widget.setVisible(False)
@@ -525,6 +533,9 @@ class MainWindow(QMainWindow):
         )
         self._mark_local_private_button.clicked.connect(self._on_mark_selected_mod_local_private)
         self._disable_tracking_button.clicked.connect(self._on_disable_selected_mod_tracking)
+        self._manual_source_intent_button.clicked.connect(
+            self._on_set_selected_mod_manual_source_intent
+        )
         self._clear_source_intent_button.clicked.connect(self._on_clear_selected_mod_source_intent)
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
@@ -2947,10 +2958,14 @@ class MainWindow(QMainWindow):
         is_actionable = name_item.data(_ROLE_UPDATE_ACTIONABLE) is True
         blocked_reason = name_item.data(_ROLE_UPDATE_BLOCK_REASON)
         overlay_intent = self._resolve_inventory_update_source_intent(selected_unique_id)
+        has_blocked_state = bool(
+            status is not None or (isinstance(blocked_reason, str) and blocked_reason.strip())
+        )
         can_manage_intent = bool(
             selected_unique_id
             and not is_actionable
-            and not (status is None and status_text == "not_checked")
+            and has_blocked_state
+            and status_text != "not_checked"
         )
 
         if status is None and status_text == "not_checked":
@@ -3043,6 +3058,7 @@ class MainWindow(QMainWindow):
         self._inventory_source_intent_actions_widget.setVisible(selected)
         self._mark_local_private_button.setEnabled(can_manage_intent)
         self._disable_tracking_button.setEnabled(can_manage_intent)
+        self._manual_source_intent_button.setEnabled(can_manage_intent)
         has_saved_intent = bool(
             selected_unique_id and self._resolve_inventory_update_source_intent(selected_unique_id) is not None
         )
@@ -3058,11 +3074,37 @@ class MainWindow(QMainWindow):
         unique_id = unique_id_item.text().strip()
         return unique_id or None
 
+    def _selected_inventory_source_intent_context(self) -> tuple[str, str] | None:
+        row = self._mods_table.currentRow()
+        if row < 0 or self._mods_table.isRowHidden(row) or not self._mods_table.selectedItems():
+            return None
+        name_item = self._mods_table.item(row, 0)
+        unique_id_item = self._mods_table.item(row, 1)
+        status_item = self._mods_table.item(row, 4)
+        if name_item is None or unique_id_item is None:
+            return None
+        unique_id = unique_id_item.text().strip()
+        if not unique_id:
+            return None
+        status_text = status_item.text().strip() if status_item is not None else ""
+        status_data = name_item.data(_ROLE_MOD_UPDATE_STATUS)
+        status = status_data if isinstance(status_data, ModUpdateStatus) else None
+        is_actionable = name_item.data(_ROLE_UPDATE_ACTIONABLE) is True
+        blocked_reason = name_item.data(_ROLE_UPDATE_BLOCK_REASON)
+        has_blocked_state = bool(
+            status is not None or (isinstance(blocked_reason, str) and blocked_reason.strip())
+        )
+        if is_actionable or status_text == "not_checked" or not has_blocked_state:
+            return None
+        mod_name = name_item.text().strip() or "Selected mod"
+        return unique_id, mod_name
+
     def _set_selected_mod_update_source_intent(self, intent_state: str) -> None:
-        selected_unique_id = self._selected_inventory_row_unique_id()
-        if selected_unique_id is None:
+        selected_context = self._selected_inventory_source_intent_context()
+        if selected_context is None:
             self._set_status("Select a blocked installed mod row to manage saved source intent.")
             return
+        selected_unique_id, _ = selected_context
         try:
             self._shell_service.set_update_source_intent(selected_unique_id, intent_state)
         except AppShellError as exc:
@@ -3077,11 +3119,72 @@ class MainWindow(QMainWindow):
     def _on_disable_selected_mod_tracking(self) -> None:
         self._set_selected_mod_update_source_intent("no_tracking")
 
-    def _on_clear_selected_mod_source_intent(self) -> None:
-        selected_unique_id = self._selected_inventory_row_unique_id()
-        if selected_unique_id is None:
+    def _prompt_selected_mod_manual_source_intent(
+        self,
+        *,
+        mod_name: str,
+        unique_id: str,
+        existing_intent: object | None,
+    ) -> tuple[str, str, str | None] | None:
+        initial_provider = None
+        initial_source_key = None
+        initial_page_url = None
+        if existing_intent is not None:
+            initial_provider = getattr(existing_intent, "manual_provider", None)
+            initial_source_key = getattr(existing_intent, "manual_source_key", None)
+            initial_page_url = getattr(existing_intent, "manual_source_page_url", None)
+        return _prompt_manual_source_association(
+            self,
+            mod_name=mod_name,
+            unique_id=unique_id,
+            initial_provider=initial_provider,
+            initial_source_key=initial_source_key,
+            initial_page_url=initial_page_url,
+        )
+
+    def _on_set_selected_mod_manual_source_intent(self) -> None:
+        selected_context = self._selected_inventory_source_intent_context()
+        if selected_context is None:
             self._set_status("Select a blocked installed mod row to manage saved source intent.")
             return
+        selected_unique_id, mod_name = selected_context
+        existing_intent = self._resolve_inventory_update_source_intent(selected_unique_id)
+        association = self._prompt_selected_mod_manual_source_intent(
+            mod_name=mod_name,
+            unique_id=selected_unique_id,
+            existing_intent=existing_intent,
+        )
+        if association is None:
+            return
+        provider, source_key, page_url = association
+        provider = provider.strip()
+        source_key = source_key.strip()
+        normalized_page_url = page_url.strip() if isinstance(page_url, str) else ""
+        if not provider or not source_key:
+            self._set_status("Manual source association requires provider and source key.")
+            return
+        try:
+            self._shell_service.set_update_source_intent(
+                selected_unique_id,
+                "manual_source_association",
+                manual_provider=provider,
+                manual_source_key=source_key,
+                manual_source_page_url=normalized_page_url or None,
+            )
+        except AppShellError as exc:
+            self._set_status(str(exc))
+            return
+        self._refresh_selected_mod_update_guidance()
+        self._set_status(
+            f"Saved manual source association for {selected_unique_id} (provider: {provider})."
+        )
+
+    def _on_clear_selected_mod_source_intent(self) -> None:
+        selected_context = self._selected_inventory_source_intent_context()
+        if selected_context is None:
+            self._set_status("Select a blocked installed mod row to manage saved source intent.")
+            return
+        selected_unique_id, _ = selected_context
         try:
             self._shell_service.clear_update_source_intent(selected_unique_id)
         except AppShellError as exc:
@@ -3633,6 +3736,97 @@ def _inventory_guidance_for_update_source_intent(
         "Open remote page is unavailable for this row.",
         f"Update source intent: manual source association is recorded in app state{provider_text}.",
         "Remote-page action unavailable: manual source association is recorded in saved update-source intent.",
+    )
+
+
+def _prompt_manual_source_association(
+    parent: QWidget,
+    *,
+    mod_name: str,
+    unique_id: str,
+    initial_provider: str | None,
+    initial_source_key: str | None,
+    initial_page_url: str | None,
+) -> tuple[str, str, str | None] | None:
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Manual source association")
+    dialog.setModal(True)
+    dialog_layout = QVBoxLayout(dialog)
+    dialog_layout.setContentsMargins(12, 10, 12, 10)
+    dialog_layout.setSpacing(8)
+
+    intro_label = QLabel(
+        f"Record a manual source association for {mod_name} ({unique_id})."
+    )
+    intro_label.setWordWrap(True)
+    dialog_layout.addWidget(intro_label)
+
+    form_layout = QGridLayout()
+    form_layout.setHorizontalSpacing(8)
+    form_layout.setVerticalSpacing(6)
+    dialog_layout.addLayout(form_layout)
+
+    provider_input = QComboBox()
+    provider_input.setObjectName("inventory_manual_source_provider_input")
+    provider_input.setEditable(True)
+    for provider_name in ("nexus", "github", "moddrop", "smapi"):
+        provider_input.addItem(provider_name)
+    if initial_provider:
+        existing_index = provider_input.findText(initial_provider)
+        if existing_index >= 0:
+            provider_input.setCurrentIndex(existing_index)
+        else:
+            provider_input.setEditText(initial_provider)
+
+    source_key_input = QLineEdit(initial_source_key or "")
+    source_key_input.setObjectName("inventory_manual_source_key_input")
+    source_key_input.setPlaceholderText("Provider-specific source key")
+    page_url_input = QLineEdit(initial_page_url or "")
+    page_url_input.setObjectName("inventory_manual_source_page_url_input")
+    page_url_input.setPlaceholderText("Optional page URL")
+
+    form_layout.addWidget(QLabel("Provider"), 0, 0)
+    form_layout.addWidget(provider_input, 0, 1)
+    form_layout.addWidget(QLabel("Source key"), 1, 0)
+    form_layout.addWidget(source_key_input, 1, 1)
+    form_layout.addWidget(QLabel("Page URL"), 2, 0)
+    form_layout.addWidget(page_url_input, 2, 1)
+
+    validation_label = QLabel("")
+    validation_label.setObjectName("inventory_manual_source_validation_label")
+    validation_label.setWordWrap(True)
+    validation_label.setVisible(False)
+    _set_auxiliary_label_style(validation_label)
+    dialog_layout.addWidget(validation_label)
+
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    dialog_layout.addWidget(buttons)
+
+    def _validate_before_accept() -> None:
+        provider_text = provider_input.currentText().strip()
+        source_key_text = source_key_input.text().strip()
+        if provider_text and source_key_text:
+            validation_label.clear()
+            validation_label.setVisible(False)
+            dialog.accept()
+            return
+        validation_label.setText("Provider and source key are required.")
+        validation_label.setVisible(True)
+
+    save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+    if save_button is not None:
+        save_button.clicked.disconnect()
+        save_button.clicked.connect(_validate_before_accept)
+
+    if dialog.exec() != int(QDialog.DialogCode.Accepted):
+        return None
+    page_url_text = page_url_input.text().strip()
+    return (
+        provider_input.currentText().strip(),
+        source_key_input.text().strip(),
+        page_url_text or None,
     )
 
 
