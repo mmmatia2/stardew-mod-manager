@@ -13,13 +13,23 @@ from sdvmm.domain.models import (
     InstallOperationRecord,
     RecoveryExecutionHistory,
     RecoveryExecutionRecord,
+    UpdateSourceIntentOverlay,
+    UpdateSourceIntentRecord,
 )
+from sdvmm.domain.update_codes import LOCAL_PRIVATE_MOD
 
 APP_STATE_VERSION = 1
 INSTALL_OPERATION_HISTORY_VERSION = 1
 INSTALL_OPERATION_HISTORY_FILENAME = "install-operation-history.json"
 RECOVERY_EXECUTION_HISTORY_VERSION = 1
 RECOVERY_EXECUTION_HISTORY_FILENAME = "recovery-execution-history.json"
+UPDATE_SOURCE_INTENT_OVERLAY_VERSION = 1
+UPDATE_SOURCE_INTENT_OVERLAY_FILENAME = "update-source-intent-overlay.json"
+_VALID_UPDATE_SOURCE_INTENT_STATES = {
+    LOCAL_PRIVATE_MOD,
+    "no_tracking",
+    "manual_source_association",
+}
 
 
 class AppStateStoreError(ValueError):
@@ -110,6 +120,10 @@ def recovery_execution_history_file(state_file: Path) -> Path:
     return state_file.parent / RECOVERY_EXECUTION_HISTORY_FILENAME
 
 
+def update_source_intent_overlay_file(state_file: Path) -> Path:
+    return state_file.parent / UPDATE_SOURCE_INTENT_OVERLAY_FILENAME
+
+
 def load_install_operation_history(history_file: Path) -> InstallOperationHistory:
     if not history_file.exists():
         return InstallOperationHistory(operations=tuple())
@@ -198,6 +212,43 @@ def append_recovery_execution_record(
     updated = RecoveryExecutionHistory(operations=(*history.operations, operation))
     save_recovery_execution_history(history_file, updated)
     return updated
+
+
+def load_update_source_intent_overlay(overlay_file: Path) -> UpdateSourceIntentOverlay:
+    if not overlay_file.exists():
+        return UpdateSourceIntentOverlay(records=tuple())
+
+    raw = _load_json_object(history_file=overlay_file, subject="update-source intent overlay")
+    version = raw.get("version")
+    if version != UPDATE_SOURCE_INTENT_OVERLAY_VERSION:
+        raise AppStateStoreError(
+            "Unsupported update-source intent overlay version: "
+            f"{version!r}; expected {UPDATE_SOURCE_INTENT_OVERLAY_VERSION}"
+        )
+
+    records_raw = raw.get("records")
+    if not isinstance(records_raw, list):
+        raise AppStateStoreError("records must be an array")
+
+    records = tuple(
+        _parse_update_source_intent_record(item, index) for index, item in enumerate(records_raw)
+    )
+    return UpdateSourceIntentOverlay(records=records)
+
+
+def save_update_source_intent_overlay(
+    overlay_file: Path,
+    overlay: UpdateSourceIntentOverlay,
+) -> None:
+    payload = {
+        "version": UPDATE_SOURCE_INTENT_OVERLAY_VERSION,
+        "records": [
+            _serialize_update_source_intent_record(record) for record in overlay.records
+        ],
+    }
+
+    overlay_file.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(overlay_file, payload)
 
 
 def _load_json_object(*, history_file: Path, subject: str) -> dict[str, object]:
@@ -439,6 +490,65 @@ def _parse_recovery_execution_record(data: object, index: int) -> RecoveryExecut
             prefix=f"operations[{index}]",
         ),
         failure_message=failure_message,
+    )
+
+
+def _serialize_update_source_intent_record(
+    record: UpdateSourceIntentRecord,
+) -> dict[str, object]:
+    if not record.unique_id.strip():
+        raise AppStateStoreError("update-source intent record unique_id must be non-empty")
+    if not record.normalized_unique_id.strip():
+        raise AppStateStoreError("update-source intent record normalized_unique_id must be non-empty")
+    if record.intent_state not in _VALID_UPDATE_SOURCE_INTENT_STATES:
+        raise AppStateStoreError(
+            "update-source intent record intent_state must be one of "
+            f"{sorted(_VALID_UPDATE_SOURCE_INTENT_STATES)!r}"
+        )
+    return {
+        "unique_id": record.unique_id,
+        "normalized_unique_id": record.normalized_unique_id,
+        "intent_state": record.intent_state,
+        "manual_provider": record.manual_provider,
+        "manual_source_key": record.manual_source_key,
+        "manual_source_page_url": record.manual_source_page_url,
+    }
+
+
+def _parse_update_source_intent_record(data: object, index: int) -> UpdateSourceIntentRecord:
+    if not isinstance(data, dict):
+        raise AppStateStoreError(f"records[{index}] must be an object")
+
+    intent_state = _require_non_empty_string(data, "intent_state", prefix=f"records[{index}]")
+    if intent_state not in _VALID_UPDATE_SOURCE_INTENT_STATES:
+        raise AppStateStoreError(
+            f"records[{index}].intent_state must be one of "
+            f"{sorted(_VALID_UPDATE_SOURCE_INTENT_STATES)!r}"
+        )
+
+    return UpdateSourceIntentRecord(
+        unique_id=_require_non_empty_string(data, "unique_id", prefix=f"records[{index}]"),
+        normalized_unique_id=_require_non_empty_string(
+            data,
+            "normalized_unique_id",
+            prefix=f"records[{index}]",
+        ),
+        intent_state=intent_state,
+        manual_provider=_optional_non_empty_string(
+            data,
+            "manual_provider",
+            prefix=f"records[{index}]",
+        ),
+        manual_source_key=_optional_non_empty_string(
+            data,
+            "manual_source_key",
+            prefix=f"records[{index}]",
+        ),
+        manual_source_page_url=_optional_non_empty_string(
+            data,
+            "manual_source_page_url",
+            prefix=f"records[{index}]",
+        ),
     )
 
 

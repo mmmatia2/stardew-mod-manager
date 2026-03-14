@@ -45,6 +45,9 @@ from sdvmm.domain.models import (
     ModRollbackPlan,
     ModRollbackResult,
     ModUpdateReport,
+    UpdateSourceIntentOverlay,
+    UpdateSourceIntentRecord,
+    UpdateSourceIntentState,
     ModsInventory,
     NexusIntegrationStatus,
     PackageInspectionResult,
@@ -76,6 +79,9 @@ from sdvmm.services.app_state_store import (
     load_app_config,
     recovery_execution_history_file,
     save_app_config,
+    load_update_source_intent_overlay,
+    save_update_source_intent_overlay,
+    update_source_intent_overlay_file,
 )
 from sdvmm.services.mod_scanner import scan_mods_directory
 from sdvmm.services.package_inspector import inspect_zip_package
@@ -241,6 +247,68 @@ class AppShellService:
             return load_recovery_execution_history(self._recovery_execution_history_file)
         except AppStateStoreError as exc:
             raise AppShellError(f"Could not load recovery history: {exc}") from exc
+
+    def load_update_source_intent_overlay(self) -> UpdateSourceIntentOverlay:
+        try:
+            return load_update_source_intent_overlay(self._update_source_intent_overlay_file)
+        except AppStateStoreError as exc:
+            raise AppShellError(f"Could not load update-source intent overlay: {exc}") from exc
+
+    def get_update_source_intent(self, unique_id: str) -> UpdateSourceIntentRecord | None:
+        canonical_unique_id = _require_canonical_unique_id(unique_id)
+        overlay = self.load_update_source_intent_overlay()
+        return next(
+            (
+                record
+                for record in overlay.records
+                if record.normalized_unique_id == canonical_unique_id
+            ),
+            None,
+        )
+
+    def set_update_source_intent(
+        self,
+        unique_id: str,
+        intent_state: UpdateSourceIntentState,
+        *,
+        manual_provider: str | None = None,
+        manual_source_key: str | None = None,
+        manual_source_page_url: str | None = None,
+    ) -> UpdateSourceIntentOverlay:
+        normalized_unique_id = _require_canonical_unique_id(unique_id)
+        display_unique_id = unique_id.strip()
+        record = UpdateSourceIntentRecord(
+            unique_id=display_unique_id,
+            normalized_unique_id=normalized_unique_id,
+            intent_state=intent_state,
+            manual_provider=_normalize_optional_text(manual_provider),
+            manual_source_key=_normalize_optional_text(manual_source_key),
+            manual_source_page_url=_normalize_optional_text(manual_source_page_url),
+        )
+        overlay = self.load_update_source_intent_overlay()
+        updated = UpdateSourceIntentOverlay(
+            records=_upsert_update_source_intent_record(overlay.records, record)
+        )
+        try:
+            save_update_source_intent_overlay(self._update_source_intent_overlay_file, updated)
+        except AppStateStoreError as exc:
+            raise AppShellError(f"Could not save update-source intent overlay: {exc}") from exc
+        return updated
+
+    def clear_update_source_intent(self, unique_id: str) -> UpdateSourceIntentOverlay:
+        normalized_unique_id = _require_canonical_unique_id(unique_id)
+        overlay = self.load_update_source_intent_overlay()
+        updated_records = tuple(
+            record
+            for record in overlay.records
+            if record.normalized_unique_id != normalized_unique_id
+        )
+        updated = UpdateSourceIntentOverlay(records=updated_records)
+        try:
+            save_update_source_intent_overlay(self._update_source_intent_overlay_file, updated)
+        except AppStateStoreError as exc:
+            raise AppShellError(f"Could not save update-source intent overlay: {exc}") from exc
+        return updated
 
     def inspect_install_recovery_by_operation_id(
         self,
@@ -2290,6 +2358,10 @@ class AppShellService:
     def _recovery_execution_history_file(self) -> Path:
         return recovery_execution_history_file(self._state_file)
 
+    @property
+    def _update_source_intent_overlay_file(self) -> Path:
+        return update_source_intent_overlay_file(self._state_file)
+
     def _record_completed_install_operation(
         self,
         *,
@@ -2414,6 +2486,34 @@ def _is_path_within_or_equal(candidate: Path, container: Path) -> bool:
 def _sorted_unique_ids(values: Iterable[str]) -> tuple[str, ...]:
     unique = {str(value) for value in values if str(value).strip()}
     return tuple(sorted(unique, key=str.casefold))
+
+
+def _require_canonical_unique_id(unique_id: str) -> str:
+    normalized = canonicalize_unique_id(unique_id)
+    if not normalized:
+        raise AppShellError("UniqueID is required.")
+    return normalized
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _upsert_update_source_intent_record(
+    records: tuple[UpdateSourceIntentRecord, ...],
+    record: UpdateSourceIntentRecord,
+) -> tuple[UpdateSourceIntentRecord, ...]:
+    remaining = [
+        existing
+        for existing in records
+        if existing.normalized_unique_id != record.normalized_unique_id
+    ]
+    remaining.append(record)
+    remaining.sort(key=lambda item: item.normalized_unique_id)
+    return tuple(remaining)
 
 
 def _version_sort_key(version: str | None) -> tuple[int, ...]:

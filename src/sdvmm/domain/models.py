@@ -171,6 +171,28 @@ class ModUpdateReport:
     statuses: tuple[ModUpdateStatus, ...]
 
 
+UpdateSourceIntentState = Literal[
+    "local_private_mod",
+    "no_tracking",
+    "manual_source_association",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateSourceIntentRecord:
+    unique_id: str
+    normalized_unique_id: str
+    intent_state: UpdateSourceIntentState
+    manual_provider: str | None = None
+    manual_source_key: str | None = None
+    manual_source_page_url: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateSourceIntentOverlay:
+    records: tuple[UpdateSourceIntentRecord, ...]
+
+
 @dataclass(frozen=True, slots=True)
 class ModDiscoveryEntry:
     name: str

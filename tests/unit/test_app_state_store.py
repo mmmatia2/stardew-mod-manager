@@ -14,6 +14,8 @@ from sdvmm.domain.models import (
     InstallOperationRecord,
     RecoveryExecutionHistory,
     RecoveryExecutionRecord,
+    UpdateSourceIntentOverlay,
+    UpdateSourceIntentRecord,
 )
 from sdvmm.domain.install_codes import INSTALL_NEW
 from sdvmm.services.app_state_store import (
@@ -22,6 +24,8 @@ from sdvmm.services.app_state_store import (
     INSTALL_OPERATION_HISTORY_VERSION,
     RECOVERY_EXECUTION_HISTORY_FILENAME,
     RECOVERY_EXECUTION_HISTORY_VERSION,
+    UPDATE_SOURCE_INTENT_OVERLAY_FILENAME,
+    UPDATE_SOURCE_INTENT_OVERLAY_VERSION,
     AppStateStoreError,
     append_install_operation_record,
     append_recovery_execution_record,
@@ -29,10 +33,13 @@ from sdvmm.services.app_state_store import (
     load_app_config,
     load_install_operation_history,
     load_recovery_execution_history,
+    load_update_source_intent_overlay,
     recovery_execution_history_file,
     save_app_config,
     save_install_operation_history,
     save_recovery_execution_history,
+    save_update_source_intent_overlay,
+    update_source_intent_overlay_file,
 )
 
 
@@ -388,6 +395,73 @@ def test_recovery_execution_history_round_trip(tmp_path: Path) -> None:
     assert payload["operations"][0]["related_install_operation_id"] == operation.related_install_operation_id
     assert payload["operations"][0]["destination_kind"] == operation.destination_kind
     assert payload["operations"][0]["outcome_status"] == "completed"
+
+
+def test_update_source_intent_overlay_round_trip(tmp_path: Path) -> None:
+    overlay_file = tmp_path / "state" / UPDATE_SOURCE_INTENT_OVERLAY_FILENAME
+    overlay = UpdateSourceIntentOverlay(
+        records=(
+            UpdateSourceIntentRecord(
+                unique_id="Sample.Private",
+                normalized_unique_id="sample.private",
+                intent_state="local_private_mod",
+            ),
+            UpdateSourceIntentRecord(
+                unique_id="Sample.Untracked",
+                normalized_unique_id="sample.untracked",
+                intent_state="no_tracking",
+            ),
+            UpdateSourceIntentRecord(
+                unique_id="Sample.Manual",
+                normalized_unique_id="sample.manual",
+                intent_state="manual_source_association",
+                manual_provider="nexus",
+                manual_source_key="12345",
+                manual_source_page_url="https://example.test/mods/12345",
+            ),
+        ),
+    )
+
+    save_update_source_intent_overlay(overlay_file, overlay)
+    loaded = load_update_source_intent_overlay(overlay_file)
+
+    assert loaded == overlay
+
+    payload = json.loads(overlay_file.read_text(encoding="utf-8"))
+    assert payload["version"] == UPDATE_SOURCE_INTENT_OVERLAY_VERSION
+    assert payload["records"][0]["intent_state"] == "local_private_mod"
+    assert payload["records"][1]["intent_state"] == "no_tracking"
+    assert payload["records"][2]["manual_provider"] == "nexus"
+
+
+def test_update_source_intent_overlay_file_uses_state_directory(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+
+    assert update_source_intent_overlay_file(state_file) == (
+        tmp_path / "state" / UPDATE_SOURCE_INTENT_OVERLAY_FILENAME
+    )
+
+
+def test_load_update_source_intent_overlay_returns_empty_when_file_missing(tmp_path: Path) -> None:
+    overlay_file = tmp_path / "state" / UPDATE_SOURCE_INTENT_OVERLAY_FILENAME
+
+    assert load_update_source_intent_overlay(overlay_file) == UpdateSourceIntentOverlay(records=tuple())
+
+
+def test_load_update_source_intent_overlay_rejects_unsupported_version(tmp_path: Path) -> None:
+    overlay_file = tmp_path / UPDATE_SOURCE_INTENT_OVERLAY_FILENAME
+    overlay_file.write_text(
+        json.dumps(
+            {
+                "version": 999,
+                "records": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AppStateStoreError, match="Unsupported update-source intent overlay version"):
+        load_update_source_intent_overlay(overlay_file)
 
 
 def test_load_recovery_execution_history_returns_empty_when_file_missing(tmp_path: Path) -> None:

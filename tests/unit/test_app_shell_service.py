@@ -35,12 +35,19 @@ from sdvmm.domain.models import (
     SandboxInstallPlanEntry,
     SmapiLogReport,
     SmapiUpdateStatus,
+    UpdateSourceIntentOverlay,
+    UpdateSourceIntentRecord,
 )
 from sdvmm.domain.install_codes import BLOCKED, INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
 from sdvmm.domain.package_codes import DIRECT_SINGLE_MOD_PACKAGE
 from sdvmm.domain.update_codes import UpdateState
 from sdvmm.domain.warning_codes import INVALID_MANIFEST
-from sdvmm.services.app_state_store import AppStateStoreError, save_app_config
+from sdvmm.services.app_state_store import (
+    AppStateStoreError,
+    save_app_config,
+    save_update_source_intent_overlay,
+    update_source_intent_overlay_file,
+)
 
 
 def test_load_startup_config_returns_none_when_state_absent(tmp_path: Path) -> None:
@@ -100,6 +107,90 @@ def test_save_mods_directory_preserves_existing_non_mod_paths(tmp_path: Path) ->
     assert updated.mods_path == second_mods
     assert updated.game_path == existing.game_path
     assert updated.app_data_path == existing.app_data_path
+
+
+def test_load_update_source_intent_overlay_returns_empty_when_state_absent(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+
+    assert service.load_update_source_intent_overlay() == UpdateSourceIntentOverlay(records=tuple())
+
+
+def test_set_update_source_intent_persists_local_private_and_no_tracking_states(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+
+    first = service.set_update_source_intent("Sample.Private", "local_private_mod")
+    second = service.set_update_source_intent("Sample.Untracked", "no_tracking")
+
+    assert len(first.records) == 1
+    assert len(second.records) == 2
+    assert second.records[0].normalized_unique_id == "sample.private"
+    assert second.records[0].intent_state == "local_private_mod"
+    assert second.records[1].normalized_unique_id == "sample.untracked"
+    assert second.records[1].intent_state == "no_tracking"
+
+    loaded = service.load_update_source_intent_overlay()
+    assert loaded == second
+    assert service.get_update_source_intent("sample.private") == second.records[0]
+    assert service.get_update_source_intent("SAMPLE.UNTRACKED") == second.records[1]
+
+
+def test_set_update_source_intent_updates_existing_record_by_canonical_unique_id(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    service.set_update_source_intent("Sample.Mod", "local_private_mod")
+
+    updated = service.set_update_source_intent(
+        " sample.mod ",
+        "manual_source_association",
+        manual_provider="nexus",
+        manual_source_key="12345",
+        manual_source_page_url="https://example.test/mods/12345",
+    )
+
+    assert len(updated.records) == 1
+    record = updated.records[0]
+    assert record.unique_id == "sample.mod"
+    assert record.normalized_unique_id == "sample.mod"
+    assert record.intent_state == "manual_source_association"
+    assert record.manual_provider == "nexus"
+    assert record.manual_source_key == "12345"
+    assert record.manual_source_page_url == "https://example.test/mods/12345"
+
+
+def test_clear_update_source_intent_removes_matching_record(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    save_update_source_intent_overlay(
+        update_source_intent_overlay_file(service.state_file),
+        UpdateSourceIntentOverlay(
+            records=(
+                UpdateSourceIntentRecord(
+                    unique_id="Sample.Private",
+                    normalized_unique_id="sample.private",
+                    intent_state="local_private_mod",
+                ),
+                UpdateSourceIntentRecord(
+                    unique_id="Sample.Keep",
+                    normalized_unique_id="sample.keep",
+                    intent_state="no_tracking",
+                ),
+            )
+        ),
+    )
+
+    updated = service.clear_update_source_intent(" SAMPLE.PRIVATE ")
+
+    assert updated.records == (
+        UpdateSourceIntentRecord(
+            unique_id="Sample.Keep",
+            normalized_unique_id="sample.keep",
+            intent_state="no_tracking",
+        ),
+    )
+    assert service.get_update_source_intent("sample.private") is None
+    assert service.get_update_source_intent("sample.keep") == updated.records[0]
 
 
 def test_scan_rejects_missing_mods_path(tmp_path: Path) -> None:
