@@ -1637,13 +1637,78 @@ def test_main_window_plan_and_recovery_local_output_behavior_remains_intact(
 
 
 def test_main_window_packages_intake_local_output_box_exists(main_window: MainWindow) -> None:
+    intake_detail_access_group = main_window.findChild(
+        QGroupBox, "packages_intake_detail_access_group"
+    )
+    intake_detail_access_label = main_window.findChild(
+        QLabel, "packages_intake_detail_access_label"
+    )
+    view_shared_details_button = main_window.findChild(
+        QPushButton, "packages_intake_view_shared_details_button"
+    )
+    show_local_intake_output_toggle = main_window.findChild(
+        QCheckBox, "packages_intake_show_local_output_toggle"
+    )
     intake_output_group = main_window.findChild(QGroupBox, "packages_intake_output_group")
     intake_output_box = main_window.findChild(QPlainTextEdit, "packages_intake_output_box")
 
+    assert intake_detail_access_group is not None
+    assert intake_detail_access_label is not None
+    assert view_shared_details_button is not None
+    assert show_local_intake_output_toggle is not None
     assert intake_output_group is not None
     assert intake_output_box is not None
+    assert "Operational Detail" in intake_detail_access_label.text()
+    assert main_window._view_intake_operational_detail_button is view_shared_details_button
+    assert main_window._show_local_intake_output_toggle is show_local_intake_output_toggle
+    assert show_local_intake_output_toggle.isChecked() is False
+    assert intake_output_group.isHidden() is True
+    assert main_window._intake_output_group is intake_output_group
     assert main_window._intake_output_box is intake_output_box
     assert intake_output_box.isReadOnly() is True
+
+
+def test_main_window_packages_intake_local_output_can_be_revealed(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    show_local_intake_output_toggle = main_window.findChild(
+        QCheckBox, "packages_intake_show_local_output_toggle"
+    )
+    intake_output_group = main_window.findChild(QGroupBox, "packages_intake_output_group")
+
+    assert show_local_intake_output_toggle is not None
+    assert intake_output_group is not None
+    assert intake_output_group.isHidden() is True
+
+    show_local_intake_output_toggle.setChecked(True)
+    qapp.processEvents()
+    assert intake_output_group.isHidden() is False
+
+    show_local_intake_output_toggle.setChecked(False)
+    qapp.processEvents()
+    assert intake_output_group.isHidden() is True
+
+
+def test_main_window_packages_intake_view_shared_operational_detail_opens_bottom_details(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    view_shared_details_button = main_window.findChild(
+        QPushButton, "packages_intake_view_shared_details_button"
+    )
+    details_group = main_window.findChild(QGroupBox, "bottom_summary_details_group")
+
+    assert view_shared_details_button is not None
+    assert details_group is not None
+    assert details_group.isHidden() is True
+
+    view_shared_details_button.click()
+    qapp.processEvents()
+
+    assert main_window._secondary_tabs.currentIndex() == main_window._summary_tab_index
+    assert main_window._details_toggle.isChecked() is True
+    assert details_group.isHidden() is False
 
 
 def test_main_window_package_inspection_writes_to_packages_intake_local_output(
@@ -1666,6 +1731,7 @@ def test_main_window_package_inspection_writes_to_packages_intake_local_output(
     main_window._on_inspect_zip()
 
     assert main_window._intake_output_box.toPlainText() == "Inspection narrative output"
+    assert main_window._findings_box.toPlainText() == "Inspection narrative output"
     assert main_window._status_strip_label.text() == "Zip inspection complete: 2 mod(s) detected"
 
 
@@ -1708,6 +1774,7 @@ def test_main_window_staging_valid_intake_switches_to_plan_install_and_updates_d
     assert main_window._staged_package_label.toolTip() == str(intake.package_path)
     assert main_window._staged_package_label.text() == str(intake.package_path)
     assert main_window._intake_output_box.toPlainText() == "Staged package for planning: AlphaPack.zip"
+    assert main_window._findings_box.toPlainText() == "Staged package for planning: AlphaPack.zip"
     assert main_window._status_strip_label.text() == "Staged package for planning: AlphaPack.zip"
     assert main_window._pending_install_plan is None
 

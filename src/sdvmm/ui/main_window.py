@@ -493,6 +493,15 @@ class MainWindow(QMainWindow):
         self._show_local_recovery_output_toggle.setObjectName(
             "recovery_show_local_output_toggle"
         )
+        self._view_intake_operational_detail_button = QPushButton("View Operational Detail")
+        self._view_intake_operational_detail_button.setObjectName(
+            "packages_intake_view_shared_details_button"
+        )
+        _set_secondary_button_style(self._view_intake_operational_detail_button)
+        self._show_local_intake_output_toggle = QCheckBox("Show local intake output")
+        self._show_local_intake_output_toggle.setObjectName(
+            "packages_intake_show_local_output_toggle"
+        )
 
         self._status_strip_group = GlobalStatusStrip()
         self._status_strip_label = self._status_strip_group.current_status_label
@@ -558,6 +567,12 @@ class MainWindow(QMainWindow):
         )
         self._show_local_recovery_output_toggle.toggled.connect(
             self._on_toggle_local_recovery_output
+        )
+        self._view_intake_operational_detail_button.clicked.connect(
+            self._on_view_intake_operational_detail
+        )
+        self._show_local_intake_output_toggle.toggled.connect(
+            self._on_toggle_local_intake_output
         )
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
@@ -850,7 +865,32 @@ class MainWindow(QMainWindow):
         detected_layout.addWidget(self._plan_selected_intake_button, 1, 3)
         intake_layout.addWidget(detected_group)
 
-        intake_output_group = QGroupBox("Packages & Intake Output")
+        intake_detail_access_group = QGroupBox("Detail Access")
+        intake_detail_access_group.setObjectName("packages_intake_detail_access_group")
+        intake_detail_access_group.setFlat(True)
+        intake_detail_access_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        intake_detail_access_layout = QVBoxLayout(intake_detail_access_group)
+        intake_detail_access_layout.setContentsMargins(8, 6, 8, 6)
+        intake_detail_access_layout.setSpacing(4)
+        intake_detail_access_label = QLabel(
+            "Use inspection and detected-package controls for primary decisions. "
+            "Open Operational Detail below for full intake narrative output."
+        )
+        intake_detail_access_label.setObjectName("packages_intake_detail_access_label")
+        intake_detail_access_label.setWordWrap(True)
+        _set_auxiliary_label_style(intake_detail_access_label)
+        intake_detail_access_layout.addWidget(intake_detail_access_label)
+        intake_detail_access_actions = QHBoxLayout()
+        intake_detail_access_actions.setSpacing(6)
+        intake_detail_access_actions.addWidget(self._view_intake_operational_detail_button)
+        intake_detail_access_actions.addWidget(self._show_local_intake_output_toggle)
+        intake_detail_access_actions.addStretch(1)
+        intake_detail_access_layout.addLayout(intake_detail_access_actions)
+        intake_layout.addWidget(intake_detail_access_group)
+
+        intake_output_group = QGroupBox("Secondary Local Intake Output")
         intake_output_group.setObjectName("packages_intake_output_group")
         intake_output_group.setFlat(True)
         intake_output_group.setSizePolicy(
@@ -860,6 +900,8 @@ class MainWindow(QMainWindow):
         intake_output_layout.setContentsMargins(8, 6, 8, 6)
         intake_output_layout.setSpacing(6)
         intake_output_layout.addWidget(self._intake_output_box)
+        intake_output_group.setVisible(False)
+        self._intake_output_group = intake_output_group
         intake_layout.addWidget(intake_output_group)
 
         intake_layout.addStretch(1)
@@ -2800,11 +2842,7 @@ class MainWindow(QMainWindow):
 
     def _set_intake_output_text(self, text: str) -> None:
         self._intake_output_box.setPlainText(text)
-        blocking_issue, next_step = _summarize_details_text(text)
-        self._blocking_issues_strip_label.setText(blocking_issue)
-        self._next_step_strip_label.setText(next_step)
-        self._blocking_issues_strip_label.setToolTip(blocking_issue)
-        self._next_step_strip_label.setToolTip(next_step)
+        self._set_details_text(text)
 
     def _set_plan_install_output_text(self, text: str) -> None:
         self._plan_install_output_box.setPlainText(text)
@@ -2823,6 +2861,17 @@ class MainWindow(QMainWindow):
 
     def _on_toggle_local_recovery_output(self, checked: bool) -> None:
         self._recovery_output_group.setVisible(checked)
+        self._refresh_responsive_panel_bounds()
+
+    def _on_view_intake_operational_detail(self) -> None:
+        self._secondary_tabs.setCurrentIndex(self._summary_tab_index)
+        if not self._details_toggle.isChecked():
+            self._details_toggle.setChecked(True)
+        else:
+            self._on_secondary_tab_changed(self._summary_tab_index)
+
+    def _on_toggle_local_intake_output(self, checked: bool) -> None:
+        self._intake_output_group.setVisible(checked)
         self._refresh_responsive_panel_bounds()
 
     def _set_plan_review_summary_text(self, text: str) -> None:
