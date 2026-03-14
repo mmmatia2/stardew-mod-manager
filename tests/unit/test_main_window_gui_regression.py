@@ -34,6 +34,7 @@ from sdvmm.domain.discovery_codes import COMPATIBLE
 from sdvmm.domain.discovery_codes import DISCOVERY_SOURCE_NEXUS
 from sdvmm.domain.discovery_codes import SMAPI_COMPATIBILITY_LIST_PROVIDER
 from sdvmm.domain.install_codes import INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
+from sdvmm.domain.package_codes import INVALID_MANIFEST_PACKAGE
 from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.domain.models import DownloadsIntakeResult
 from sdvmm.domain.models import InstalledMod
@@ -45,6 +46,7 @@ from sdvmm.domain.models import ModUpdateReport
 from sdvmm.domain.models import ModUpdateStatus
 from sdvmm.domain.models import ModsInventory
 from sdvmm.domain.models import PackageModEntry
+from sdvmm.domain.models import PackageFinding
 from sdvmm.domain.models import RecoveryExecutionRecord
 from sdvmm.domain.models import SandboxInstallPlan
 from sdvmm.domain.models import SandboxInstallPlanEntry
@@ -591,6 +593,7 @@ def test_main_window_plan_install_surface_has_expected_structure(
     safety_panel_group = main_window.findChild(QGroupBox, "plan_install_safety_panel_group")
     staged_package_group = main_window.findChild(QGroupBox, "plan_install_staged_package_group")
     execute_group = main_window.findChild(QGroupBox, "plan_install_execute_group")
+    plan_review_summary_group = main_window.findChild(QGroupBox, "plan_install_review_summary_group")
     plan_output_group = main_window.findChild(QGroupBox, "plan_install_output_group")
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
     recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
@@ -604,6 +607,7 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert safety_panel_group is not None
     assert staged_package_group is not None
     assert execute_group is not None
+    assert plan_review_summary_group is not None
     assert plan_output_group is not None
     assert recovery_group is not None
     assert recovery_output_group is not None
@@ -620,6 +624,8 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert plan_layout.indexOf(destination_group) < plan_layout.indexOf(safety_panel_group)
     assert plan_layout.indexOf(safety_panel_group) < plan_layout.indexOf(staged_package_group)
     assert plan_layout.indexOf(staged_package_group) < plan_layout.indexOf(execute_group)
+    assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_review_summary_group)
+    assert plan_layout.indexOf(plan_review_summary_group) < plan_layout.indexOf(plan_output_group)
     assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_output_group)
     assert plan_layout.indexOf(plan_output_group) < plan_layout.indexOf(recovery_group)
     assert plan_layout.indexOf(recovery_group) < plan_layout.indexOf(recovery_output_group)
@@ -718,6 +724,7 @@ def test_main_window_plan_install_surface_key_controls_exist(
     install_archive_label = main_window.findChild(QLabel, "plan_install_archive_label")
     staged_package_group = main_window.findChild(QGroupBox, "plan_install_staged_package_group")
     staged_package_label = main_window.findChild(QLineEdit, "plan_install_staged_package_value")
+    plan_review_summary_label = main_window.findChild(QLabel, "plan_install_review_summary_label")
     plan_output_box = main_window.findChild(QPlainTextEdit, "plan_install_output_box")
     plan_button = main_window.findChild(QPushButton, "plan_install_plan_button")
     run_button = main_window.findChild(QPushButton, "plan_install_run_button")
@@ -727,6 +734,7 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert install_archive_label is not None
     assert staged_package_group is not None
     assert staged_package_label is not None
+    assert plan_review_summary_label is not None
     assert plan_output_box is not None
     assert plan_button is not None
     assert run_button is not None
@@ -735,6 +743,7 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert main_window._overwrite_checkbox is overwrite_checkbox
     assert main_window._install_archive_label is install_archive_label
     assert main_window._staged_package_label is staged_package_label
+    assert main_window._plan_review_summary_label is plan_review_summary_label
     assert main_window._plan_install_output_box is plan_output_box
     assert staged_package_label.isReadOnly() is True
 
@@ -1163,9 +1172,13 @@ def test_main_window_install_related_inputs_invalidate_pending_plan(
 
     for action in invalidation_actions:
         main_window._pending_install_plan = _sandbox_install_plan()
+        main_window._set_plan_review_summary_text("Plan review: ready to install.")
         action()
         qapp.processEvents()
         assert main_window._pending_install_plan is None
+        assert main_window._plan_review_summary_label.text() == (
+            "Plan review: no plan yet. Click Plan install to review."
+        )
 
 
 def test_main_window_plan_install_stores_sandbox_plan_and_sets_status(
@@ -1187,6 +1200,7 @@ def test_main_window_plan_install_stores_sandbox_plan_and_sets_status(
     assert build_calls["count"] == 1
     assert main_window._pending_install_plan is sandbox_plan
     assert main_window._status_strip_label.text() == review.message
+    assert main_window._plan_review_summary_label.text() == "Plan review: ready to install."
     assert main_window._plan_install_output_box.toPlainText().startswith(review.message)
 
 
@@ -1233,7 +1247,51 @@ def test_main_window_plan_install_blocked_review_clears_pending_plan_and_sets_st
     assert review.allowed is False
     assert main_window._pending_install_plan is None
     assert main_window._status_strip_label.text() == review.message
+    assert main_window._plan_review_summary_label.text() == "Plan review: blocked by dependency issues."
     assert main_window._plan_install_output_box.toPlainText().startswith(review.message)
+
+
+def test_main_window_plan_install_blocked_by_package_issues_sets_summary(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blocked_package_plan = _sandbox_install_plan(
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        action=BLOCKED,
+        can_install=False,
+        warnings=("Package manifest invalid.",),
+        package_findings=(
+            PackageFinding(
+                kind=INVALID_MANIFEST_PACKAGE,
+                message="Manifest is invalid",
+                related_paths=(r"C:\Packages\Sample\manifest.json",),
+            ),
+        ),
+    )
+    monkeypatch.setattr(main_window._shell_service, "build_install_plan", lambda **_: blocked_package_plan)
+
+    main_window._on_plan_install()
+
+    assert main_window._pending_install_plan is None
+    assert main_window._plan_review_summary_label.text() == "Plan review: blocked by package issues."
+
+
+def test_main_window_plan_install_runnable_with_warnings_sets_summary(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warning_plan = _sandbox_install_plan(
+        destination_kind=INSTALL_TARGET_SANDBOX_MODS,
+        action=INSTALL_NEW,
+        can_install=True,
+        warnings=("Optional compatibility warning.",),
+    )
+    monkeypatch.setattr(main_window._shell_service, "build_install_plan", lambda **_: warning_plan)
+
+    main_window._on_plan_install()
+
+    assert main_window._pending_install_plan is warning_plan
+    assert main_window._plan_review_summary_label.text() == "Plan review: runnable with warnings."
 
 
 def test_main_window_run_install_uses_confirmation_flow_and_service_gate(
@@ -2621,6 +2679,9 @@ def _sandbox_install_plan(
     archive_path: Path | None = None,
     can_install: bool = True,
     warnings: tuple[str, ...] = tuple(),
+    package_findings: tuple[PackageFinding, ...] = tuple(),
+    package_warnings: tuple[object, ...] = tuple(),
+    plan_warnings: tuple[str, ...] = tuple(),
 ) -> SandboxInstallPlan:
     destination_mods_path = (
         Path(r"C:\Game\Mods")
@@ -2650,9 +2711,9 @@ def _sandbox_install_plan(
         sandbox_mods_path=destination_mods_path,
         sandbox_archive_path=destination_archive_path,
         entries=(entry,),
-        package_findings=tuple(),
-        package_warnings=tuple(),
-        plan_warnings=tuple(),
+        package_findings=package_findings,
+        package_warnings=package_warnings,
+        plan_warnings=plan_warnings,
         destination_kind=destination_kind,
     )
 

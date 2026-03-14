@@ -270,6 +270,12 @@ class MainWindow(QMainWindow):
         self._inspect_recovery_button.setObjectName("recovery_inspection_button")
         self._run_recovery_button = QPushButton("Run recovery")
         self._run_recovery_button.setObjectName("recovery_execute_button")
+        self._plan_review_summary_label = QLabel(
+            "Plan review: no plan yet. Click Plan install to review."
+        )
+        self._plan_review_summary_label.setObjectName("plan_install_review_summary_label")
+        self._plan_review_summary_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._plan_review_summary_label)
 
         for control in (
             self._game_path_input,
@@ -826,6 +832,18 @@ class MainWindow(QMainWindow):
             staged_package_layout.addWidget(self._staged_package_label)
             plan_tab_layout.insertWidget(2, staged_package_group)
 
+            plan_review_summary_group = QGroupBox("Plan Review Summary")
+            plan_review_summary_group.setObjectName("plan_install_review_summary_group")
+            plan_review_summary_group.setFlat(True)
+            plan_review_summary_group.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+            )
+            plan_review_summary_layout = QVBoxLayout(plan_review_summary_group)
+            plan_review_summary_layout.setContentsMargins(8, 6, 8, 6)
+            plan_review_summary_layout.setSpacing(4)
+            plan_review_summary_layout.addWidget(self._plan_review_summary_label)
+            plan_tab_layout.insertWidget(4, plan_review_summary_group)
+
             plan_install_output_group = QGroupBox("Plan & Install Output")
             plan_install_output_group.setObjectName("plan_install_output_group")
             plan_install_output_group.setFlat(True)
@@ -836,7 +854,7 @@ class MainWindow(QMainWindow):
             plan_install_output_layout.setContentsMargins(8, 6, 8, 6)
             plan_install_output_layout.setSpacing(6)
             plan_install_output_layout.addWidget(self._plan_install_output_box)
-            plan_tab_layout.insertWidget(4, plan_install_output_group)
+            plan_tab_layout.insertWidget(5, plan_install_output_group)
 
             recovery_group = QGroupBox("Recovery")
             recovery_group.setObjectName("recovery_inspection_group")
@@ -866,7 +884,7 @@ class MainWindow(QMainWindow):
             recovery_controls.addWidget(self._run_recovery_button)
             recovery_layout.addLayout(recovery_controls)
             recovery_layout.addWidget(self._recovery_selection_summary_label)
-            plan_tab_layout.insertWidget(5, recovery_group)
+            plan_tab_layout.insertWidget(6, recovery_group)
 
             recovery_output_group = QGroupBox("Recovery Output")
             recovery_output_group.setObjectName("recovery_output_group")
@@ -878,7 +896,7 @@ class MainWindow(QMainWindow):
             recovery_output_layout.setContentsMargins(8, 6, 8, 6)
             recovery_output_layout.setSpacing(6)
             recovery_output_layout.addWidget(self._recovery_output_box)
-            plan_tab_layout.insertWidget(6, recovery_output_group)
+            plan_tab_layout.insertWidget(7, recovery_output_group)
         context_tabs.addTab(plan_tab, "Plan & Install")
         self._plan_install_tab = plan_tab
 
@@ -1166,6 +1184,7 @@ class MainWindow(QMainWindow):
             return
 
         self._pending_install_plan = None
+        self._set_plan_review_summary_text("Plan review: no plan yet. Click Plan install to review.")
         inspection_text = build_package_inspection_text(inspection)
         self._set_package_inspection_result_text(inspection_text)
         self._set_intake_output_text(inspection_text)
@@ -1187,6 +1206,7 @@ class MainWindow(QMainWindow):
             )
         except AppShellError as exc:
             self._pending_install_plan = None
+            self._set_plan_review_summary_text("Plan review: no plan yet. Click Plan install to review.")
             QMessageBox.critical(self, "Install plan failed", str(exc))
             self._set_plan_install_output_text(str(exc))
             self._set_status(str(exc))
@@ -1241,6 +1261,7 @@ class MainWindow(QMainWindow):
     def _apply_install_plan_review(self, plan: SandboxInstallPlan) -> None:
         review = self._shell_service.review_install_execution(plan)
         self._pending_install_plan = plan if review.allowed else None
+        self._set_plan_review_summary_text(_build_plan_review_summary_text(plan, review))
         self._set_plan_install_output_text(
             "\n\n".join(
                 (
@@ -2648,6 +2669,10 @@ class MainWindow(QMainWindow):
         self._blocking_issues_strip_label.setToolTip(blocking_issue)
         self._next_step_strip_label.setToolTip(next_step)
 
+    def _set_plan_review_summary_text(self, text: str) -> None:
+        self._plan_review_summary_label.setText(text)
+        self._plan_review_summary_label.setToolTip(text)
+
     def _set_package_inspection_result_text(self, text: str | None) -> None:
         has_text = bool(text and text.strip())
         self._package_inspection_result_box.setPlainText(text or "")
@@ -2662,6 +2687,7 @@ class MainWindow(QMainWindow):
 
     def _invalidate_pending_plan(self, *_: object) -> None:
         self._pending_install_plan = None
+        self._set_plan_review_summary_text("Plan review: no plan yet. Click Plan install to review.")
 
     def _on_watched_path_changed(self, *_: object) -> None:
         self._known_watched_zip_paths = tuple()
@@ -2686,6 +2712,7 @@ class MainWindow(QMainWindow):
 
     def _on_install_target_changed(self, *_: object) -> None:
         self._pending_install_plan = None
+        self._set_plan_review_summary_text("Plan review: no plan yet. Click Plan install to review.")
         self._refresh_install_destination_preview()
         if self._current_install_target() == INSTALL_TARGET_CONFIGURED_REAL_MODS:
             self._set_status("Install destination set to REAL game Mods path. Review carefully before executing.")
@@ -3309,6 +3336,43 @@ def _update_status_actionability(status: ModUpdateStatus) -> tuple[bool, str]:
     if status.state == "metadata_unavailable":
         return False, status.message or "Metadata unavailable for this mod."
     return False, status.message or f"State '{status.state}' is not actionable."
+
+
+def _build_plan_review_summary_text(
+    plan: SandboxInstallPlan,
+    review: InstallExecutionReview,
+) -> str:
+    has_dependency_block = bool(plan.dependency_findings) or any(
+        _contains_dependency_terms(warning)
+        for warning in (
+            *plan.plan_warnings,
+            *[warning for entry in plan.entries for warning in entry.warnings],
+        )
+    )
+    has_package_block = bool(plan.package_findings) or bool(plan.package_warnings)
+    has_runnable_warnings = bool(
+        plan.plan_warnings
+        or plan.package_warnings
+        or plan.package_findings
+        or review.summary.review_warnings
+        or any(entry.warnings for entry in plan.entries)
+    )
+
+    if not review.allowed:
+        if has_dependency_block:
+            return "Plan review: blocked by dependency issues."
+        if has_package_block:
+            return "Plan review: blocked by package issues."
+        return "Plan review: blocked. Review plan details."
+
+    if has_runnable_warnings:
+        return "Plan review: runnable with warnings."
+    return "Plan review: ready to install."
+
+
+def _contains_dependency_terms(text: str) -> bool:
+    lowered = text.casefold()
+    return "dependency" in lowered or "dependencies" in lowered
 
 
 def _build_install_recovery_inspection_text(
