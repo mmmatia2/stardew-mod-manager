@@ -16,7 +16,10 @@ from sdvmm.domain.models import (
     ModsInventory,
     NexusIntegrationStatus,
     RemoteModLink,
+    UpdateSourceIntentOverlay,
+    UpdateSourceIntentRecord,
 )
+from sdvmm.domain.unique_id import canonicalize_unique_id
 from sdvmm.domain.nexus_codes import (
     NEXUS_CONFIGURED,
     NEXUS_INVALID_AUTH_FAILURE,
@@ -55,6 +58,7 @@ REQUEST_FAILURE = "request_failure"
 RESPONSE_MISSING_VERSION = "response_missing_version"
 UNEXPECTED_PROVIDER_RESPONSE = "unexpected_provider_response"
 UNSUPPORTED_PROVIDER = "unsupported_provider"
+INCOMPLETE_MANUAL_SOURCE_ASSOCIATION = "incomplete_manual_source_association"
 
 
 class MetadataFetchError(ValueError):
@@ -327,8 +331,10 @@ def check_updates_for_inventory(
     fetcher: JsonMetadataFetcher | None = None,
     timeout_seconds: float = 8.0,
     nexus_api_key: str | None = None,
+    update_source_intent_overlay: UpdateSourceIntentOverlay | None = None,
 ) -> ModUpdateReport:
     active_fetcher = fetcher or UrllibJsonMetadataFetcher()
+    overlay_by_unique_id = _overlay_records_by_unique_id(update_source_intent_overlay)
 
     statuses: list[ModUpdateStatus] = []
     for mod in inventory.mods:
@@ -338,6 +344,9 @@ def check_updates_for_inventory(
                 fetcher=active_fetcher,
                 timeout_seconds=timeout_seconds,
                 nexus_api_key=nexus_api_key,
+                update_source_intent=overlay_by_unique_id.get(
+                    canonicalize_unique_id(mod.unique_id)
+                ),
             )
         )
 
@@ -471,8 +480,14 @@ def _check_single_mod(
     fetcher: JsonMetadataFetcher,
     timeout_seconds: float,
     nexus_api_key: str | None,
+    update_source_intent: UpdateSourceIntentRecord | None,
 ) -> ModUpdateStatus:
-    links, resolution_issues = resolve_remote_link_candidates(mod.update_keys)
+    manual_resolution = _resolve_manual_source_override(update_source_intent)
+    if manual_resolution is None:
+        links, resolution_issues = resolve_remote_link_candidates(mod.update_keys)
+    else:
+        links = manual_resolution.links
+        resolution_issues = manual_resolution.issues
     base_status = ModUpdateStatus(
         unique_id=mod.unique_id,
         name=mod.name,
@@ -817,6 +832,8 @@ def _diagnostic_code_for_resolution_issue(issue: LinkResolutionIssue):
         if issue.provider in {"local", "private"}:
             return LOCAL_PRIVATE_MOD
         return NO_PROVIDER_MAPPING
+    if issue.reason == INCOMPLETE_MANUAL_SOURCE_ASSOCIATION:
+        return METADATA_SOURCE_ISSUE
     return METADATA_SOURCE_ISSUE
 
 
@@ -825,6 +842,11 @@ def _message_for_resolution_issue(issue: LinkResolutionIssue) -> str:
         return "[local_private_mod] Mod declares a local/private update source; no public remote page is available."
     if issue.reason == UNSUPPORTED_PROVIDER:
         return f"[{UNSUPPORTED_PROVIDER}] No provider mapping for UpdateKey provider '{issue.provider}'."
+    if issue.reason == INCOMPLETE_MANUAL_SOURCE_ASSOCIATION:
+        return (
+            f"[{INCOMPLETE_MANUAL_SOURCE_ASSOCIATION}] "
+            "Saved manual source association is incomplete; provider and source key are required."
+        )
     return f"[{issue.reason}] {issue.message}"
 
 
@@ -835,3 +857,78 @@ def _diagnostic_code_for_failures(failures: list[ProviderFailure]):
     ):
         return REMOTE_METADATA_LOOKUP_FAILED
     return METADATA_SOURCE_ISSUE
+
+
+@dataclass(frozen=True, slots=True)
+class ManualSourceOverrideResolution:
+    links: tuple[RemoteModLink, ...]
+    issues: tuple[LinkResolutionIssue, ...]
+
+
+def _overlay_records_by_unique_id(
+    overlay: UpdateSourceIntentOverlay | None,
+) -> dict[str, UpdateSourceIntentRecord]:
+    if overlay is None:
+        return {}
+    return {
+        record.normalized_unique_id: record
+        for record in overlay.records
+    }
+
+
+def _resolve_manual_source_override(
+    update_source_intent: UpdateSourceIntentRecord | None,
+) -> ManualSourceOverrideResolution | None:
+    if update_source_intent is None or update_source_intent.intent_state != "manual_source_association":
+        return None
+
+    provider_name = (update_source_intent.manual_provider or "").strip().casefold()
+    source_key = (update_source_intent.manual_source_key or "").strip()
+    page_url = (update_source_intent.manual_source_page_url or "").strip()
+    if not provider_name or not source_key:
+        return ManualSourceOverrideResolution(
+            links=tuple(),
+            issues=(
+                LinkResolutionIssue(
+                    provider=provider_name or "<missing>",
+                    reason=INCOMPLETE_MANUAL_SOURCE_ASSOCIATION,
+                    message="Saved manual source association must include provider and source key.",
+                ),
+            ),
+        )
+
+    adapter = _PROVIDERS_BY_NAME.get(provider_name)
+    if adapter is None:
+        return ManualSourceOverrideResolution(
+            links=tuple(),
+            issues=(
+                LinkResolutionIssue(
+                    provider=provider_name,
+                    reason=UNSUPPORTED_PROVIDER,
+                    message=(
+                        f"Saved manual source association provider '{provider_name}' "
+                        "is not mapped to a supported metadata adapter."
+                    ),
+                ),
+            ),
+        )
+
+    link = adapter.build_link(source_key)
+    if link is None:
+        return ManualSourceOverrideResolution(
+            links=tuple(),
+            issues=(
+                LinkResolutionIssue(
+                    provider=provider_name,
+                    reason=MALFORMED_UPDATE_KEY,
+                    message=(
+                        f"Saved manual source association has unsupported {provider_name} "
+                        f"source key format: {source_key}"
+                    ),
+                ),
+            ),
+        )
+
+    if page_url and _looks_like_url(page_url):
+        link = replace(link, page_url=page_url)
+    return ManualSourceOverrideResolution(links=(link,), issues=tuple())

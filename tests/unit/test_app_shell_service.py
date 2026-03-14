@@ -2935,9 +2935,11 @@ def test_check_updates_passes_resolved_nexus_key_to_metadata_service(
         fetcher=None,
         timeout_seconds: float = 8.0,
         nexus_api_key: str | None = None,
+        update_source_intent_overlay: UpdateSourceIntentOverlay | None = None,
     ) -> ModUpdateReport:
         captured["inventory"] = incoming_inventory
         captured["nexus_api_key"] = nexus_api_key
+        captured["update_source_intent_overlay"] = update_source_intent_overlay
         return ModUpdateReport(statuses=tuple())
 
     monkeypatch = pytest.MonkeyPatch()
@@ -2959,6 +2961,46 @@ def test_check_updates_passes_resolved_nexus_key_to_metadata_service(
 
     assert captured["inventory"] is inventory
     assert captured["nexus_api_key"] == "persisted-nexus-key"
+    assert captured["update_source_intent_overlay"] == UpdateSourceIntentOverlay(records=tuple())
+
+
+def test_check_updates_passes_manual_source_association_overlay_to_metadata_service(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    inventory = _empty_inventory()
+    captured: dict[str, object] = {}
+    saved_overlay = service.set_update_source_intent(
+        "Sample.Override",
+        "manual_source_association",
+        manual_provider="nexus",
+        manual_source_key="12345",
+        manual_source_page_url="https://example.test/manual-page",
+    )
+
+    def _fake_check_updates_for_inventory(
+        incoming_inventory,
+        *,
+        fetcher=None,
+        timeout_seconds: float = 8.0,
+        nexus_api_key: str | None = None,
+        update_source_intent_overlay: UpdateSourceIntentOverlay | None = None,
+    ) -> ModUpdateReport:
+        captured["inventory"] = incoming_inventory
+        captured["nexus_api_key"] = nexus_api_key
+        captured["update_source_intent_overlay"] = update_source_intent_overlay
+        return ModUpdateReport(statuses=tuple())
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(shell_service_module, "check_updates_for_inventory", _fake_check_updates_for_inventory)
+    try:
+        _ = service.check_updates(inventory)
+    finally:
+        monkeypatch.undo()
+
+    assert captured["inventory"] is inventory
+    assert captured["nexus_api_key"] is None
+    assert captured["update_source_intent_overlay"] == saved_overlay
 
 
 def test_search_mod_discovery_delegates_to_discovery_service(tmp_path: Path) -> None:

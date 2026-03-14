@@ -5,7 +5,12 @@ from typing import Mapping
 
 import pytest
 
-from sdvmm.domain.models import InstalledMod, ModsInventory
+from sdvmm.domain.models import (
+    InstalledMod,
+    ModsInventory,
+    UpdateSourceIntentOverlay,
+    UpdateSourceIntentRecord,
+)
 from sdvmm.domain.update_codes import (
     LOCAL_PRIVATE_MOD,
     METADATA_SOURCE_ISSUE,
@@ -287,6 +292,143 @@ def test_unknown_provider_mapping_produces_distinct_diagnostic_code() -> None:
     assert status.update_source_diagnostic == NO_PROVIDER_MAPPING
     assert "[unsupported_provider]" in (status.message or "")
     assert "CustomProvider".casefold() in (status.message or "").casefold()
+
+
+def test_manual_source_association_override_uses_supported_provider_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(NEXUS_API_KEY_ENV, raising=False)
+
+    mod = _mod(unique_id="Sample.Override", version="1.0.0", update_keys=("GitHub:owner/repo",))
+    inventory = _inventory((mod,))
+    fetcher = StubFetcher(
+        payloads={
+            "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json": {
+                "version": "1.2.0",
+                "url": "https://www.nexusmods.com/stardewvalley/mods/12345",
+            }
+        }
+    )
+    overlay = UpdateSourceIntentOverlay(
+        records=(
+            UpdateSourceIntentRecord(
+                unique_id="Sample.Override",
+                normalized_unique_id="sample.override",
+                intent_state="manual_source_association",
+                manual_provider="nexus",
+                manual_source_key="12345",
+                manual_source_page_url="https://example.test/manual-page",
+            ),
+        )
+    )
+
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=fetcher,
+        nexus_api_key="test-api-key",
+        update_source_intent_overlay=overlay,
+    )
+
+    status = report.statuses[0]
+    assert status.state == "update_available"
+    assert status.remote_link is not None
+    assert status.remote_link.provider == "nexus"
+    assert status.remote_link.key == "stardewvalley:12345"
+    assert fetcher.calls == [
+        (
+            "https://api.nexusmods.com/v1/games/stardewvalley/mods/12345.json",
+            {"apikey": "test-api-key"},
+        )
+    ]
+
+
+def test_no_overlay_preserves_manifest_derived_update_resolution() -> None:
+    mod = _mod(
+        unique_id="Sample.ManifestOnly",
+        version="2.5.0",
+        update_keys=("GitHub:owner/repo",),
+    )
+    inventory = _inventory((mod,))
+    fetcher = StubFetcher(
+        payloads={
+            "https://api.github.com/repos/owner/repo/releases/latest": {
+                "tag_name": "v2.5.0"
+            }
+        }
+    )
+
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=fetcher,
+        nexus_api_key="test-api-key",
+    )
+
+    status = report.statuses[0]
+    assert status.state == "up_to_date"
+    assert status.remote_link is not None
+    assert status.remote_link.provider == "github"
+    assert fetcher.calls == [
+        (
+            "https://api.github.com/repos/owner/repo/releases/latest",
+            {},
+        )
+    ]
+
+
+def test_unsupported_manual_source_provider_produces_typed_metadata_issue() -> None:
+    mod = _mod(unique_id="Sample.Override", version="1.0.0", update_keys=("GitHub:owner/repo",))
+    inventory = _inventory((mod,))
+    overlay = UpdateSourceIntentOverlay(
+        records=(
+            UpdateSourceIntentRecord(
+                unique_id="Sample.Override",
+                normalized_unique_id="sample.override",
+                intent_state="manual_source_association",
+                manual_provider="unsupported-provider",
+                manual_source_key="abc123",
+            ),
+        )
+    )
+
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=StubFetcher(),
+        update_source_intent_overlay=overlay,
+    )
+
+    status = report.statuses[0]
+    assert status.state == "metadata_unavailable"
+    assert status.update_source_diagnostic == NO_PROVIDER_MAPPING
+    assert status.remote_link is None
+    assert "[unsupported_provider]" in (status.message or "")
+
+
+def test_incomplete_manual_source_association_degrades_predictably_without_crashing() -> None:
+    mod = _mod(unique_id="Sample.Override", version="1.0.0", update_keys=("GitHub:owner/repo",))
+    inventory = _inventory((mod,))
+    overlay = UpdateSourceIntentOverlay(
+        records=(
+            UpdateSourceIntentRecord(
+                unique_id="Sample.Override",
+                normalized_unique_id="sample.override",
+                intent_state="manual_source_association",
+                manual_provider="nexus",
+                manual_source_key=None,
+            ),
+        )
+    )
+
+    report = check_updates_for_inventory(
+        inventory,
+        fetcher=StubFetcher(),
+        update_source_intent_overlay=overlay,
+    )
+
+    status = report.statuses[0]
+    assert status.state == "metadata_unavailable"
+    assert status.update_source_diagnostic == METADATA_SOURCE_ISSUE
+    assert status.remote_link is None
+    assert "[incomplete_manual_source_association]" in (status.message or "")
 
 
 def test_provider_fallback_uses_nexus_when_github_fails(

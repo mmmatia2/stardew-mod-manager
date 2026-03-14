@@ -874,10 +874,12 @@ class AppShellService:
             nexus_api_key_text=nexus_api_key_text,
             existing_config=existing_config,
         )
+        update_source_intent_overlay = self.load_update_source_intent_overlay()
         try:
             return check_updates_for_inventory(
                 inventory,
                 nexus_api_key=nexus_api_key,
+                update_source_intent_overlay=update_source_intent_overlay,
             )
         except OSError as exc:
             raise AppShellError(f"Could not check remote metadata: {exc}") from exc
