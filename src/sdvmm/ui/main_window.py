@@ -227,6 +227,13 @@ class MainWindow(QMainWindow):
             "inventory_update_guidance_label"
         )
         self._inventory_update_guidance_label.setWordWrap(True)
+        self._inventory_blocked_detail_label = QLabel("")
+        self._inventory_blocked_detail_label.setObjectName(
+            "inventory_update_blocked_detail_label"
+        )
+        self._inventory_blocked_detail_label.setWordWrap(True)
+        self._inventory_blocked_detail_label.setVisible(False)
+        _set_auxiliary_label_style(self._inventory_blocked_detail_label)
         self._open_remote_page_button = QPushButton("Open remote page")
         self._open_remote_page_button.setObjectName("inventory_open_remote_page_button")
         self._open_remote_page_button.setEnabled(False)
@@ -664,6 +671,7 @@ class MainWindow(QMainWindow):
         inventory_layout.addWidget(inventory_controls_tabs)
         inventory_layout.addLayout(inventory_filter_row)
         inventory_layout.addWidget(self._inventory_update_guidance_label)
+        inventory_layout.addWidget(self._inventory_blocked_detail_label)
         inventory_layout.addWidget(flow_hint_label)
         inventory_layout.addWidget(self._mods_table, 1)
         workspace_splitter.addWidget(inventory_group)
@@ -2856,8 +2864,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_selected_mod_update_guidance(self) -> None:
         row = self._mods_table.currentRow()
-        if row < 0 or self._mods_table.isRowHidden(row):
+        has_selected_items = bool(self._mods_table.selectedItems())
+        if row < 0 or self._mods_table.isRowHidden(row) or not has_selected_items:
             message = "Select an installed mod row to see update guidance."
+            self._set_inventory_blocked_detail_text(None)
             self._set_open_remote_page_state(
                 enabled=False,
                 tooltip="Select an actionable mod row to open its remote page.",
@@ -2870,6 +2880,7 @@ class MainWindow(QMainWindow):
         status_item = self._mods_table.item(row, 4)
         if name_item is None:
             message = "Select an installed mod row to see update guidance."
+            self._set_inventory_blocked_detail_text(None)
             self._set_open_remote_page_state(
                 enabled=False,
                 tooltip="Select an actionable mod row to open its remote page.",
@@ -2889,6 +2900,7 @@ class MainWindow(QMainWindow):
                 f"{mod_name}: run Check updates to evaluate update actionability. "
                 "Open remote page stays disabled until an actionable row is selected."
             )
+            self._set_inventory_blocked_detail_text(None)
             self._set_open_remote_page_state(
                 enabled=False,
                 tooltip="Run Check updates and select an actionable row first.",
@@ -2898,6 +2910,7 @@ class MainWindow(QMainWindow):
                 f"{mod_name}: update available. "
                 "Next step: use Open remote page for this selected row."
             )
+            self._set_inventory_blocked_detail_text(None)
             self._set_open_remote_page_state(
                 enabled=True,
                 tooltip=f"Open remote page for selected mod: {mod_name}.",
@@ -2907,12 +2920,19 @@ class MainWindow(QMainWindow):
                 f"{mod_name}: {blocked_reason.strip()} "
                 "Open remote page is unavailable for this row."
             )
+            self._set_inventory_blocked_detail_text(
+                _derive_update_source_diagnostics_text(
+                    status=status,
+                    blocked_reason=blocked_reason,
+                )
+            )
             self._set_open_remote_page_state(
                 enabled=False,
                 tooltip=f"Remote-page action unavailable: {blocked_reason.strip()}",
             )
         else:
             message = f"{mod_name}: no update action is currently available."
+            self._set_inventory_blocked_detail_text(None)
             self._set_open_remote_page_state(
                 enabled=False,
                 tooltip="Remote-page action is unavailable for the selected row.",
@@ -2920,6 +2940,13 @@ class MainWindow(QMainWindow):
 
         self._inventory_update_guidance_label.setText(message)
         self._inventory_update_guidance_label.setToolTip(message)
+
+    def _set_inventory_blocked_detail_text(self, text: str | None) -> None:
+        has_text = bool(text and text.strip())
+        blocked_text = text.strip() if has_text and text is not None else ""
+        self._inventory_blocked_detail_label.setText(blocked_text)
+        self._inventory_blocked_detail_label.setToolTip(blocked_text)
+        self._inventory_blocked_detail_label.setVisible(has_text)
 
     def _set_open_remote_page_state(self, *, enabled: bool, tooltip: str) -> None:
         self._open_remote_page_button.setEnabled(enabled)
@@ -3423,6 +3450,47 @@ def _update_status_actionability(status: ModUpdateStatus) -> tuple[bool, str]:
     if status.state == "metadata_unavailable":
         return False, status.message or "Metadata unavailable for this mod."
     return False, status.message or f"State '{status.state}' is not actionable."
+
+
+def _derive_update_source_diagnostics_text(
+    *,
+    status: ModUpdateStatus | None,
+    blocked_reason: object,
+) -> str | None:
+    reason_text = blocked_reason.strip() if isinstance(blocked_reason, str) else ""
+    lowered_reason = reason_text.casefold()
+
+    if (
+        "unsupported update key" in lowered_reason
+        or "update key format" in lowered_reason
+    ):
+        return "Update source diagnostics: unsupported update key format."
+    if "no provider mapping" in lowered_reason:
+        return "Update source diagnostics: no provider mapping."
+    if (
+        "local/private" in lowered_reason
+        or "local mod" in lowered_reason
+        or "private mod" in lowered_reason
+    ):
+        return "Update source diagnostics: local/private mod."
+    if (
+        "no remote link" in lowered_reason
+        or "missing remote link" in lowered_reason
+    ):
+        return "Update source diagnostics: missing remote link."
+    if (
+        "metadata unavailable" in lowered_reason
+        or "remote metadata unavailable" in lowered_reason
+    ):
+        return "Update source diagnostics: remote metadata unavailable."
+
+    if status is None:
+        return None
+    if status.state == "no_remote_link":
+        return "Update source diagnostics: missing remote link."
+    if status.state == "metadata_unavailable":
+        return "Update source diagnostics: remote metadata unavailable."
+    return None
 
 
 def _build_plan_review_summary_text(

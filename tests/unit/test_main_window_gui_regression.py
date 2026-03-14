@@ -52,6 +52,7 @@ from sdvmm.domain.models import SandboxInstallPlan
 from sdvmm.domain.models import SandboxInstallPlanEntry
 from sdvmm.ui.main_window import MainWindow
 from sdvmm.ui.main_window import _ROLE_DISCOVERY_INDEX
+from sdvmm.ui.main_window import _ROLE_UPDATE_BLOCK_REASON
 
 
 @pytest.fixture
@@ -375,13 +376,19 @@ def test_main_window_inventory_selected_row_update_guidance_line_exists_and_defa
     main_window: MainWindow,
 ) -> None:
     guidance_label = main_window.findChild(QLabel, "inventory_update_guidance_label")
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
     open_remote_button = main_window.findChild(
         QPushButton, "inventory_open_remote_page_button"
     )
 
     assert guidance_label is not None
+    assert blocked_detail_label is not None
     assert open_remote_button is not None
     assert guidance_label.text() == "Select an installed mod row to see update guidance."
+    assert blocked_detail_label.text() == ""
+    assert blocked_detail_label.isVisible() is False
     assert open_remote_button.isEnabled() is False
 
 
@@ -427,6 +434,9 @@ def test_main_window_inventory_selected_row_guidance_shows_blocked_reason(
     qapp.processEvents()
 
     guidance_text = main_window._inventory_update_guidance_label.text()
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
     open_remote_button = main_window.findChild(
         QPushButton, "inventory_open_remote_page_button"
     )
@@ -434,9 +444,148 @@ def test_main_window_inventory_selected_row_guidance_shows_blocked_reason(
         guidance_text
         == "Beta Mod: No remote link available. Open remote page is unavailable for this row."
     )
+    assert blocked_detail_label is not None
+    assert blocked_detail_label.isVisible() is True
+    assert blocked_detail_label.text() == "Update source diagnostics: missing remote link."
     assert open_remote_button is not None
     assert open_remote_button.isEnabled() is False
     assert "No remote link available." in open_remote_button.toolTip()
+
+
+def test_main_window_inventory_diagnostics_hides_when_blocked_reason_is_generic(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    blocked_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    assert blocked_row >= 0
+    beta_item = main_window._mods_table.item(blocked_row, 0)
+    status_item = main_window._mods_table.item(blocked_row, 4)
+    assert beta_item is not None
+    assert status_item is not None
+    status_item.setText("blocked_custom")
+    beta_item.setData(_ROLE_UPDATE_BLOCK_REASON, "Temporarily blocked.")
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    assert (
+        main_window._inventory_update_guidance_label.text()
+        == "Alpha Mod: Temporarily blocked. Open remote page is unavailable for this row."
+    )
+    assert blocked_detail_label.text() == ""
+    assert blocked_detail_label.isVisible() is False
+
+
+def test_main_window_inventory_diagnostics_shows_update_key_issue_category(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    beta_item = main_window._mods_table.item(blocked_row, 0)
+    assert beta_item is not None
+    beta_item.setData(
+        _ROLE_UPDATE_BLOCK_REASON,
+        "Unsupported update key format: custom://alpha",
+    )
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    assert blocked_detail_label.isVisible() is True
+    assert (
+        blocked_detail_label.text()
+        == "Update source diagnostics: unsupported update key format."
+    )
+
+
+def test_main_window_inventory_diagnostics_clears_for_actionable_selection(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    actionable_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    assert blocked_row >= 0
+    assert actionable_row >= 0
+
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+    assert blocked_detail_label.isVisible() is True
+
+    main_window._mods_table.setCurrentCell(actionable_row, 0)
+    qapp.processEvents()
+    assert blocked_detail_label.text() == ""
+    assert blocked_detail_label.isVisible() is False
+
+
+def test_main_window_inventory_diagnostics_clears_for_not_checked_selection(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    not_checked_row = _find_mod_row(main_window._mods_table, "Gamma Mod")
+    assert not_checked_row >= 0
+    main_window._mods_table.setCurrentCell(not_checked_row, 0)
+    qapp.processEvents()
+
+    assert blocked_detail_label.text() == ""
+    assert blocked_detail_label.isVisible() is False
+
+
+def test_main_window_inventory_diagnostics_clears_when_no_row_selected(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+    assert blocked_detail_label.isVisible() is True
+
+    main_window._mods_table.clearSelection()
+    main_window._mods_table.setCurrentCell(-1, -1)
+    qapp.processEvents()
+
+    assert blocked_detail_label.text() == ""
+    assert blocked_detail_label.isVisible() is False
 
 
 def test_main_window_inventory_selected_row_guidance_shows_not_checked_prompt(
