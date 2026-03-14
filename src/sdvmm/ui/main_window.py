@@ -480,6 +480,19 @@ class MainWindow(QMainWindow):
         self._recovery_output_box.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        self._view_shared_operational_detail_button = QPushButton("View Operational Detail")
+        self._view_shared_operational_detail_button.setObjectName(
+            "plan_install_view_shared_details_button"
+        )
+        _set_secondary_button_style(self._view_shared_operational_detail_button)
+        self._show_local_plan_output_toggle = QCheckBox("Show local plan output")
+        self._show_local_plan_output_toggle.setObjectName(
+            "plan_install_show_local_output_toggle"
+        )
+        self._show_local_recovery_output_toggle = QCheckBox("Show local recovery output")
+        self._show_local_recovery_output_toggle.setObjectName(
+            "recovery_show_local_output_toggle"
+        )
 
         self._status_strip_group = GlobalStatusStrip()
         self._status_strip_label = self._status_strip_group.current_status_label
@@ -537,6 +550,15 @@ class MainWindow(QMainWindow):
             self._on_set_selected_mod_manual_source_intent
         )
         self._clear_source_intent_button.clicked.connect(self._on_clear_selected_mod_source_intent)
+        self._view_shared_operational_detail_button.clicked.connect(
+            self._on_view_shared_operational_detail
+        )
+        self._show_local_plan_output_toggle.toggled.connect(
+            self._on_toggle_local_plan_output
+        )
+        self._show_local_recovery_output_toggle.toggled.connect(
+            self._on_toggle_local_recovery_output
+        )
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
         self._archive_filter_input.textChanged.connect(self._apply_archive_filter)
@@ -940,7 +962,33 @@ class MainWindow(QMainWindow):
             plan_facts_layout.addWidget(self._plan_facts_label)
             plan_tab_layout.insertWidget(5, plan_facts_group)
 
-            plan_install_output_group = QGroupBox("Plan & Install Output")
+            detail_access_group = QGroupBox("Detail Access")
+            detail_access_group.setObjectName("plan_install_detail_access_group")
+            detail_access_group.setFlat(True)
+            detail_access_group.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+            )
+            detail_access_layout = QVBoxLayout(detail_access_group)
+            detail_access_layout.setContentsMargins(8, 6, 8, 6)
+            detail_access_layout.setSpacing(4)
+            detail_access_label = QLabel(
+                "Use the summary, explanation, facts, and status strip for primary decisions. "
+                "Open Operational Detail below when you need the full narrative output."
+            )
+            detail_access_label.setObjectName("plan_install_detail_access_label")
+            detail_access_label.setWordWrap(True)
+            _set_auxiliary_label_style(detail_access_label)
+            detail_access_layout.addWidget(detail_access_label)
+            detail_access_actions = QHBoxLayout()
+            detail_access_actions.setSpacing(6)
+            detail_access_actions.addWidget(self._view_shared_operational_detail_button)
+            detail_access_actions.addWidget(self._show_local_plan_output_toggle)
+            detail_access_actions.addWidget(self._show_local_recovery_output_toggle)
+            detail_access_actions.addStretch(1)
+            detail_access_layout.addLayout(detail_access_actions)
+            plan_tab_layout.insertWidget(6, detail_access_group)
+
+            plan_install_output_group = QGroupBox("Secondary Local Plan Output")
             plan_install_output_group.setObjectName("plan_install_output_group")
             plan_install_output_group.setFlat(True)
             plan_install_output_group.setSizePolicy(
@@ -950,7 +998,8 @@ class MainWindow(QMainWindow):
             plan_install_output_layout.setContentsMargins(8, 6, 8, 6)
             plan_install_output_layout.setSpacing(6)
             plan_install_output_layout.addWidget(self._plan_install_output_box)
-            plan_tab_layout.insertWidget(6, plan_install_output_group)
+            plan_install_output_group.setVisible(False)
+            self._plan_install_output_group = plan_install_output_group
 
             recovery_group = QGroupBox("Recovery")
             recovery_group.setObjectName("recovery_inspection_group")
@@ -982,7 +1031,9 @@ class MainWindow(QMainWindow):
             recovery_layout.addWidget(self._recovery_selection_summary_label)
             plan_tab_layout.insertWidget(7, recovery_group)
 
-            recovery_output_group = QGroupBox("Recovery Output")
+            plan_tab_layout.insertWidget(8, plan_install_output_group)
+
+            recovery_output_group = QGroupBox("Secondary Local Recovery Output")
             recovery_output_group.setObjectName("recovery_output_group")
             recovery_output_group.setFlat(True)
             recovery_output_group.setSizePolicy(
@@ -992,7 +1043,9 @@ class MainWindow(QMainWindow):
             recovery_output_layout.setContentsMargins(8, 6, 8, 6)
             recovery_output_layout.setSpacing(6)
             recovery_output_layout.addWidget(self._recovery_output_box)
-            plan_tab_layout.insertWidget(8, recovery_output_group)
+            recovery_output_group.setVisible(False)
+            self._recovery_output_group = recovery_output_group
+            plan_tab_layout.insertWidget(9, recovery_output_group)
         context_tabs.addTab(plan_tab, "Plan & Install")
         self._plan_install_tab = plan_tab
 
@@ -2743,11 +2796,7 @@ class MainWindow(QMainWindow):
 
     def _set_recovery_output_text(self, text: str) -> None:
         self._recovery_output_box.setPlainText(text)
-        blocking_issue, next_step = _summarize_details_text(text)
-        self._blocking_issues_strip_label.setText(blocking_issue)
-        self._next_step_strip_label.setText(next_step)
-        self._blocking_issues_strip_label.setToolTip(blocking_issue)
-        self._next_step_strip_label.setToolTip(next_step)
+        self._set_details_text(text)
 
     def _set_intake_output_text(self, text: str) -> None:
         self._intake_output_box.setPlainText(text)
@@ -2759,11 +2808,22 @@ class MainWindow(QMainWindow):
 
     def _set_plan_install_output_text(self, text: str) -> None:
         self._plan_install_output_box.setPlainText(text)
-        blocking_issue, next_step = _summarize_details_text(text)
-        self._blocking_issues_strip_label.setText(blocking_issue)
-        self._next_step_strip_label.setText(next_step)
-        self._blocking_issues_strip_label.setToolTip(blocking_issue)
-        self._next_step_strip_label.setToolTip(next_step)
+        self._set_details_text(text)
+
+    def _on_view_shared_operational_detail(self) -> None:
+        self._secondary_tabs.setCurrentIndex(self._summary_tab_index)
+        if not self._details_toggle.isChecked():
+            self._details_toggle.setChecked(True)
+        else:
+            self._on_secondary_tab_changed(self._summary_tab_index)
+
+    def _on_toggle_local_plan_output(self, checked: bool) -> None:
+        self._plan_install_output_group.setVisible(checked)
+        self._refresh_responsive_panel_bounds()
+
+    def _on_toggle_local_recovery_output(self, checked: bool) -> None:
+        self._recovery_output_group.setVisible(checked)
+        self._refresh_responsive_panel_bounds()
 
     def _set_plan_review_summary_text(self, text: str) -> None:
         self._plan_review_summary_label.setText(text)

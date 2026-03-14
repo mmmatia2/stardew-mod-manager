@@ -1354,6 +1354,7 @@ def test_main_window_plan_install_surface_has_expected_structure(
     execute_group = main_window.findChild(QGroupBox, "plan_install_execute_group")
     plan_review_summary_group = main_window.findChild(QGroupBox, "plan_install_review_summary_group")
     plan_facts_group = main_window.findChild(QGroupBox, "plan_install_facts_group")
+    detail_access_group = main_window.findChild(QGroupBox, "plan_install_detail_access_group")
     plan_output_group = main_window.findChild(QGroupBox, "plan_install_output_group")
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
     recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
@@ -1369,6 +1370,7 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert execute_group is not None
     assert plan_review_summary_group is not None
     assert plan_facts_group is not None
+    assert detail_access_group is not None
     assert plan_output_group is not None
     assert recovery_group is not None
     assert recovery_output_group is not None
@@ -1387,10 +1389,11 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert plan_layout.indexOf(staged_package_group) < plan_layout.indexOf(execute_group)
     assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_review_summary_group)
     assert plan_layout.indexOf(plan_review_summary_group) < plan_layout.indexOf(plan_facts_group)
-    assert plan_layout.indexOf(plan_facts_group) < plan_layout.indexOf(plan_output_group)
-    assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_output_group)
-    assert plan_layout.indexOf(plan_output_group) < plan_layout.indexOf(recovery_group)
+    assert plan_layout.indexOf(plan_facts_group) < plan_layout.indexOf(detail_access_group)
+    assert plan_layout.indexOf(detail_access_group) < plan_layout.indexOf(recovery_group)
+    assert plan_layout.indexOf(recovery_group) < plan_layout.indexOf(plan_output_group)
     assert plan_layout.indexOf(recovery_group) < plan_layout.indexOf(recovery_output_group)
+    assert plan_layout.indexOf(plan_output_group) < plan_layout.indexOf(recovery_output_group)
 
 
 def test_main_window_plan_install_tab_hosts_scroll_content_for_constrained_height(
@@ -1491,6 +1494,17 @@ def test_main_window_plan_install_surface_key_controls_exist(
         QLabel, "plan_install_review_explanation_label"
     )
     plan_facts_label = main_window.findChild(QLabel, "plan_install_facts_label")
+    detail_access_group = main_window.findChild(QGroupBox, "plan_install_detail_access_group")
+    detail_access_label = main_window.findChild(QLabel, "plan_install_detail_access_label")
+    view_shared_details_button = main_window.findChild(
+        QPushButton, "plan_install_view_shared_details_button"
+    )
+    show_local_plan_output_toggle = main_window.findChild(
+        QCheckBox, "plan_install_show_local_output_toggle"
+    )
+    show_local_recovery_output_toggle = main_window.findChild(
+        QCheckBox, "recovery_show_local_output_toggle"
+    )
     plan_output_box = main_window.findChild(QPlainTextEdit, "plan_install_output_box")
     plan_button = main_window.findChild(QPushButton, "plan_install_plan_button")
     run_button = main_window.findChild(QPushButton, "plan_install_run_button")
@@ -1503,6 +1517,11 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert plan_review_summary_label is not None
     assert plan_review_explanation_label is not None
     assert plan_facts_label is not None
+    assert detail_access_group is not None
+    assert detail_access_label is not None
+    assert view_shared_details_button is not None
+    assert show_local_plan_output_toggle is not None
+    assert show_local_recovery_output_toggle is not None
     assert plan_output_box is not None
     assert plan_button is not None
     assert run_button is not None
@@ -1514,12 +1533,18 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert main_window._plan_review_summary_label is plan_review_summary_label
     assert main_window._plan_review_explanation_label is plan_review_explanation_label
     assert main_window._plan_facts_label is plan_facts_label
+    assert main_window._view_shared_operational_detail_button is view_shared_details_button
+    assert main_window._show_local_plan_output_toggle is show_local_plan_output_toggle
+    assert main_window._show_local_recovery_output_toggle is show_local_recovery_output_toggle
     assert main_window._plan_install_output_box is plan_output_box
     assert staged_package_label.isReadOnly() is True
     assert (
         plan_review_explanation_label.text()
         == "Plan detail: no plan selected."
     )
+    assert "Operational Detail below" in detail_access_label.text()
+    assert show_local_plan_output_toggle.isChecked() is False
+    assert show_local_recovery_output_toggle.isChecked() is False
     assert plan_facts_label.text() == (
         "Entries: -\n"
         "Replace existing: -\n"
@@ -1529,14 +1554,72 @@ def test_main_window_plan_install_surface_key_controls_exist(
     )
 
 
+def test_main_window_plan_install_local_outputs_start_hidden_and_can_be_revealed(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    plan_output_group = main_window.findChild(QGroupBox, "plan_install_output_group")
+    recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
+    show_local_plan_output_toggle = main_window.findChild(
+        QCheckBox, "plan_install_show_local_output_toggle"
+    )
+    show_local_recovery_output_toggle = main_window.findChild(
+        QCheckBox, "recovery_show_local_output_toggle"
+    )
+
+    assert plan_output_group is not None
+    assert recovery_output_group is not None
+    assert show_local_plan_output_toggle is not None
+    assert show_local_recovery_output_toggle is not None
+    assert plan_output_group.isHidden() is True
+    assert recovery_output_group.isHidden() is True
+
+    show_local_plan_output_toggle.setChecked(True)
+    show_local_recovery_output_toggle.setChecked(True)
+    qapp.processEvents()
+
+    assert plan_output_group.isHidden() is False
+    assert recovery_output_group.isHidden() is False
+
+    show_local_plan_output_toggle.setChecked(False)
+    show_local_recovery_output_toggle.setChecked(False)
+    qapp.processEvents()
+
+    assert plan_output_group.isHidden() is True
+    assert recovery_output_group.isHidden() is True
+
+
+def test_main_window_plan_install_view_shared_operational_detail_opens_bottom_details(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    view_shared_details_button = main_window.findChild(
+        QPushButton, "plan_install_view_shared_details_button"
+    )
+    details_group = main_window.findChild(QGroupBox, "bottom_summary_details_group")
+
+    assert view_shared_details_button is not None
+    assert details_group is not None
+    assert details_group.isHidden() is True
+
+    view_shared_details_button.click()
+    qapp.processEvents()
+
+    assert main_window._secondary_tabs.currentIndex() == main_window._summary_tab_index
+    assert main_window._details_toggle.isChecked() is True
+    assert details_group.isHidden() is False
+
+
 def test_main_window_plan_and_recovery_local_output_behavior_remains_intact(
     main_window: MainWindow,
 ) -> None:
     main_window._set_plan_install_output_text("Plan output narrative")
+    assert main_window._findings_box.toPlainText() == "Plan output narrative"
     main_window._set_recovery_output_text("Recovery output narrative")
 
     assert main_window._plan_install_output_box.toPlainText() == "Plan output narrative"
     assert main_window._recovery_output_box.toPlainText() == "Recovery output narrative"
+    assert main_window._findings_box.toPlainText() == "Recovery output narrative"
 
 
 def test_main_window_packages_intake_local_output_box_exists(main_window: MainWindow) -> None:
