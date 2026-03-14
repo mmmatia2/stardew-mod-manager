@@ -123,6 +123,8 @@ _ROLE_DISCOVERY_INDEX = int(Qt.ItemDataRole.UserRole) + 3
 _ROLE_DISCOVERY_LINK = int(Qt.ItemDataRole.UserRole) + 4
 _ROLE_MOD_FOLDER_PATH = int(Qt.ItemDataRole.UserRole) + 5
 _ROLE_ARCHIVE_INDEX = int(Qt.ItemDataRole.UserRole) + 6
+_ROLE_UPDATE_ACTIONABLE = int(Qt.ItemDataRole.UserRole) + 7
+_ROLE_UPDATE_BLOCK_REASON = int(Qt.ItemDataRole.UserRole) + 8
 
 
 class MainWindow(QMainWindow):
@@ -183,6 +185,13 @@ class MainWindow(QMainWindow):
         self._mods_filter_input.setPlaceholderText("Filter installed mods")
         self._mods_filter_input.setClearButtonEnabled(True)
         self._mods_filter_input.setMinimumWidth(180)
+        self._mods_update_actionability_filter_combo = QComboBox()
+        self._mods_update_actionability_filter_combo.setObjectName(
+            "inventory_update_actionability_filter_combo"
+        )
+        self._mods_update_actionability_filter_combo.addItem("all", "all")
+        self._mods_update_actionability_filter_combo.addItem("actionable", "actionable")
+        self._mods_update_actionability_filter_combo.addItem("blocked", "blocked")
         self._discovery_filter_input = QLineEdit()
         self._discovery_filter_input.setObjectName("discovery_filter_input")
         self._discovery_filter_input.setPlaceholderText("Filter discovery results")
@@ -268,6 +277,7 @@ class MainWindow(QMainWindow):
             self._discovery_filter_input,
             self._intake_filter_input,
             self._archive_filter_input,
+            self._mods_update_actionability_filter_combo,
             self._nexus_api_key_input,
             self._scan_target_combo,
             self._install_target_combo,
@@ -426,6 +436,9 @@ class MainWindow(QMainWindow):
         self._discovery_query_input.returnPressed.connect(self._on_search_discovery)
         self._details_toggle.toggled.connect(self._on_toggle_details_panel)
         self._mods_filter_input.textChanged.connect(self._apply_mods_filter)
+        self._mods_update_actionability_filter_combo.currentIndexChanged.connect(
+            self._apply_mods_filter
+        )
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
         self._archive_filter_input.textChanged.connect(self._apply_archive_filter)
@@ -591,6 +604,8 @@ class MainWindow(QMainWindow):
         inventory_filter_row.setSpacing(6)
         inventory_filter_row.addWidget(QLabel("Filter"))
         inventory_filter_row.addWidget(self._mods_filter_input, 1)
+        inventory_filter_row.addWidget(QLabel("Updates"))
+        inventory_filter_row.addWidget(self._mods_update_actionability_filter_combo)
         inventory_filter_row.addWidget(self._mods_filter_stats_label)
 
         flow_hint_label = QLabel(
@@ -2368,11 +2383,18 @@ class MainWindow(QMainWindow):
             name_item.setData(_ROLE_REMOTE_LINK, "")
             name_item.setData(_ROLE_MOD_UPDATE_STATUS, None)
             name_item.setData(_ROLE_MOD_FOLDER_PATH, str(mod.folder_path))
+            name_item.setData(_ROLE_UPDATE_ACTIONABLE, False)
+            name_item.setData(
+                _ROLE_UPDATE_BLOCK_REASON,
+                "Run Check updates to evaluate update actionability.",
+            )
             self._mods_table.setItem(row, 0, name_item)
             self._mods_table.setItem(row, 1, QTableWidgetItem(mod.unique_id))
             self._mods_table.setItem(row, 2, QTableWidgetItem(mod.version))
             self._mods_table.setItem(row, 3, QTableWidgetItem("-"))
-            self._mods_table.setItem(row, 4, QTableWidgetItem("not_checked"))
+            status_item = QTableWidgetItem("not_checked")
+            status_item.setToolTip("Run Check updates to evaluate update actionability.")
+            self._mods_table.setItem(row, 4, status_item)
             self._mods_table.setItem(row, 5, QTableWidgetItem(mod.folder_path.name))
 
         self._mods_table.setSortingEnabled(was_sorting)
@@ -2408,18 +2430,32 @@ class MainWindow(QMainWindow):
             status = by_folder_text.get(folder_path_text)
             if status is None:
                 self._mods_table.setItem(row, 3, QTableWidgetItem("-"))
-                self._mods_table.setItem(row, 4, QTableWidgetItem("metadata_unavailable"))
+                status_item = QTableWidgetItem("metadata_unavailable")
+                reason = "Metadata unavailable for this mod in the latest update check."
+                status_item.setToolTip(reason)
+                self._mods_table.setItem(row, 4, status_item)
                 name_item.setData(_ROLE_MOD_UPDATE_STATUS, None)
                 name_item.setData(_ROLE_REMOTE_LINK, "")
+                name_item.setData(_ROLE_UPDATE_ACTIONABLE, False)
+                name_item.setData(_ROLE_UPDATE_BLOCK_REASON, reason)
                 continue
 
+            actionable, blocked_reason = _update_status_actionability(status)
             self._mods_table.setItem(row, 3, QTableWidgetItem(status.remote_version or "-"))
-            self._mods_table.setItem(row, 4, QTableWidgetItem(status.state))
+            status_item = QTableWidgetItem(status.state)
+            status_item.setToolTip(
+                blocked_reason
+                if not actionable
+                else "Actionable: update is available for this mod."
+            )
+            self._mods_table.setItem(row, 4, status_item)
             name_item.setData(_ROLE_MOD_UPDATE_STATUS, status)
             name_item.setData(
                 _ROLE_REMOTE_LINK,
                 status.remote_link.page_url if status.remote_link is not None else "",
             )
+            name_item.setData(_ROLE_UPDATE_ACTIONABLE, actionable)
+            name_item.setData(_ROLE_UPDATE_BLOCK_REASON, blocked_reason)
         self._mods_table.setSortingEnabled(was_sorting)
         self._apply_mods_filter()
 
@@ -2696,13 +2732,24 @@ class MainWindow(QMainWindow):
 
     def _apply_mods_filter(self, *_: object) -> None:
         filter_text = self._mods_filter_input.text()
+        actionability_filter = self._current_mods_update_actionability_filter()
         visible_count = 0
         for row in range(self._mods_table.rowCount()):
             row_values = []
             for col in range(self._mods_table.columnCount()):
                 item = self._mods_table.item(row, col)
                 row_values.append(item.text() if item is not None else "")
-            matches = row_matches_filter(row_values, filter_text)
+            matches_text = row_matches_filter(row_values, filter_text)
+            name_item = self._mods_table.item(row, 0)
+            is_actionable = bool(
+                name_item is not None and name_item.data(_ROLE_UPDATE_ACTIONABLE) is True
+            )
+            matches_actionability = True
+            if actionability_filter == "actionable":
+                matches_actionability = is_actionable
+            elif actionability_filter == "blocked":
+                matches_actionability = not is_actionable
+            matches = matches_text and matches_actionability
             self._mods_table.setRowHidden(row, not matches)
             if matches:
                 visible_count += 1
@@ -2711,6 +2758,12 @@ class MainWindow(QMainWindow):
             shown_count=visible_count,
             total_count=self._mods_table.rowCount(),
         )
+
+    def _current_mods_update_actionability_filter(self) -> str:
+        value = self._mods_update_actionability_filter_combo.currentData()
+        if isinstance(value, str):
+            return value
+        return "all"
 
     def _apply_discovery_filter(self, *_: object) -> None:
         filter_text = self._discovery_filter_input.text()
@@ -3198,6 +3251,18 @@ def _latest_recovery_outcome_summary(
         f"{latest_record.outcome_status} at {latest_record.timestamp} "
         f"(executed={latest_record.executed_entry_count})."
     )
+
+
+def _update_status_actionability(status: ModUpdateStatus) -> tuple[bool, str]:
+    if status.state == "update_available":
+        return True, ""
+    if status.state == "up_to_date":
+        return False, "Up to date; no update action required."
+    if status.state == "no_remote_link":
+        return False, status.message or "No remote link is available for this mod."
+    if status.state == "metadata_unavailable":
+        return False, status.message or "Metadata unavailable for this mod."
+    return False, status.message or f"State '{status.state}' is not actionable."
 
 
 def _build_install_recovery_inspection_text(

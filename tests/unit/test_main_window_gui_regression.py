@@ -36,10 +36,14 @@ from sdvmm.domain.discovery_codes import SMAPI_COMPATIBILITY_LIST_PROVIDER
 from sdvmm.domain.install_codes import INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
 from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.domain.models import DownloadsIntakeResult
+from sdvmm.domain.models import InstalledMod
 from sdvmm.domain.models import InstallOperationEntryRecord
 from sdvmm.domain.models import InstallOperationRecord
 from sdvmm.domain.models import ModDiscoveryEntry
 from sdvmm.domain.models import ModDiscoveryResult
+from sdvmm.domain.models import ModUpdateReport
+from sdvmm.domain.models import ModUpdateStatus
+from sdvmm.domain.models import ModsInventory
 from sdvmm.domain.models import PackageModEntry
 from sdvmm.domain.models import RecoveryExecutionRecord
 from sdvmm.domain.models import SandboxInstallPlan
@@ -350,6 +354,89 @@ def test_main_window_install_target_updates_context_archive_label_and_status(
     assert install_context_label.text().startswith("REAL game Mods:")
     assert install_archive_label.text() == "Archive path for real Game Mods destination"
     assert "REAL game Mods path" in status_label.text()
+
+
+def test_main_window_inventory_update_actionability_filter_exists_with_default_all(
+    main_window: MainWindow,
+) -> None:
+    action_filter = main_window.findChild(QComboBox, "inventory_update_actionability_filter_combo")
+
+    assert action_filter is not None
+    assert action_filter.count() == 3
+    assert action_filter.itemText(0) == "all"
+    assert action_filter.itemText(1) == "actionable"
+    assert action_filter.itemText(2) == "blocked"
+    assert action_filter.currentData() == "all"
+
+
+def test_main_window_inventory_update_actionability_filter_modes_show_expected_subsets(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    qapp.processEvents()
+
+    assert _visible_row_count(main_window._mods_table) == 3
+
+    main_window._mods_update_actionability_filter_combo.setCurrentText("actionable")
+    qapp.processEvents()
+    assert _visible_row_count(main_window._mods_table) == 1
+    assert _visible_mod_names(main_window._mods_table) == ("Alpha Mod",)
+
+    main_window._mods_update_actionability_filter_combo.setCurrentText("blocked")
+    qapp.processEvents()
+    assert _visible_row_count(main_window._mods_table) == 2
+    assert set(_visible_mod_names(main_window._mods_table)) == {"Beta Mod", "Gamma Mod"}
+
+
+def test_main_window_inventory_blocked_update_rows_show_non_empty_reason_tooltip(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    main_window._mods_update_actionability_filter_combo.setCurrentText("blocked")
+    qapp.processEvents()
+
+    for row in range(main_window._mods_table.rowCount()):
+        if main_window._mods_table.isRowHidden(row):
+            continue
+        status_item = main_window._mods_table.item(row, 4)
+        assert status_item is not None
+        assert status_item.toolTip().strip() != ""
+
+
+def test_main_window_inventory_search_filter_still_works_with_update_actionability_filter(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    qapp.processEvents()
+
+    main_window._mods_filter_input.setText("Alpha")
+    qapp.processEvents()
+    assert _visible_row_count(main_window._mods_table) == 1
+    assert _visible_mod_names(main_window._mods_table) == ("Alpha Mod",)
+
+    main_window._mods_update_actionability_filter_combo.setCurrentText("blocked")
+    qapp.processEvents()
+    assert _visible_row_count(main_window._mods_table) == 0
+
+    main_window._mods_filter_input.clear()
+    qapp.processEvents()
+    assert _visible_row_count(main_window._mods_table) == 2
+    assert set(_visible_mod_names(main_window._mods_table)) == {"Beta Mod", "Gamma Mod"}
 
 
 def test_main_window_sandbox_archive_autofill_only_when_empty(
@@ -2585,4 +2672,81 @@ def _visible_row_count(table: QTableWidget) -> int:
         1
         for row in range(table.rowCount())
         if not table.isRowHidden(row)
+    )
+
+
+def _visible_mod_names(table: QTableWidget) -> tuple[str, ...]:
+    names: list[str] = []
+    for row in range(table.rowCount()):
+        if table.isRowHidden(row):
+            continue
+        item = table.item(row, 0)
+        if item is not None:
+            names.append(item.text())
+    return tuple(names)
+
+
+def _inventory_for_update_actionability_tests() -> ModsInventory:
+    return ModsInventory(
+        mods=(
+            _installed_mod_for_update_ui(
+                name="Alpha Mod",
+                unique_id="Sample.Alpha",
+                folder_name="AlphaMod",
+            ),
+            _installed_mod_for_update_ui(
+                name="Beta Mod",
+                unique_id="Sample.Beta",
+                folder_name="BetaMod",
+            ),
+            _installed_mod_for_update_ui(
+                name="Gamma Mod",
+                unique_id="Sample.Gamma",
+                folder_name="GammaMod",
+            ),
+        ),
+        parse_warnings=tuple(),
+        duplicate_unique_ids=tuple(),
+        missing_required_dependencies=tuple(),
+        scan_entry_findings=tuple(),
+        ignored_entries=tuple(),
+    )
+
+
+def _update_report_for_update_actionability_tests() -> ModUpdateReport:
+    return ModUpdateReport(
+        statuses=(
+            ModUpdateStatus(
+                unique_id="Sample.Alpha",
+                name="Alpha Mod",
+                folder_path=Path(r"C:\Mods\AlphaMod"),
+                installed_version="1.0.0",
+                remote_version="1.1.0",
+                state="update_available",
+                remote_link=None,
+                message="Update available.",
+            ),
+            ModUpdateStatus(
+                unique_id="Sample.Beta",
+                name="Beta Mod",
+                folder_path=Path(r"C:\Mods\BetaMod"),
+                installed_version="1.0.0",
+                remote_version=None,
+                state="no_remote_link",
+                remote_link=None,
+                message="No remote link available.",
+            ),
+        )
+    )
+
+
+def _installed_mod_for_update_ui(*, name: str, unique_id: str, folder_name: str) -> InstalledMod:
+    folder_path = Path(r"C:\Mods") / folder_name
+    return InstalledMod(
+        unique_id=unique_id,
+        name=name,
+        version="1.0.0",
+        folder_path=folder_path,
+        manifest_path=folder_path / "manifest.json",
+        dependencies=tuple(),
     )
