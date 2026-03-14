@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QCheckBox
@@ -9,9 +8,7 @@ from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QPlainTextEdit
 from PySide6.QtWidgets import QScrollArea
 from PySide6.QtWidgets import QSizePolicy
-from PySide6.QtWidgets import QTabWidget
 from PySide6.QtWidgets import QVBoxLayout
-from PySide6.QtWidgets import QWidget
 
 
 class BottomDetailsRegion(QGroupBox):
@@ -27,25 +24,15 @@ class BottomDetailsRegion(QGroupBox):
         self.setFlat(True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
-        summary_tab = QWidget()
-        summary_tab.setObjectName("bottom_summary_tab")
-        summary_tab_layout = QVBoxLayout(summary_tab)
-        summary_tab_layout.setContentsMargins(6, 4, 6, 4)
-        summary_tab_layout.setSpacing(4)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
-        summary_header_label = QLabel("Shared narrative output")
-        summary_header_label.setObjectName("bottom_detail_identity_label")
-        _set_section_label_style(summary_header_label)
-        summary_tab_layout.addWidget(summary_header_label)
-
-        summary_help_label = QLabel(
-            "Use this shared area for the full narrative output of recent workflow actions. Make primary decisions in tab-local summaries and guidance above, then open detailed output here when you need deeper inspection."
-        )
-        summary_help_label.setObjectName("bottom_detail_help_label")
-        summary_help_label.setWordWrap(True)
-        _set_auxiliary_label_style(summary_help_label)
-        summary_tab_layout.addWidget(summary_help_label)
-        summary_tab_layout.addWidget(details_toggle)
+        detail_header_label = QLabel("Detailed output")
+        detail_header_label.setObjectName("bottom_detail_identity_label")
+        _set_section_label_style(detail_header_label)
+        layout.addWidget(detail_header_label)
+        layout.addWidget(details_toggle)
 
         details_group = QGroupBox("Detailed output")
         details_group.setObjectName("bottom_summary_details_group")
@@ -55,26 +42,21 @@ class BottomDetailsRegion(QGroupBox):
         details_layout.setContentsMargins(6, 4, 6, 4)
         details_layout.addWidget(findings_box)
         details_group.setVisible(False)
-        summary_tab_layout.addWidget(details_group, 1)
+        layout.addWidget(details_group, 1)
 
-        tabs = QTabWidget()
-        tabs.setObjectName("bottom_details_tabs")
-        tabs.setDocumentMode(True)
-        tabs.setUsesScrollButtons(True)
-        tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        summary_tab_index = tabs.addTab(summary_tab, "Narrative Output")
+        setup_group = QGroupBox("Setup")
+        setup_group.setObjectName("bottom_setup_group")
+        setup_group.setFlat(True)
+        setup_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        setup_layout = QVBoxLayout(setup_group)
+        setup_layout.setContentsMargins(6, 4, 6, 4)
+        setup_layout.setSpacing(4)
         setup_scroll.setObjectName("bottom_setup_tab")
-        setup_tab_index = tabs.addTab(setup_scroll, "Setup")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(4)
-        layout.addWidget(tabs)
+        setup_layout.addWidget(setup_scroll)
+        layout.addWidget(setup_group)
 
         self.details_group = details_group
-        self.tabs = tabs
-        self.summary_tab_index = summary_tab_index
-        self.setup_tab_index = setup_tab_index
+        self.setup_group = setup_group
 
 
 def _set_label_font_weight(label: QLabel, *, bold: bool = False) -> None:

@@ -459,49 +459,6 @@ class MainWindow(QMainWindow):
         self._package_inspection_result_box.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        self._intake_output_box = QPlainTextEdit()
-        self._intake_output_box.setObjectName("packages_intake_output_box")
-        self._intake_output_box.setReadOnly(True)
-        self._intake_output_box.setMinimumHeight(92)
-        self._intake_output_box.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self._plan_install_output_box = QPlainTextEdit()
-        self._plan_install_output_box.setObjectName("plan_install_output_box")
-        self._plan_install_output_box.setReadOnly(True)
-        self._plan_install_output_box.setMinimumHeight(72)
-        self._plan_install_output_box.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self._recovery_output_box = QPlainTextEdit()
-        self._recovery_output_box.setObjectName("recovery_local_output_box")
-        self._recovery_output_box.setReadOnly(True)
-        self._recovery_output_box.setMinimumHeight(72)
-        self._recovery_output_box.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self._view_shared_operational_detail_button = QPushButton("View Operational Detail")
-        self._view_shared_operational_detail_button.setObjectName(
-            "plan_install_view_shared_details_button"
-        )
-        _set_secondary_button_style(self._view_shared_operational_detail_button)
-        self._show_local_plan_output_toggle = QCheckBox("Show local plan output")
-        self._show_local_plan_output_toggle.setObjectName(
-            "plan_install_show_local_output_toggle"
-        )
-        self._show_local_recovery_output_toggle = QCheckBox("Show local recovery output")
-        self._show_local_recovery_output_toggle.setObjectName(
-            "recovery_show_local_output_toggle"
-        )
-        self._view_intake_operational_detail_button = QPushButton("View Operational Detail")
-        self._view_intake_operational_detail_button.setObjectName(
-            "packages_intake_view_shared_details_button"
-        )
-        _set_secondary_button_style(self._view_intake_operational_detail_button)
-        self._show_local_intake_output_toggle = QCheckBox("Show local intake output")
-        self._show_local_intake_output_toggle.setObjectName(
-            "packages_intake_show_local_output_toggle"
-        )
 
         self._status_strip_group = GlobalStatusStrip()
         self._status_strip_label = self._status_strip_group.current_status_label
@@ -559,21 +516,6 @@ class MainWindow(QMainWindow):
             self._on_set_selected_mod_manual_source_intent
         )
         self._clear_source_intent_button.clicked.connect(self._on_clear_selected_mod_source_intent)
-        self._view_shared_operational_detail_button.clicked.connect(
-            self._on_view_shared_operational_detail
-        )
-        self._show_local_plan_output_toggle.toggled.connect(
-            self._on_toggle_local_plan_output
-        )
-        self._show_local_recovery_output_toggle.toggled.connect(
-            self._on_toggle_local_recovery_output
-        )
-        self._view_intake_operational_detail_button.clicked.connect(
-            self._on_view_intake_operational_detail
-        )
-        self._show_local_intake_output_toggle.toggled.connect(
-            self._on_toggle_local_intake_output
-        )
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
         self._archive_filter_input.textChanged.connect(self._apply_archive_filter)
@@ -581,38 +523,6 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._refresh_intake_selector()
         self._load_startup_state()
-
-    def _build_detail_access_group(
-        self,
-        *,
-        group_object_name: str,
-        label_object_name: str,
-        guidance_text: str,
-        view_details_button: QPushButton,
-        output_toggles: tuple[QCheckBox, ...],
-    ) -> QGroupBox:
-        detail_access_group = QGroupBox("Detail Access")
-        detail_access_group.setObjectName(group_object_name)
-        detail_access_group.setFlat(True)
-        detail_access_group.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
-        )
-        detail_access_layout = QVBoxLayout(detail_access_group)
-        detail_access_layout.setContentsMargins(8, 6, 8, 6)
-        detail_access_layout.setSpacing(4)
-        detail_access_label = QLabel(guidance_text)
-        detail_access_label.setObjectName(label_object_name)
-        detail_access_label.setWordWrap(True)
-        _set_auxiliary_label_style(detail_access_label)
-        detail_access_layout.addWidget(detail_access_label)
-        detail_access_actions = QHBoxLayout()
-        detail_access_actions.setSpacing(6)
-        detail_access_actions.addWidget(view_details_button)
-        for toggle in output_toggles:
-            detail_access_actions.addWidget(toggle)
-        detail_access_actions.addStretch(1)
-        detail_access_layout.addLayout(detail_access_actions)
-        return detail_access_group
 
     def _build_layout(self) -> None:
         container = QWidget()
@@ -897,32 +807,6 @@ class MainWindow(QMainWindow):
         detected_layout.addWidget(self._plan_selected_intake_button, 1, 3)
         intake_layout.addWidget(detected_group)
 
-        intake_detail_access_group = self._build_detail_access_group(
-            group_object_name="packages_intake_detail_access_group",
-            label_object_name="packages_intake_detail_access_label",
-            guidance_text=(
-                "Use inspection and detected-package controls for primary decisions. "
-                "Open Operational Detail below for full intake narrative output."
-            ),
-            view_details_button=self._view_intake_operational_detail_button,
-            output_toggles=(self._show_local_intake_output_toggle,),
-        )
-        intake_layout.addWidget(intake_detail_access_group)
-
-        intake_output_group = QGroupBox("Secondary Local Intake Output")
-        intake_output_group.setObjectName("packages_intake_output_group")
-        intake_output_group.setFlat(True)
-        intake_output_group.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
-        )
-        intake_output_layout = QVBoxLayout(intake_output_group)
-        intake_output_layout.setContentsMargins(8, 6, 8, 6)
-        intake_output_layout.setSpacing(6)
-        intake_output_layout.addWidget(self._intake_output_box)
-        intake_output_group.setVisible(False)
-        self._intake_output_group = intake_output_group
-        intake_layout.addWidget(intake_output_group)
-
         intake_layout.addStretch(1)
         context_tabs.addTab(intake_tab, "Packages & Intake")
 
@@ -1023,34 +907,6 @@ class MainWindow(QMainWindow):
             plan_facts_layout.addWidget(self._plan_facts_label)
             plan_tab_layout.insertWidget(5, plan_facts_group)
 
-            detail_access_group = self._build_detail_access_group(
-                group_object_name="plan_install_detail_access_group",
-                label_object_name="plan_install_detail_access_label",
-                guidance_text=(
-                    "Use the summary, explanation, facts, and status strip for primary decisions. "
-                    "Open Operational Detail below when you need the full narrative output."
-                ),
-                view_details_button=self._view_shared_operational_detail_button,
-                output_toggles=(
-                    self._show_local_plan_output_toggle,
-                    self._show_local_recovery_output_toggle,
-                ),
-            )
-            plan_tab_layout.insertWidget(6, detail_access_group)
-
-            plan_install_output_group = QGroupBox("Secondary Local Plan Output")
-            plan_install_output_group.setObjectName("plan_install_output_group")
-            plan_install_output_group.setFlat(True)
-            plan_install_output_group.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
-            )
-            plan_install_output_layout = QVBoxLayout(plan_install_output_group)
-            plan_install_output_layout.setContentsMargins(8, 6, 8, 6)
-            plan_install_output_layout.setSpacing(6)
-            plan_install_output_layout.addWidget(self._plan_install_output_box)
-            plan_install_output_group.setVisible(False)
-            self._plan_install_output_group = plan_install_output_group
-
             recovery_group = QGroupBox("Recovery")
             recovery_group.setObjectName("recovery_inspection_group")
             recovery_group.setFlat(True)
@@ -1079,23 +935,7 @@ class MainWindow(QMainWindow):
             recovery_controls.addWidget(self._run_recovery_button)
             recovery_layout.addLayout(recovery_controls)
             recovery_layout.addWidget(self._recovery_selection_summary_label)
-            plan_tab_layout.insertWidget(7, recovery_group)
-
-            plan_tab_layout.insertWidget(8, plan_install_output_group)
-
-            recovery_output_group = QGroupBox("Secondary Local Recovery Output")
-            recovery_output_group.setObjectName("recovery_output_group")
-            recovery_output_group.setFlat(True)
-            recovery_output_group.setSizePolicy(
-                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred
-            )
-            recovery_output_layout = QVBoxLayout(recovery_output_group)
-            recovery_output_layout.setContentsMargins(8, 6, 8, 6)
-            recovery_output_layout.setSpacing(6)
-            recovery_output_layout.addWidget(self._recovery_output_box)
-            recovery_output_group.setVisible(False)
-            self._recovery_output_group = recovery_output_group
-            plan_tab_layout.insertWidget(9, recovery_output_group)
+            plan_tab_layout.insertWidget(6, recovery_group)
         context_tabs.addTab(plan_tab, "Plan & Install")
         self._plan_install_tab = plan_tab
 
@@ -1117,10 +957,6 @@ class MainWindow(QMainWindow):
         self._guidance_group = bottom_details_region
         self._secondary_group = bottom_details_region
         self._details_group = bottom_details_region.details_group
-        self._secondary_tabs = bottom_details_region.tabs
-        self._summary_tab_index = bottom_details_region.summary_tab_index
-        self._setup_tab_index = bottom_details_region.setup_tab_index
-        self._secondary_tabs.currentChanged.connect(self._on_secondary_tab_changed)
         root_layout.addWidget(bottom_details_region)
         self._apply_guidance_compact_mode(details_visible=False)
         self._background_action_buttons = (
@@ -1168,7 +1004,6 @@ class MainWindow(QMainWindow):
         if state.message:
             self._set_details_text(state.message)
             self._set_status(state.message)
-            self._secondary_tabs.setCurrentIndex(self._setup_tab_index)
 
         self._refresh_scan_context_preview()
         self._refresh_install_destination_preview()
@@ -1187,9 +1022,6 @@ class MainWindow(QMainWindow):
         )
         if selected:
             self._game_path_input.setText(selected)
-
-    def _on_secondary_tab_changed(self, index: int) -> None:
-        self._refresh_responsive_panel_bounds()
 
     def _on_toggle_details_panel(self, checked: bool) -> None:
         self._details_group.setVisible(checked)
@@ -2845,42 +2677,13 @@ class MainWindow(QMainWindow):
         self._next_step_strip_label.setToolTip(next_step)
 
     def _set_recovery_output_text(self, text: str) -> None:
-        self._recovery_output_box.setPlainText(text)
         self._set_details_text(text)
 
     def _set_intake_output_text(self, text: str) -> None:
-        self._intake_output_box.setPlainText(text)
         self._set_details_text(text)
 
     def _set_plan_install_output_text(self, text: str) -> None:
-        self._plan_install_output_box.setPlainText(text)
         self._set_details_text(text)
-
-    def _on_view_shared_operational_detail(self) -> None:
-        self._secondary_tabs.setCurrentIndex(self._summary_tab_index)
-        if not self._details_toggle.isChecked():
-            self._details_toggle.setChecked(True)
-        else:
-            self._on_secondary_tab_changed(self._summary_tab_index)
-
-    def _on_toggle_local_plan_output(self, checked: bool) -> None:
-        self._plan_install_output_group.setVisible(checked)
-        self._refresh_responsive_panel_bounds()
-
-    def _on_toggle_local_recovery_output(self, checked: bool) -> None:
-        self._recovery_output_group.setVisible(checked)
-        self._refresh_responsive_panel_bounds()
-
-    def _on_view_intake_operational_detail(self) -> None:
-        self._secondary_tabs.setCurrentIndex(self._summary_tab_index)
-        if not self._details_toggle.isChecked():
-            self._details_toggle.setChecked(True)
-        else:
-            self._on_secondary_tab_changed(self._summary_tab_index)
-
-    def _on_toggle_local_intake_output(self, checked: bool) -> None:
-        self._intake_output_group.setVisible(checked)
-        self._refresh_responsive_panel_bounds()
 
     def _set_plan_review_summary_text(self, text: str) -> None:
         self._plan_review_summary_label.setText(text)
@@ -3720,19 +3523,13 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_findings_box"):
             self._findings_box.setMaximumHeight(details_cap)
 
-        if hasattr(self, "_secondary_tabs") and hasattr(self, "_details_group"):
-            current_index = self._secondary_tabs.currentIndex()
-            if current_index == self._setup_tab_index:
-                secondary_cap = setup_cap
-                if self._details_group.isVisible():
-                    secondary_cap = max(secondary_cap, guidance_open_cap)
-            else:
-                secondary_cap = (
-                    guidance_open_cap if self._details_group.isVisible() else guidance_closed_cap
-                )
+        if hasattr(self, "_details_group"):
+            secondary_cap = max(
+                setup_cap,
+                guidance_open_cap if self._details_group.isVisible() else guidance_closed_cap,
+            )
             if hasattr(self, "_secondary_group"):
                 self._secondary_group.setMaximumHeight(secondary_cap)
-            self._secondary_tabs.setMaximumHeight(secondary_cap)
 
     @staticmethod
     def _set_filter_stats(label: QLabel, *, shown_count: int, total_count: int) -> None:
