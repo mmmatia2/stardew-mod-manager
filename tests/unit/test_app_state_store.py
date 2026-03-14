@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+import sdvmm.app.paths as app_paths
 import sdvmm.services.app_state_store as app_state_store
 
 from sdvmm.domain.models import (
@@ -62,6 +63,77 @@ def test_save_and_load_app_config_round_trip(tmp_path: Path) -> None:
     assert payload["app_config"]["real_archive_path"] == str(config.real_archive_path)
     assert payload["app_config"]["nexus_api_key"] == "test-nexus-key"
     assert payload["app_config"]["install_target"] == "configured_real_mods"
+
+
+def test_default_app_state_file_uses_platform_default_windows_appdata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    appdata = tmp_path / "AppData" / "Roaming"
+    home.mkdir(parents=True)
+    appdata.mkdir(parents=True)
+    monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(app_paths.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    state_file = app_paths.default_app_state_file()
+
+    assert state_file == appdata / "sdvmm" / "app-state.json"
+
+
+def test_default_app_state_file_prefers_legacy_state_root_when_only_legacy_state_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    appdata = tmp_path / "AppData" / "Roaming"
+    legacy_root = home / ".config" / "sdvmm"
+    home.mkdir(parents=True)
+    appdata.mkdir(parents=True)
+    legacy_root.mkdir(parents=True)
+    (legacy_root / INSTALL_OPERATION_HISTORY_FILENAME).write_text(
+        json.dumps({"version": INSTALL_OPERATION_HISTORY_VERSION, "operations": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(app_paths.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    state_file = app_paths.default_app_state_file()
+
+    assert state_file == legacy_root / "app-state.json"
+
+
+def test_default_app_state_file_prefers_new_platform_root_when_both_locations_have_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    appdata = tmp_path / "AppData" / "Roaming"
+    legacy_root = home / ".config" / "sdvmm"
+    new_root = appdata / "sdvmm"
+    home.mkdir(parents=True)
+    legacy_root.mkdir(parents=True)
+    new_root.mkdir(parents=True)
+    (legacy_root / "app-state.json").write_text("{}", encoding="utf-8")
+    (new_root / RECOVERY_EXECUTION_HISTORY_FILENAME).write_text(
+        json.dumps({"version": RECOVERY_EXECUTION_HISTORY_VERSION, "operations": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: home))
+    monkeypatch.setattr(app_paths.sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.delenv("XDG_STATE_HOME", raising=False)
+
+    state_file = app_paths.default_app_state_file()
+
+    assert state_file == new_root / "app-state.json"
 
 
 @pytest.mark.parametrize(
