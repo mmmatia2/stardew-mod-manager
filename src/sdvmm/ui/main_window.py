@@ -227,6 +227,12 @@ class MainWindow(QMainWindow):
             "inventory_update_guidance_label"
         )
         self._inventory_update_guidance_label.setWordWrap(True)
+        self._open_remote_page_button = QPushButton("Open remote page")
+        self._open_remote_page_button.setObjectName("inventory_open_remote_page_button")
+        self._open_remote_page_button.setEnabled(False)
+        self._open_remote_page_button.setToolTip(
+            "Select an actionable mod row to open its remote page."
+        )
         for stats_label in (
             self._mods_filter_stats_label,
             self._discovery_filter_stats_label,
@@ -575,10 +581,9 @@ class MainWindow(QMainWindow):
         self._check_updates_button.clicked.connect(self._on_check_updates)
         _set_primary_button_style(self._check_updates_button)
         inventory_tab_layout.addWidget(self._check_updates_button, 1, 1)
-        open_remote_button = QPushButton("Open remote page")
-        open_remote_button.clicked.connect(self._on_open_remote_page)
-        _set_secondary_button_style(open_remote_button)
-        inventory_tab_layout.addWidget(open_remote_button, 1, 2)
+        self._open_remote_page_button.clicked.connect(self._on_open_remote_page)
+        _set_secondary_button_style(self._open_remote_page_button)
+        inventory_tab_layout.addWidget(self._open_remote_page_button, 1, 2)
         inventory_tab_layout.setColumnStretch(1, 1)
         inventory_tab_layout.setColumnStretch(2, 1)
         inventory_controls_tabs.addTab(inventory_tab, "Inventory")
@@ -2853,6 +2858,10 @@ class MainWindow(QMainWindow):
         row = self._mods_table.currentRow()
         if row < 0 or self._mods_table.isRowHidden(row):
             message = "Select an installed mod row to see update guidance."
+            self._set_open_remote_page_state(
+                enabled=False,
+                tooltip="Select an actionable mod row to open its remote page.",
+            )
             self._inventory_update_guidance_label.setText(message)
             self._inventory_update_guidance_label.setToolTip(message)
             return
@@ -2861,6 +2870,10 @@ class MainWindow(QMainWindow):
         status_item = self._mods_table.item(row, 4)
         if name_item is None:
             message = "Select an installed mod row to see update guidance."
+            self._set_open_remote_page_state(
+                enabled=False,
+                tooltip="Select an actionable mod row to open its remote page.",
+            )
             self._inventory_update_guidance_label.setText(message)
             self._inventory_update_guidance_label.setToolTip(message)
             return
@@ -2872,16 +2885,45 @@ class MainWindow(QMainWindow):
         blocked_reason = name_item.data(_ROLE_UPDATE_BLOCK_REASON)
 
         if status is None and status_text == "not_checked":
-            message = f"{mod_name}: run Check updates to evaluate update actionability."
+            message = (
+                f"{mod_name}: run Check updates to evaluate update actionability. "
+                "Open remote page stays disabled until an actionable row is selected."
+            )
+            self._set_open_remote_page_state(
+                enabled=False,
+                tooltip="Run Check updates and select an actionable row first.",
+            )
         elif is_actionable:
-            message = f"{mod_name}: update available. Open remote page to continue."
+            message = (
+                f"{mod_name}: update available. "
+                "Next step: use Open remote page for this selected row."
+            )
+            self._set_open_remote_page_state(
+                enabled=True,
+                tooltip=f"Open remote page for selected mod: {mod_name}.",
+            )
         elif isinstance(blocked_reason, str) and blocked_reason.strip():
-            message = f"{mod_name}: {blocked_reason.strip()}"
+            message = (
+                f"{mod_name}: {blocked_reason.strip()} "
+                "Open remote page is unavailable for this row."
+            )
+            self._set_open_remote_page_state(
+                enabled=False,
+                tooltip=f"Remote-page action unavailable: {blocked_reason.strip()}",
+            )
         else:
             message = f"{mod_name}: no update action is currently available."
+            self._set_open_remote_page_state(
+                enabled=False,
+                tooltip="Remote-page action is unavailable for the selected row.",
+            )
 
         self._inventory_update_guidance_label.setText(message)
         self._inventory_update_guidance_label.setToolTip(message)
+
+    def _set_open_remote_page_state(self, *, enabled: bool, tooltip: str) -> None:
+        self._open_remote_page_button.setEnabled(enabled)
+        self._open_remote_page_button.setToolTip(tooltip)
 
     def _apply_discovery_filter(self, *_: object) -> None:
         filter_text = self._discovery_filter_input.text()

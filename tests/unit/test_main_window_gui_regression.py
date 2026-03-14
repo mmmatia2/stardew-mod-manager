@@ -375,9 +375,14 @@ def test_main_window_inventory_selected_row_update_guidance_line_exists_and_defa
     main_window: MainWindow,
 ) -> None:
     guidance_label = main_window.findChild(QLabel, "inventory_update_guidance_label")
+    open_remote_button = main_window.findChild(
+        QPushButton, "inventory_open_remote_page_button"
+    )
 
     assert guidance_label is not None
+    assert open_remote_button is not None
     assert guidance_label.text() == "Select an installed mod row to see update guidance."
+    assert open_remote_button.isEnabled() is False
 
 
 def test_main_window_inventory_selected_row_guidance_shows_actionable_message(
@@ -395,7 +400,16 @@ def test_main_window_inventory_selected_row_guidance_shows_actionable_message(
     qapp.processEvents()
 
     guidance_text = main_window._inventory_update_guidance_label.text()
-    assert "Alpha Mod: update available. Open remote page to continue." == guidance_text
+    open_remote_button = main_window.findChild(
+        QPushButton, "inventory_open_remote_page_button"
+    )
+    assert (
+        "Alpha Mod: update available. Next step: use Open remote page for this selected row."
+        == guidance_text
+    )
+    assert open_remote_button is not None
+    assert open_remote_button.isEnabled() is True
+    assert "Alpha Mod" in open_remote_button.toolTip()
 
 
 def test_main_window_inventory_selected_row_guidance_shows_blocked_reason(
@@ -413,7 +427,16 @@ def test_main_window_inventory_selected_row_guidance_shows_blocked_reason(
     qapp.processEvents()
 
     guidance_text = main_window._inventory_update_guidance_label.text()
-    assert guidance_text == "Beta Mod: No remote link available."
+    open_remote_button = main_window.findChild(
+        QPushButton, "inventory_open_remote_page_button"
+    )
+    assert (
+        guidance_text
+        == "Beta Mod: No remote link available. Open remote page is unavailable for this row."
+    )
+    assert open_remote_button is not None
+    assert open_remote_button.isEnabled() is False
+    assert "No remote link available." in open_remote_button.toolTip()
 
 
 def test_main_window_inventory_selected_row_guidance_shows_not_checked_prompt(
@@ -429,7 +452,50 @@ def test_main_window_inventory_selected_row_guidance_shows_not_checked_prompt(
     qapp.processEvents()
 
     guidance_text = main_window._inventory_update_guidance_label.text()
-    assert guidance_text == "Gamma Mod: run Check updates to evaluate update actionability."
+    open_remote_button = main_window.findChild(
+        QPushButton, "inventory_open_remote_page_button"
+    )
+    assert (
+        guidance_text
+        == "Gamma Mod: run Check updates to evaluate update actionability. "
+        "Open remote page stays disabled until an actionable row is selected."
+    )
+    assert open_remote_button is not None
+    assert open_remote_button.isEnabled() is False
+
+
+def test_main_window_inventory_open_remote_button_state_updates_with_selection_changes(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    open_remote_button = main_window.findChild(
+        QPushButton, "inventory_open_remote_page_button"
+    )
+
+    assert open_remote_button is not None
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    qapp.processEvents()
+
+    actionable_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert actionable_row >= 0
+    assert blocked_row >= 0
+
+    main_window._mods_table.setCurrentCell(actionable_row, 0)
+    qapp.processEvents()
+    assert open_remote_button.isEnabled() is True
+
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+    assert open_remote_button.isEnabled() is False
+
+    main_window._mods_table.clearSelection()
+    main_window._mods_table.setCurrentCell(-1, -1)
+    qapp.processEvents()
+    assert open_remote_button.isEnabled() is False
 
 
 def test_main_window_inventory_update_actionability_filter_modes_show_expected_subsets(
