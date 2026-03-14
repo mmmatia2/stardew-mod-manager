@@ -289,13 +289,15 @@ def test_main_window_scan_target_updates_top_context_scan_source_label(
 
     scan_target_combo.setCurrentIndex(real_index)
     qapp.processEvents()
-    assert scan_source_label.text().startswith("REAL Mods:")
+    assert scan_source_label.text() == "REAL Mods selected"
     assert scan_source_label.toolTip() == r"C:\SDV\Mods"
+    assert r"C:\SDV\Mods" not in scan_source_label.text()
 
     scan_target_combo.setCurrentIndex(sandbox_index)
     qapp.processEvents()
-    assert scan_source_label.text().startswith("Sandbox Mods:")
+    assert scan_source_label.text() == "Sandbox Mods selected"
     assert scan_source_label.toolTip() == r"C:\SDV\SandboxMods"
+    assert r"C:\SDV\SandboxMods" not in scan_source_label.text()
 
 
 def test_main_window_scan_source_preview_updates_for_active_target_path_changes(
@@ -315,14 +317,16 @@ def test_main_window_scan_source_preview_updates_for_active_target_path_changes(
     scan_target_combo.setCurrentIndex(real_index)
     main_window._mods_path_input.setText(r"C:\RealModsA")
     qapp.processEvents()
-    assert scan_source_label.text().startswith("REAL Mods:")
+    assert scan_source_label.text() == "REAL Mods selected"
     assert scan_source_label.toolTip() == r"C:\RealModsA"
+    assert r"C:\RealModsA" not in scan_source_label.text()
 
     scan_target_combo.setCurrentIndex(sandbox_index)
     main_window._sandbox_mods_path_input.setText(r"C:\SandboxModsA")
     qapp.processEvents()
-    assert scan_source_label.text().startswith("Sandbox Mods:")
+    assert scan_source_label.text() == "Sandbox Mods selected"
     assert scan_source_label.toolTip() == r"C:\SandboxModsA"
+    assert r"C:\SandboxModsA" not in scan_source_label.text()
 
 
 def test_main_window_install_target_updates_context_archive_label_and_status(
@@ -351,13 +355,23 @@ def test_main_window_install_target_updates_context_archive_label_and_status(
     qapp.processEvents()
     install_target_combo.setCurrentIndex(sandbox_index)
     qapp.processEvents()
-    assert install_context_label.text().startswith("Sandbox Mods:")
+    assert (
+        install_context_label.text()
+        == "Sandbox Mods destination selected (recommended/test path)"
+    )
+    assert r"C:\Game\SandboxMods" not in install_context_label.text()
+    assert install_context_label.toolTip() == r"C:\Game\SandboxMods"
     assert install_archive_label.text() == "Archive path for sandbox destination"
     assert "sandbox Mods path" in status_label.text()
 
     install_target_combo.setCurrentIndex(real_index)
     qapp.processEvents()
-    assert install_context_label.text().startswith("REAL game Mods:")
+    assert (
+        install_context_label.text()
+        == "REAL game Mods destination selected (confirmation required)"
+    )
+    assert r"C:\Game\Mods" not in install_context_label.text()
+    assert install_context_label.toolTip() == r"C:\Game\Mods"
     assert install_archive_label.text() == "Archive path for real Game Mods destination"
     assert "REAL game Mods path" in status_label.text()
 

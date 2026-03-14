@@ -2846,7 +2846,7 @@ class MainWindow(QMainWindow):
 
     def _set_scan_context(self, path: Path, label: str) -> None:
         path_text = str(path)
-        self._scan_context_label.setText(f"{label}: {_compact_path_text(path_text)}")
+        self._scan_context_label.setText(f"{label} selected")
         self._scan_context_label.setToolTip(path_text)
 
     def _invalidate_pending_plan(self, *_: object) -> None:
@@ -3324,8 +3324,10 @@ class MainWindow(QMainWindow):
         else:
             path_text = self._sandbox_mods_path_input.text().strip() or "<unset>"
             target_label = "Sandbox Mods"
-        compact = _compact_path_text(path_text)
-        self._scan_context_label.setText(f"{target_label}: {compact}")
+        context_text = f"{target_label} selected"
+        if path_text == "<unset>":
+            context_text = f"{context_text} (path unset)"
+        self._scan_context_label.setText(context_text)
         self._scan_context_label.setToolTip(path_text)
 
     def _refresh_nexus_status(self, *, validated: bool) -> None:
@@ -3341,9 +3343,10 @@ class MainWindow(QMainWindow):
         if target == INSTALL_TARGET_CONFIGURED_REAL_MODS:
             self._install_archive_label.setText("Archive path for real Game Mods destination")
             path_text = self._mods_path_input.text().strip() or "<unset>"
-            self._install_context_label.setText(
-                f"REAL game Mods: {_compact_path_text(path_text)} (explicit confirmation required)"
-            )
+            context_text = "REAL game Mods destination selected (confirmation required)"
+            if path_text == "<unset>":
+                context_text = f"{context_text} (path unset)"
+            self._install_context_label.setText(context_text)
             self._install_context_label.setToolTip(path_text)
             if not self._real_archive_path_input.text().strip() and self._mods_path_input.text().strip():
                 self._real_archive_path_input.setText(
@@ -3354,7 +3357,10 @@ class MainWindow(QMainWindow):
 
         self._install_archive_label.setText("Archive path for sandbox destination")
         path_text = self._sandbox_mods_path_input.text().strip() or "<unset>"
-        self._install_context_label.setText(f"Sandbox Mods: {_compact_path_text(path_text)}")
+        context_text = "Sandbox Mods destination selected (recommended/test path)"
+        if path_text == "<unset>":
+            context_text = f"{context_text} (path unset)"
+        self._install_context_label.setText(context_text)
         self._install_context_label.setToolTip(path_text)
         if (
             not self._sandbox_archive_path_input.text().strip()
