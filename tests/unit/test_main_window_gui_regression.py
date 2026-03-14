@@ -594,6 +594,7 @@ def test_main_window_plan_install_surface_has_expected_structure(
     staged_package_group = main_window.findChild(QGroupBox, "plan_install_staged_package_group")
     execute_group = main_window.findChild(QGroupBox, "plan_install_execute_group")
     plan_review_summary_group = main_window.findChild(QGroupBox, "plan_install_review_summary_group")
+    plan_facts_group = main_window.findChild(QGroupBox, "plan_install_facts_group")
     plan_output_group = main_window.findChild(QGroupBox, "plan_install_output_group")
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
     recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
@@ -608,6 +609,7 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert staged_package_group is not None
     assert execute_group is not None
     assert plan_review_summary_group is not None
+    assert plan_facts_group is not None
     assert plan_output_group is not None
     assert recovery_group is not None
     assert recovery_output_group is not None
@@ -625,7 +627,8 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert plan_layout.indexOf(safety_panel_group) < plan_layout.indexOf(staged_package_group)
     assert plan_layout.indexOf(staged_package_group) < plan_layout.indexOf(execute_group)
     assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_review_summary_group)
-    assert plan_layout.indexOf(plan_review_summary_group) < plan_layout.indexOf(plan_output_group)
+    assert plan_layout.indexOf(plan_review_summary_group) < plan_layout.indexOf(plan_facts_group)
+    assert plan_layout.indexOf(plan_facts_group) < plan_layout.indexOf(plan_output_group)
     assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_output_group)
     assert plan_layout.indexOf(plan_output_group) < plan_layout.indexOf(recovery_group)
     assert plan_layout.indexOf(recovery_group) < plan_layout.indexOf(recovery_output_group)
@@ -728,6 +731,7 @@ def test_main_window_plan_install_surface_key_controls_exist(
     plan_review_explanation_label = main_window.findChild(
         QLabel, "plan_install_review_explanation_label"
     )
+    plan_facts_label = main_window.findChild(QLabel, "plan_install_facts_label")
     plan_output_box = main_window.findChild(QPlainTextEdit, "plan_install_output_box")
     plan_button = main_window.findChild(QPushButton, "plan_install_plan_button")
     run_button = main_window.findChild(QPushButton, "plan_install_run_button")
@@ -739,6 +743,7 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert staged_package_label is not None
     assert plan_review_summary_label is not None
     assert plan_review_explanation_label is not None
+    assert plan_facts_label is not None
     assert plan_output_box is not None
     assert plan_button is not None
     assert run_button is not None
@@ -749,11 +754,19 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert main_window._staged_package_label is staged_package_label
     assert main_window._plan_review_summary_label is plan_review_summary_label
     assert main_window._plan_review_explanation_label is plan_review_explanation_label
+    assert main_window._plan_facts_label is plan_facts_label
     assert main_window._plan_install_output_box is plan_output_box
     assert staged_package_label.isReadOnly() is True
     assert (
         plan_review_explanation_label.text()
         == "Plan detail: no plan selected."
+    )
+    assert plan_facts_label.text() == (
+        "Entries: -\n"
+        "Replace existing: -\n"
+        "Archive writes: -\n"
+        "Approval required: -\n"
+        "Blocked entries: -"
     )
 
 
@@ -1183,6 +1196,13 @@ def test_main_window_install_related_inputs_invalidate_pending_plan(
         main_window._pending_install_plan = _sandbox_install_plan()
         main_window._set_plan_review_summary_text("Plan review: ready to install.")
         main_window._set_plan_review_explanation_text("Ready: no blocking issues detected.")
+        main_window._set_plan_facts_text(
+            "Entries: 1\n"
+            "Replace existing: no\n"
+            "Archive writes: no\n"
+            "Approval required: no\n"
+            "Blocked entries: 0"
+        )
         action()
         qapp.processEvents()
         assert main_window._pending_install_plan is None
@@ -1190,6 +1210,13 @@ def test_main_window_install_related_inputs_invalidate_pending_plan(
             "Plan review: no plan yet. Click Plan install to review."
         )
         assert main_window._plan_review_explanation_label.text() == "Plan detail: no plan selected."
+        assert main_window._plan_facts_label.text() == (
+            "Entries: -\n"
+            "Replace existing: -\n"
+            "Archive writes: -\n"
+            "Approval required: -\n"
+            "Blocked entries: -"
+        )
 
 
 def test_main_window_plan_install_stores_sandbox_plan_and_sets_status(
@@ -1213,6 +1240,13 @@ def test_main_window_plan_install_stores_sandbox_plan_and_sets_status(
     assert main_window._status_strip_label.text() == review.message
     assert main_window._plan_review_summary_label.text() == "Plan review: ready to install."
     assert main_window._plan_review_explanation_label.text() == "Ready: no blocking issues detected."
+    assert main_window._plan_facts_label.text() == (
+        "Entries: 1\n"
+        "Replace existing: no\n"
+        "Archive writes: no\n"
+        "Approval required: no\n"
+        "Blocked entries: 0"
+    )
     assert "warning" not in main_window._plan_review_explanation_label.text().casefold()
     assert "blocked" not in main_window._plan_review_explanation_label.text().casefold()
     assert main_window._plan_install_output_box.toPlainText().startswith(review.message)
@@ -1239,6 +1273,7 @@ def test_main_window_plan_install_stores_real_destination_plan_and_sets_status(
     assert review.requires_explicit_approval is True
     assert main_window._status_strip_label.text() == review.message
     assert main_window._plan_review_explanation_label.text() == "Ready: no blocking issues detected."
+    assert "Approval required: yes" in main_window._plan_facts_label.text()
     assert "warning" not in main_window._plan_review_explanation_label.text().casefold()
     assert "blocked" not in main_window._plan_review_explanation_label.text().casefold()
     assert main_window._plan_install_output_box.toPlainText().startswith(review.message)
@@ -1266,6 +1301,7 @@ def test_main_window_plan_install_blocked_review_clears_pending_plan_and_sets_st
     assert main_window._status_strip_label.text() == review.message
     assert main_window._plan_review_summary_label.text() == "Plan review: blocked by dependency issues."
     assert main_window._plan_review_explanation_label.text().startswith("Dependency issue:")
+    assert "Blocked entries: 1" in main_window._plan_facts_label.text()
     assert main_window._plan_install_output_box.toPlainText().startswith(review.message)
 
 
@@ -1312,6 +1348,13 @@ def test_main_window_plan_install_runnable_with_warnings_sets_summary(
     assert main_window._pending_install_plan is warning_plan
     assert main_window._plan_review_summary_label.text() == "Plan review: runnable with warnings."
     assert main_window._plan_review_explanation_label.text().startswith("Warning:")
+    assert main_window._plan_facts_label.text() == (
+        "Entries: 1\n"
+        "Replace existing: no\n"
+        "Archive writes: no\n"
+        "Approval required: no\n"
+        "Blocked entries: 0"
+    )
 
 
 def test_main_window_run_install_uses_confirmation_flow_and_service_gate(

@@ -128,6 +128,13 @@ _ROLE_UPDATE_BLOCK_REASON = int(Qt.ItemDataRole.UserRole) + 8
 
 _NO_PLAN_REVIEW_SUMMARY_TEXT = "Plan review: no plan yet. Click Plan install to review."
 _NO_PLAN_REVIEW_EXPLANATION_TEXT = "Plan detail: no plan selected."
+_NO_PLAN_FACTS_TEXT = (
+    "Entries: -\n"
+    "Replace existing: -\n"
+    "Archive writes: -\n"
+    "Approval required: -\n"
+    "Blocked entries: -"
+)
 
 
 class MainWindow(QMainWindow):
@@ -285,6 +292,10 @@ class MainWindow(QMainWindow):
         )
         self._plan_review_explanation_label.setWordWrap(True)
         _set_auxiliary_label_style(self._plan_review_explanation_label)
+        self._plan_facts_label = QLabel(_NO_PLAN_FACTS_TEXT)
+        self._plan_facts_label.setObjectName("plan_install_facts_label")
+        self._plan_facts_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._plan_facts_label)
 
         for control in (
             self._game_path_input,
@@ -854,6 +865,18 @@ class MainWindow(QMainWindow):
             plan_review_summary_layout.addWidget(self._plan_review_explanation_label)
             plan_tab_layout.insertWidget(4, plan_review_summary_group)
 
+            plan_facts_group = QGroupBox("Plan Facts")
+            plan_facts_group.setObjectName("plan_install_facts_group")
+            plan_facts_group.setFlat(True)
+            plan_facts_group.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+            )
+            plan_facts_layout = QVBoxLayout(plan_facts_group)
+            plan_facts_layout.setContentsMargins(8, 6, 8, 6)
+            plan_facts_layout.setSpacing(4)
+            plan_facts_layout.addWidget(self._plan_facts_label)
+            plan_tab_layout.insertWidget(5, plan_facts_group)
+
             plan_install_output_group = QGroupBox("Plan & Install Output")
             plan_install_output_group.setObjectName("plan_install_output_group")
             plan_install_output_group.setFlat(True)
@@ -864,7 +887,7 @@ class MainWindow(QMainWindow):
             plan_install_output_layout.setContentsMargins(8, 6, 8, 6)
             plan_install_output_layout.setSpacing(6)
             plan_install_output_layout.addWidget(self._plan_install_output_box)
-            plan_tab_layout.insertWidget(5, plan_install_output_group)
+            plan_tab_layout.insertWidget(6, plan_install_output_group)
 
             recovery_group = QGroupBox("Recovery")
             recovery_group.setObjectName("recovery_inspection_group")
@@ -894,7 +917,7 @@ class MainWindow(QMainWindow):
             recovery_controls.addWidget(self._run_recovery_button)
             recovery_layout.addLayout(recovery_controls)
             recovery_layout.addWidget(self._recovery_selection_summary_label)
-            plan_tab_layout.insertWidget(6, recovery_group)
+            plan_tab_layout.insertWidget(7, recovery_group)
 
             recovery_output_group = QGroupBox("Recovery Output")
             recovery_output_group.setObjectName("recovery_output_group")
@@ -906,7 +929,7 @@ class MainWindow(QMainWindow):
             recovery_output_layout.setContentsMargins(8, 6, 8, 6)
             recovery_output_layout.setSpacing(6)
             recovery_output_layout.addWidget(self._recovery_output_box)
-            plan_tab_layout.insertWidget(7, recovery_output_group)
+            plan_tab_layout.insertWidget(8, recovery_output_group)
         context_tabs.addTab(plan_tab, "Plan & Install")
         self._plan_install_tab = plan_tab
 
@@ -1271,6 +1294,7 @@ class MainWindow(QMainWindow):
         self._pending_install_plan = plan if review.allowed else None
         self._set_plan_review_summary_text(_build_plan_review_summary_text(plan, review))
         self._set_plan_review_explanation_text(_build_plan_review_explanation_text(plan, review))
+        self._set_plan_facts_text(_build_plan_facts_text(plan, review))
         self._set_plan_install_output_text(
             "\n\n".join(
                 (
@@ -2686,6 +2710,10 @@ class MainWindow(QMainWindow):
         self._plan_review_explanation_label.setText(text)
         self._plan_review_explanation_label.setToolTip(text)
 
+    def _set_plan_facts_text(self, text: str) -> None:
+        self._plan_facts_label.setText(text)
+        self._plan_facts_label.setToolTip(text)
+
     def _set_package_inspection_result_text(self, text: str | None) -> None:
         has_text = bool(text and text.strip())
         self._package_inspection_result_box.setPlainText(text or "")
@@ -2702,6 +2730,7 @@ class MainWindow(QMainWindow):
         self._pending_install_plan = None
         self._set_plan_review_summary_text(_NO_PLAN_REVIEW_SUMMARY_TEXT)
         self._set_plan_review_explanation_text(_NO_PLAN_REVIEW_EXPLANATION_TEXT)
+        self._set_plan_facts_text(_NO_PLAN_FACTS_TEXT)
 
     def _on_watched_path_changed(self, *_: object) -> None:
         self._known_watched_zip_paths = tuple()
@@ -2728,6 +2757,7 @@ class MainWindow(QMainWindow):
         self._pending_install_plan = None
         self._set_plan_review_summary_text(_NO_PLAN_REVIEW_SUMMARY_TEXT)
         self._set_plan_review_explanation_text(_NO_PLAN_REVIEW_EXPLANATION_TEXT)
+        self._set_plan_facts_text(_NO_PLAN_FACTS_TEXT)
         self._refresh_install_destination_preview()
         if self._current_install_target() == INSTALL_TARGET_CONFIGURED_REAL_MODS:
             self._set_status("Install destination set to REAL game Mods path. Review carefully before executing.")
@@ -3403,6 +3433,29 @@ def _build_plan_review_explanation_text(
     if runnable_warning:
         return f"Warning: {runnable_warning}"
     return "Ready: no blocking issues detected."
+
+
+def _build_plan_facts_text(
+    plan: SandboxInstallPlan,
+    review: InstallExecutionReview,
+) -> str:
+    summary = review.summary
+    blocked_entry_count = _count_blocked_plan_entries(plan)
+    return (
+        f"Entries: {summary.total_entry_count}\n"
+        f"Replace existing: {'yes' if summary.has_existing_targets_to_replace else 'no'}\n"
+        f"Archive writes: {'yes' if summary.has_archive_writes else 'no'}\n"
+        f"Approval required: {'yes' if review.requires_explicit_approval else 'no'}\n"
+        f"Blocked entries: {blocked_entry_count}"
+    )
+
+
+def _count_blocked_plan_entries(plan: SandboxInstallPlan) -> int:
+    return sum(
+        1
+        for entry in plan.entries
+        if (not entry.can_install) or entry.action == "blocked"
+    )
 
 
 def _first_dependency_warning_text(plan: SandboxInstallPlan) -> str | None:
