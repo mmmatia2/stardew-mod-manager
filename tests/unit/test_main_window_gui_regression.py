@@ -689,6 +689,176 @@ def test_main_window_inventory_guidance_falls_back_to_typed_diagnostics_without_
     assert blocked_detail_label.text() == "Update source diagnostics: missing update key."
 
 
+def test_main_window_inventory_update_source_intent_actions_are_hidden_and_inert_without_selection(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    actions_widget = main_window.findChild(QWidget, "inventory_update_source_intent_actions")
+    mark_local_private_button = main_window.findChild(
+        QPushButton, "inventory_mark_local_private_button"
+    )
+    disable_tracking_button = main_window.findChild(
+        QPushButton, "inventory_disable_tracking_button"
+    )
+    clear_source_intent_button = main_window.findChild(
+        QPushButton, "inventory_clear_source_intent_button"
+    )
+
+    assert actions_widget is not None
+    assert mark_local_private_button is not None
+    assert disable_tracking_button is not None
+    assert clear_source_intent_button is not None
+    assert actions_widget.isVisible() is False
+
+    main_window._on_mark_selected_mod_local_private()
+    qapp.processEvents()
+
+    assert main_window._shell_service.get_update_source_intent("Sample.Beta") is None
+    assert (
+        main_window._status_strip_label.text()
+        == "Select a blocked installed mod row to manage saved source intent."
+    )
+
+
+def test_main_window_inventory_selected_row_can_be_marked_local_private(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    actions_widget = main_window.findChild(QWidget, "inventory_update_source_intent_actions")
+    mark_local_private_button = main_window.findChild(
+        QPushButton, "inventory_mark_local_private_button"
+    )
+    clear_source_intent_button = main_window.findChild(
+        QPushButton, "inventory_clear_source_intent_button"
+    )
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+    open_remote_button = main_window.findChild(
+        QPushButton, "inventory_open_remote_page_button"
+    )
+
+    assert actions_widget is not None
+    assert mark_local_private_button is not None
+    assert clear_source_intent_button is not None
+    assert blocked_detail_label is not None
+    assert open_remote_button is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    assert actions_widget.isVisible() is True
+    assert mark_local_private_button.isEnabled() is True
+    assert clear_source_intent_button.isEnabled() is False
+
+    mark_local_private_button.click()
+    qapp.processEvents()
+
+    saved_intent = main_window._shell_service.get_update_source_intent("Sample.Beta")
+    assert saved_intent is not None
+    assert saved_intent.intent_state == "local_private_mod"
+    assert (
+        main_window._inventory_update_guidance_label.text()
+        == "Beta Mod: marked as local/private in saved update-source intent. "
+        "Open remote page is unavailable for this row."
+    )
+    assert blocked_detail_label.isVisible() is True
+    assert (
+        blocked_detail_label.text()
+        == "Update source intent: local/private mod is recorded in app state."
+    )
+    assert clear_source_intent_button.isEnabled() is True
+    assert open_remote_button.isEnabled() is False
+
+
+def test_main_window_inventory_selected_row_can_disable_tracking(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    disable_tracking_button = main_window.findChild(
+        QPushButton, "inventory_disable_tracking_button"
+    )
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+
+    assert disable_tracking_button is not None
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    assert disable_tracking_button.isEnabled() is True
+
+    disable_tracking_button.click()
+    qapp.processEvents()
+
+    saved_intent = main_window._shell_service.get_update_source_intent("Sample.Beta")
+    assert saved_intent is not None
+    assert saved_intent.intent_state == "no_tracking"
+    assert (
+        main_window._inventory_update_guidance_label.text()
+        == "Beta Mod: update tracking is intentionally disabled in saved update-source intent. "
+        "Open remote page is unavailable for this row."
+    )
+    assert blocked_detail_label.isVisible() is True
+    assert (
+        blocked_detail_label.text()
+        == "Update source intent: no-tracking is recorded in app state."
+    )
+
+
+def test_main_window_inventory_clearing_saved_source_intent_restores_typed_diagnostics(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+    clear_source_intent_button = main_window.findChild(
+        QPushButton, "inventory_clear_source_intent_button"
+    )
+    blocked_detail_label = main_window.findChild(
+        QLabel, "inventory_update_blocked_detail_label"
+    )
+
+    assert clear_source_intent_button is not None
+    assert blocked_detail_label is not None
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    main_window._shell_service.set_update_source_intent("Sample.Beta", "local_private_mod")
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    assert clear_source_intent_button.isEnabled() is True
+
+    clear_source_intent_button.click()
+    qapp.processEvents()
+
+    assert main_window._shell_service.get_update_source_intent("Sample.Beta") is None
+    assert (
+        main_window._inventory_update_guidance_label.text()
+        == "Beta Mod: No remote link available. Open remote page is unavailable for this row."
+    )
+    assert blocked_detail_label.isVisible() is True
+    assert blocked_detail_label.text() == "Update source diagnostics: missing update key."
+    assert clear_source_intent_button.isEnabled() is False
+
+
 def test_main_window_inventory_diagnostics_clears_for_actionable_selection(
     main_window: MainWindow,
     qapp: QApplication,

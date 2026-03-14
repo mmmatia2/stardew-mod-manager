@@ -242,6 +242,33 @@ class MainWindow(QMainWindow):
         self._inventory_blocked_detail_label.setWordWrap(True)
         self._inventory_blocked_detail_label.setVisible(False)
         _set_auxiliary_label_style(self._inventory_blocked_detail_label)
+        self._inventory_source_intent_actions_label = QLabel("Saved source intent")
+        _set_auxiliary_label_style(self._inventory_source_intent_actions_label)
+        self._mark_local_private_button = QPushButton("Mark local/private")
+        self._mark_local_private_button.setObjectName("inventory_mark_local_private_button")
+        self._disable_tracking_button = QPushButton("Disable tracking")
+        self._disable_tracking_button.setObjectName("inventory_disable_tracking_button")
+        self._clear_source_intent_button = QPushButton("Clear saved intent")
+        self._clear_source_intent_button.setObjectName("inventory_clear_source_intent_button")
+        for button in (
+            self._mark_local_private_button,
+            self._disable_tracking_button,
+            self._clear_source_intent_button,
+        ):
+            _set_secondary_button_style(button)
+        self._inventory_source_intent_actions_widget = QWidget()
+        self._inventory_source_intent_actions_widget.setObjectName(
+            "inventory_update_source_intent_actions"
+        )
+        inventory_source_intent_actions_layout = QHBoxLayout(self._inventory_source_intent_actions_widget)
+        inventory_source_intent_actions_layout.setContentsMargins(0, 0, 0, 0)
+        inventory_source_intent_actions_layout.setSpacing(6)
+        inventory_source_intent_actions_layout.addWidget(self._inventory_source_intent_actions_label)
+        inventory_source_intent_actions_layout.addWidget(self._mark_local_private_button)
+        inventory_source_intent_actions_layout.addWidget(self._disable_tracking_button)
+        inventory_source_intent_actions_layout.addWidget(self._clear_source_intent_button)
+        inventory_source_intent_actions_layout.addStretch(1)
+        self._inventory_source_intent_actions_widget.setVisible(False)
         self._open_remote_page_button = QPushButton("Open remote page")
         self._open_remote_page_button.setObjectName("inventory_open_remote_page_button")
         self._open_remote_page_button.setEnabled(False)
@@ -496,6 +523,9 @@ class MainWindow(QMainWindow):
         self._mods_table.itemSelectionChanged.connect(
             self._refresh_selected_mod_update_guidance
         )
+        self._mark_local_private_button.clicked.connect(self._on_mark_selected_mod_local_private)
+        self._disable_tracking_button.clicked.connect(self._on_disable_selected_mod_tracking)
+        self._clear_source_intent_button.clicked.connect(self._on_clear_selected_mod_source_intent)
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
         self._archive_filter_input.textChanged.connect(self._apply_archive_filter)
@@ -680,6 +710,7 @@ class MainWindow(QMainWindow):
         inventory_layout.addLayout(inventory_filter_row)
         inventory_layout.addWidget(self._inventory_update_guidance_label)
         inventory_layout.addWidget(self._inventory_blocked_detail_label)
+        inventory_layout.addWidget(self._inventory_source_intent_actions_widget)
         inventory_layout.addWidget(flow_hint_label)
         inventory_layout.addWidget(self._mods_table, 1)
         workspace_splitter.addWidget(inventory_group)
@@ -2880,6 +2911,11 @@ class MainWindow(QMainWindow):
                 enabled=False,
                 tooltip="Select an actionable mod row to open its remote page.",
             )
+            self._refresh_inventory_source_intent_action_state(
+                selected_unique_id=None,
+                selected=False,
+                can_manage_intent=False,
+            )
             self._inventory_update_guidance_label.setText(message)
             self._inventory_update_guidance_label.setToolTip(message)
             return
@@ -2894,6 +2930,11 @@ class MainWindow(QMainWindow):
                 enabled=False,
                 tooltip="Select an actionable mod row to open its remote page.",
             )
+            self._refresh_inventory_source_intent_action_state(
+                selected_unique_id=None,
+                selected=False,
+                can_manage_intent=False,
+            )
             self._inventory_update_guidance_label.setText(message)
             self._inventory_update_guidance_label.setToolTip(message)
             return
@@ -2906,6 +2947,11 @@ class MainWindow(QMainWindow):
         is_actionable = name_item.data(_ROLE_UPDATE_ACTIONABLE) is True
         blocked_reason = name_item.data(_ROLE_UPDATE_BLOCK_REASON)
         overlay_intent = self._resolve_inventory_update_source_intent(selected_unique_id)
+        can_manage_intent = bool(
+            selected_unique_id
+            and not is_actionable
+            and not (status is None and status_text == "not_checked")
+        )
 
         if status is None and status_text == "not_checked":
             message = (
@@ -2960,6 +3006,11 @@ class MainWindow(QMainWindow):
                 tooltip="Remote-page action is unavailable for the selected row.",
             )
 
+        self._refresh_inventory_source_intent_action_state(
+            selected_unique_id=selected_unique_id,
+            selected=True,
+            can_manage_intent=can_manage_intent,
+        )
         self._inventory_update_guidance_label.setText(message)
         self._inventory_update_guidance_label.setToolTip(message)
 
@@ -2981,6 +3032,63 @@ class MainWindow(QMainWindow):
     def _set_open_remote_page_state(self, *, enabled: bool, tooltip: str) -> None:
         self._open_remote_page_button.setEnabled(enabled)
         self._open_remote_page_button.setToolTip(tooltip)
+
+    def _refresh_inventory_source_intent_action_state(
+        self,
+        *,
+        selected_unique_id: str | None,
+        selected: bool,
+        can_manage_intent: bool,
+    ) -> None:
+        self._inventory_source_intent_actions_widget.setVisible(selected)
+        self._mark_local_private_button.setEnabled(can_manage_intent)
+        self._disable_tracking_button.setEnabled(can_manage_intent)
+        has_saved_intent = bool(
+            selected_unique_id and self._resolve_inventory_update_source_intent(selected_unique_id) is not None
+        )
+        self._clear_source_intent_button.setEnabled(can_manage_intent and has_saved_intent)
+
+    def _selected_inventory_row_unique_id(self) -> str | None:
+        row = self._mods_table.currentRow()
+        if row < 0 or self._mods_table.isRowHidden(row) or not self._mods_table.selectedItems():
+            return None
+        unique_id_item = self._mods_table.item(row, 1)
+        if unique_id_item is None:
+            return None
+        unique_id = unique_id_item.text().strip()
+        return unique_id or None
+
+    def _set_selected_mod_update_source_intent(self, intent_state: str) -> None:
+        selected_unique_id = self._selected_inventory_row_unique_id()
+        if selected_unique_id is None:
+            self._set_status("Select a blocked installed mod row to manage saved source intent.")
+            return
+        try:
+            self._shell_service.set_update_source_intent(selected_unique_id, intent_state)
+        except AppShellError as exc:
+            self._set_status(str(exc))
+            return
+        self._refresh_selected_mod_update_guidance()
+        self._set_status(f"Saved update-source intent for {selected_unique_id}: {intent_state}.")
+
+    def _on_mark_selected_mod_local_private(self) -> None:
+        self._set_selected_mod_update_source_intent("local_private_mod")
+
+    def _on_disable_selected_mod_tracking(self) -> None:
+        self._set_selected_mod_update_source_intent("no_tracking")
+
+    def _on_clear_selected_mod_source_intent(self) -> None:
+        selected_unique_id = self._selected_inventory_row_unique_id()
+        if selected_unique_id is None:
+            self._set_status("Select a blocked installed mod row to manage saved source intent.")
+            return
+        try:
+            self._shell_service.clear_update_source_intent(selected_unique_id)
+        except AppShellError as exc:
+            self._set_status(str(exc))
+            return
+        self._refresh_selected_mod_update_guidance()
+        self._set_status(f"Cleared saved update-source intent for {selected_unique_id}.")
 
     def _apply_discovery_filter(self, *_: object) -> None:
         filter_text = self._discovery_filter_input.text()
