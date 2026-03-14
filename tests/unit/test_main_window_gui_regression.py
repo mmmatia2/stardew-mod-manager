@@ -369,6 +369,67 @@ def test_main_window_inventory_update_actionability_filter_exists_with_default_a
     assert action_filter.currentData() == "all"
 
 
+def test_main_window_inventory_selected_row_update_guidance_line_exists_and_defaults_neutral(
+    main_window: MainWindow,
+) -> None:
+    guidance_label = main_window.findChild(QLabel, "inventory_update_guidance_label")
+
+    assert guidance_label is not None
+    assert guidance_label.text() == "Select an installed mod row to see update guidance."
+
+
+def test_main_window_inventory_selected_row_guidance_shows_actionable_message(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    actionable_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    assert actionable_row >= 0
+    main_window._mods_table.setCurrentCell(actionable_row, 0)
+    qapp.processEvents()
+
+    guidance_text = main_window._inventory_update_guidance_label.text()
+    assert "Alpha Mod: update available. Open remote page to continue." == guidance_text
+
+
+def test_main_window_inventory_selected_row_guidance_shows_blocked_reason(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+    report = _update_report_for_update_actionability_tests()
+
+    main_window._render_inventory(inventory)
+    main_window._apply_update_report(report)
+    blocked_row = _find_mod_row(main_window._mods_table, "Beta Mod")
+    assert blocked_row >= 0
+    main_window._mods_table.setCurrentCell(blocked_row, 0)
+    qapp.processEvents()
+
+    guidance_text = main_window._inventory_update_guidance_label.text()
+    assert guidance_text == "Beta Mod: No remote link available."
+
+
+def test_main_window_inventory_selected_row_guidance_shows_not_checked_prompt(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    inventory = _inventory_for_update_actionability_tests()
+
+    main_window._render_inventory(inventory)
+    not_checked_row = _find_mod_row(main_window._mods_table, "Gamma Mod")
+    assert not_checked_row >= 0
+    main_window._mods_table.setCurrentCell(not_checked_row, 0)
+    qapp.processEvents()
+
+    guidance_text = main_window._inventory_update_guidance_label.text()
+    assert guidance_text == "Gamma Mod: run Check updates to evaluate update actionability."
+
+
 def test_main_window_inventory_update_actionability_filter_modes_show_expected_subsets(
     main_window: MainWindow,
     qapp: QApplication,
@@ -2684,6 +2745,14 @@ def _visible_mod_names(table: QTableWidget) -> tuple[str, ...]:
         if item is not None:
             names.append(item.text())
     return tuple(names)
+
+
+def _find_mod_row(table: QTableWidget, mod_name: str) -> int:
+    for row in range(table.rowCount()):
+        item = table.item(row, 0)
+        if item is not None and item.text() == mod_name:
+            return row
+    return -1
 
 
 def _inventory_for_update_actionability_tests() -> ModsInventory:

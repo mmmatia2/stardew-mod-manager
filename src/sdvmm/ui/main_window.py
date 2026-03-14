@@ -210,6 +210,13 @@ class MainWindow(QMainWindow):
         self._discovery_filter_stats_label = QLabel("0/0 shown")
         self._intake_filter_stats_label = QLabel("0/0 shown")
         self._archive_filter_stats_label = QLabel("0/0 shown")
+        self._inventory_update_guidance_label = QLabel(
+            "Select an installed mod row to see update guidance."
+        )
+        self._inventory_update_guidance_label.setObjectName(
+            "inventory_update_guidance_label"
+        )
+        self._inventory_update_guidance_label.setWordWrap(True)
         for stats_label in (
             self._mods_filter_stats_label,
             self._discovery_filter_stats_label,
@@ -439,6 +446,9 @@ class MainWindow(QMainWindow):
         self._mods_update_actionability_filter_combo.currentIndexChanged.connect(
             self._apply_mods_filter
         )
+        self._mods_table.itemSelectionChanged.connect(
+            self._refresh_selected_mod_update_guidance
+        )
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
         self._archive_filter_input.textChanged.connect(self._apply_archive_filter)
@@ -622,6 +632,7 @@ class MainWindow(QMainWindow):
         inventory_layout.addWidget(_section_label("Installed Mods Workspace"))
         inventory_layout.addWidget(inventory_controls_tabs)
         inventory_layout.addLayout(inventory_filter_row)
+        inventory_layout.addWidget(self._inventory_update_guidance_label)
         inventory_layout.addWidget(flow_hint_label)
         inventory_layout.addWidget(self._mods_table, 1)
         workspace_splitter.addWidget(inventory_group)
@@ -2758,12 +2769,47 @@ class MainWindow(QMainWindow):
             shown_count=visible_count,
             total_count=self._mods_table.rowCount(),
         )
+        self._refresh_selected_mod_update_guidance()
 
     def _current_mods_update_actionability_filter(self) -> str:
         value = self._mods_update_actionability_filter_combo.currentData()
         if isinstance(value, str):
             return value
         return "all"
+
+    def _refresh_selected_mod_update_guidance(self) -> None:
+        row = self._mods_table.currentRow()
+        if row < 0 or self._mods_table.isRowHidden(row):
+            message = "Select an installed mod row to see update guidance."
+            self._inventory_update_guidance_label.setText(message)
+            self._inventory_update_guidance_label.setToolTip(message)
+            return
+
+        name_item = self._mods_table.item(row, 0)
+        status_item = self._mods_table.item(row, 4)
+        if name_item is None:
+            message = "Select an installed mod row to see update guidance."
+            self._inventory_update_guidance_label.setText(message)
+            self._inventory_update_guidance_label.setToolTip(message)
+            return
+
+        mod_name = name_item.text().strip() or "Selected mod"
+        status_text = status_item.text().strip() if status_item is not None else ""
+        status = name_item.data(_ROLE_MOD_UPDATE_STATUS)
+        is_actionable = name_item.data(_ROLE_UPDATE_ACTIONABLE) is True
+        blocked_reason = name_item.data(_ROLE_UPDATE_BLOCK_REASON)
+
+        if status is None and status_text == "not_checked":
+            message = f"{mod_name}: run Check updates to evaluate update actionability."
+        elif is_actionable:
+            message = f"{mod_name}: update available. Open remote page to continue."
+        elif isinstance(blocked_reason, str) and blocked_reason.strip():
+            message = f"{mod_name}: {blocked_reason.strip()}"
+        else:
+            message = f"{mod_name}: no update action is currently available."
+
+        self._inventory_update_guidance_label.setText(message)
+        self._inventory_update_guidance_label.setToolTip(message)
 
     def _apply_discovery_filter(self, *_: object) -> None:
         filter_text = self._discovery_filter_input.text()
