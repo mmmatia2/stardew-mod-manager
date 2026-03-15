@@ -1,0 +1,54 @@
+# -*- mode: python ; coding: utf-8 -*-
+from pathlib import Path
+import tomllib
+
+from PyInstaller.utils.hooks import copy_metadata
+
+
+ROOT = Path(SPECPATH).resolve().parent
+PYPROJECT = ROOT / "pyproject.toml"
+PROJECT = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
+VERSION = PROJECT["version"]
+DIST_NAME = f"stardew-mod-manager-{VERSION}-windows-portable"
+
+datas = copy_metadata("stardew-mod-manager")
+
+a = Analysis(
+    [str(ROOT / "src" / "sdvmm" / "app" / "main.py")],
+    pathex=[str(ROOT / "src")],
+    binaries=[],
+    datas=datas,
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="Stardew Mod Manager",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name=DIST_NAME,
+    contents_directory="_internal",
+)

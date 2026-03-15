@@ -148,6 +148,39 @@ You can still run focused suites when iterating:
 .\.venv\Scripts\python.exe -m pytest tests\unit\test_main_window_gui_regression.py -q
 ```
 
+### 4) Build Windows portable folder (`0.2.0`)
+
+Packaging baseline in this repo uses **PyInstaller one-folder** output because it is the smallest practical Windows desktop packaging path here without introducing installer/signing work.
+
+Install the packaging dependency:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e .[build]
+```
+
+Build the portable folder:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\build_windows_portable.py
+```
+
+Output folder:
+
+```text
+dist\stardew-mod-manager-0.2.0-windows-portable\
+```
+
+Launch the packaged app:
+
+```powershell
+.\dist\stardew-mod-manager-0.2.0-windows-portable\Stardew Mod Manager.exe
+```
+
+Current caveats:
+- this is a portable folder build, not an installer
+- no code signing yet, so Windows reputation prompts are still expected
+- no auto-update or release-hardening work yet
+
 ## Known limitations (current)
 
 - no automated provider-compliant download pipeline yet (manual download remains required)
