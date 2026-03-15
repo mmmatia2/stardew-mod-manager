@@ -24,7 +24,6 @@ Implemented:
 - update check awareness flow
 - selected-row remote-page handoff
 - intake staging into `Plan & Install`
-- local workflow output in owning tabs
 - install-to-recovery continuity
 
 ### 3. Managed Live Mods Safety Baseline
@@ -46,129 +45,110 @@ Implemented baseline:
 - recovery filtering
 - recovery execution path with status continuity
 
+### 5. Update Source Diagnostics / Persistence / Repair Foundations
+
+Implemented:
+
+- typed update-source diagnostics below the UI
+- Inventory binding to typed diagnostics
+- atomic app-state and history writes
+- honest handling of critical history-recording failure
+- platform-correct app-state path behavior
+- durable update-source intent overlay
+- local/private and no-tracking intent
+- manual source association storage and UI
+- manual source association participation in update checks
+
+### 6. Information Architecture Simplification (Paused)
+
+Implemented enough for now:
+
+- bottom area reduced to output-only ownership
+- setup moved into a dedicated workspace tab
+- duplicate narrative/detail access scaffolding removed
+- top context and status ownership reduced
+- shell/tab alignment issue driven down to an acceptable stop point
+
+Paused because:
+
+- product-facing sandbox/dev workflow completion is now higher value than more decomposition or shell polish
+- additional UI cleanup is hitting diminishing returns relative to workflow gaps
+
 ## Current phase
 
-### 5. Dependency / Conflict / Update Ergonomics
+### 7. Sandbox Dev Loop Foundation
 
-Completed inside this phase so far:
+Completed or in hand:
 
-- inventory update-actionability filter
-- selected-row update guidance
-- selected-row remote action enablement
-- `Plan & Install` review summary, explanation, and facts
-- initial selected-row update-source diagnostics surface
+- sandbox-only SMAPI dev launch using `--mods-path <sandbox>`
+- runtime readiness/status for sandbox launch
+- explicit selected-mod `real -> sandbox` sync
+- block-on-conflict, no-overwrite sync policy
 
-### Current priority inside this phase
+Current stage in review:
 
-Promote update-source diagnostics below the UI and bind the Inventory surface to that typed contract.
+- explicit selected-mod `sandbox -> real` managed promotion
+- confirmation-first live write flow
+- block-on-conflict live-target policy
+- synthetic install-history recording so promotion remains inspectable/recoverable
 
-That means:
+Why this phase is current priority:
 
-- add typed update-source diagnostics in the domain/app/service layer
-- bind the Inventory UI to that typed contract
-- explicitly distinguish unsupported key format, missing key, missing remote link, provider-mapping failure, and metadata lookup failure
-- eliminate UI-side reconstruction of source diagnostics from user-facing strings
+- it directly supports the actual personal mod-development loop
+- it keeps real personal Mods isolated from dev/test iteration
+- it has higher product value than more generic UI decomposition
 
 ## Next phase
 
-### 6. Update Source Diagnostics Contract
+### 8. Sandbox Dev Loop Ergonomics
 
-Scope:
+Likely scope:
 
-- promote update-source diagnostics into a typed contract
-- keep user-facing update-check behavior read-only
-- preserve current status/message behavior unless a small wording fix is required for correctness
-
-Validation gate:
-
-- update-source failure categories are testable below the UI
-- Inventory diagnostics can stop being driven by message parsing in the following increment
-
-Explicitly out of scope:
-
-- metadata editing
-- manual source association
-- provider automation
-
-### 7. Persistence and Release-Safety Foundations
-
-Scope:
-
-- atomic app-state and history writes
-- honest handling of install/recovery history write failure
-- platform-correct app-state storage behavior
-- stronger persistence durability for the app's safety/reversibility promise
+- conflict preview / promotion clarity
+- open sandbox / real Mods convenience actions
+- automatic rescan or destination-focus decisions after sync/promotion
+- clearer launch/readiness explanation for sandbox workflow
 
 Validation gate:
 
-- install and recovery history writes are crash-safer than direct overwrite
-- critical history-recording failure is not silently swallowed in paths that claim reversibility
-- state-file path behavior is appropriate for the supported desktop platform targets
+- repeated dev-loop use feels explicit and low-friction without weakening real-Mods safety
 
 Explicitly out of scope:
 
-- database introduction
-- installer/signing work
-- broad release packaging
-
-### 8A. Update Source Association and Local-Private State
-
-Scope:
-
-- add a durable app-level way to distinguish:
-  - local/private mods
-  - intentionally untracked mods
-  - repairable remote-source problems
-
-Validation gate:
-
-- a repeated update check can preserve source-association intent without re-guessing from manifest metadata alone
-
-Explicitly out of scope:
-
-- automatic repair
-- automatic downloads
-
-### 8B. Update Source Repair UX
-
-Scope:
-
-- only after diagnostics and source-association state are reliable, add a narrow row-local repair flow for missing or broken update sources
-
-Validation gate:
-
-- a user can understand what is wrong with an update source and what, if anything, is fixable
-
-Explicitly out of scope:
-
-- automatic remote repair
-- automatic downloads
+- raw bidirectional mirroring
+- blind overwrite into real Mods
+- profile or instance systems
+- build/watch automation
 
 ## Later planned phases
 
-### 9. Information Architecture Simplification
+### 9. Recovery and Promotion Hardening
 
-Planned audits:
+Planned scope:
 
-1. duplicate-information / ownership audit
-2. interaction-model / redesign-necessity audit
+- archive-aware replace/promotion policy if block-on-conflict becomes too limiting
+- stronger preview/review surfaces for live promotion and recovery
+- auditability improvements for live-write workflows
 
-Entry criteria:
+### 10. Information Architecture Follow-up
 
-- update-source diagnostics are a typed contract
-- current workflow surfaces are no longer changing every few days
-- `Plan & Install` information ownership is stable enough to audit
+Revisit only after the sandbox dev loop is no longer the main product blocker.
 
-### 10. Visual Polish and Release UX
+Planned scope:
+
+- remaining ownership cleanup
+- `Plan & Install` / `Recovery` surface simplification if still justified
+- progressive disclosure for dense but stable workflows
+
+### 11. Visual Polish and Release UX
 
 Planned scope:
 
 - visual hierarchy cleanup
 - warning/disabled-state clarity
-- progressive disclosure where the app still feels overly dense
 - first-run and advanced-mode UX clarity
 
-### 11. Public Release Hardening
+### 12. Public Release Hardening
 
 Planned scope:
 
@@ -177,9 +157,8 @@ Planned scope:
 - code signing
 - CI
 - persistence migration discipline
-- first-run/onboarding clarity
 
-### 12. Provider-Compliant Automation
+### 13. Provider-Compliant Automation
 
 Planned scope:
 
@@ -188,4 +167,3 @@ Planned scope:
 - no scraping
 - no premium bypass
 - no one-click install-from-search until explicitly designed and approved
-- not a first-release requirement

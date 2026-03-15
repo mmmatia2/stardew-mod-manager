@@ -18,7 +18,7 @@ The goal is not to restate the whole codebase. The goal is to give enough high-s
 - Entry point: `sdvmm-ui` -> [`src/sdvmm/app/main.py`](/Users/darth/Projects/stardew-mod-manager/src/sdvmm/app/main.py)
 - Current validation baseline:
   - `.\.venv\Scripts\python.exe -m pytest tests\unit -q`
-  - latest verified result in this thread: `351 passed, 1 skipped`
+  - latest verified result in this thread: `415 passed, 1 skipped`
   - UI startup smoke also passes offscreen
 - Product posture:
   - local-first
@@ -42,6 +42,9 @@ The app is no longer just a scanner. It now has a coherent local workflow:
 9. record install history
 10. derive/review/execute recovery
 11. inspect linked recovery history
+12. launch Stardew/SMAPI against sandbox Mods only
+13. sync selected real Mods into sandbox Mods
+14. promote selected sandbox Mods into real Mods through an explicit managed flow
 
 The product is not feature-complete for public release, but it is materially beyond prototype state.
 
@@ -74,6 +77,7 @@ The current architecture intentionally keeps:
 - `MainWindow` is still the largest integration surface and the main UX composition point
 - `AppShellService` is the workflow backbone
 - install and recovery history are file-backed, versioned, and now include stable IDs
+- sandbox dev-loop trust now depends heavily on `AppShellService` path validation and live-write policy
 
 ## Current Strengths
 
@@ -99,41 +103,49 @@ The previously fragmented workflow has been tightened:
 - `Plan & Install` owns planning/review/execution
 - recovery is local to the same workflow surface
 - install completion now links back into recovery selection
+- sandbox launch/sync/promotion now make the app directly useful for mod-development iteration, not just mod curation
 
 ### UI composition progress
 
 The app has already corrected several structural UI mistakes:
 
-- `Plan & Install` now has a tab-local scroll host for constrained height
-- `Packages & Intake`, `Plan & Install`, and `Recovery` have local output surfaces
-- primary controls were moved out of the global detail area
+- primary controls were moved out of the bottom detail area
+- setup/configuration now lives in the main workspace instead of the bottom panel
+- the bottom area is now output-only
+
+The UI is still dense, but further generic decomposition is no longer the highest-value track.
 
 ## Current Weak Spots
 
-### 1. Update-source diagnostics are still heuristic
+### 1. Sandbox promotion policy is intentionally conservative
 
-The newest work in progress is around blocked update rows such as:
+The product now has explicit:
 
-- `no_remote_link`
-- `metadata_unavailable`
+- sandbox-only launch
+- selected `real -> sandbox` sync
+- selected `sandbox -> real` promotion
 
-Current diagnostics are still inferred from UI-visible strings and existing selected-row state. This is useful, but not yet a durable backend contract.
+The remaining question is not whether the dev loop exists. It is how aggressive live promotion should become next.
 
-The main unresolved product question is:
+Current behavior is intentionally conservative:
 
-> Should update-source diagnostics stay as UI heuristics, or should the app promote them into a proper domain/app contract?
+- block on conflict
+- no blind overwrite
+- archive/recovery trust preserved for real writes
+
+The next unresolved product question is:
+
+> Should the next step stay block-on-conflict, or move to archive-then-replace with an explicit preview/review step?
 
 ### 2. `MainWindow` is still the densest integration point
 
-The app has improved composition and ownership boundaries, but `MainWindow` still carries substantial UI workflow logic and cross-surface coordination.
+The app has improved ownership boundaries, but `MainWindow` still carries substantial UI workflow logic and cross-surface coordination.
 
-This is acceptable for now because product-facing workflow completion was prioritized over continued extraction, but it remains a maintenance risk.
+This is acceptable for now because product-facing workflow completion was correctly prioritized, but it remains a maintenance risk.
 
-### 3. Narrative output boxes still exist as secondary truth surfaces
+### 3. Desktop interaction density is improved, not solved
 
-Structured summaries/explanations/facts have been added to reduce dependence on narrative output, but the narrative boxes are still useful fallback/detail/debug surfaces.
-
-The app should not remove them yet, but a future audit should determine when they can be collapsed or retired.
+The app is cleaner than before, but workflow surfaces are still dense. This is now a secondary concern behind sandbox dev-loop trust and live-write clarity.
 
 ### 4. Public-release readiness work has barely started
 
@@ -184,64 +196,37 @@ Notably still pending:
 
 ### In progress
 
-#### 5. Dependency / Conflict / Update Ergonomics
+#### 5. Sandbox Dev Loop Foundation
 
-Already completed within this phase:
+Already completed or effectively implemented:
 
-- update actionability filter in Inventory
-- selected-row update guidance
-- selected-row remote action enablement
-- plan review summary/explanation/facts in `Plan & Install`
-- initial selected-row update-source diagnostics line
+- sandbox-only SMAPI dev launch
+- selected `real -> sandbox` sync
+- selected `sandbox -> real` managed promotion
 
 Current recommendation:
 
-- finish the typed update-source diagnostics contract
-- then rebind Inventory UI to typed diagnostics
-- then move persistence durability and honest history-recording behavior ahead of broader UX cleanup
+- close manual validation on live promotion wording/UX
+- then move to the next smallest ergonomics and conflict-preview increment
 
 ### Next likely phase
 
-#### 6. Update Source Diagnostics Contract
+#### 6. Sandbox Dev Loop Ergonomics
 
-This phase should promote diagnostics below the UI and distinguish:
+This phase should determine which one small improvement matters most:
 
-- local/private mod
-- missing update key
-- unsupported update key format
-- remote metadata lookup failure
-- no provider mapping
-- generic unknown source issue
-
-#### 7. Persistence and Release-Safety Foundations
-
-This phase should harden:
-
-- atomic app-state and history writes
-- honest handling of history-recording failure
-- platform-correct app-state storage behavior
-
-#### 8. Update Source Association and Repair UX
-
-Only after diagnostics are reliable, this phase should determine whether users need:
-
-- manual source association
-- explicit local/private or no-tracking state
-- update-key correction
-- unsupported provider mapping explanation
+- conflict preview before promotion
+- archive-aware replace policy
+- open sandbox / real Mods convenience actions
+- auto-rescan / destination-focus after sync or promotion
 
 ### Later planned phase
 
-#### 9. Information Architecture Simplification
+#### 7. Information Architecture Follow-up
 
-This should happen only after the current workflow surfaces are stable enough to audit meaningfully and update diagnostics no longer depend on UI heuristics.
+The UI simplification track is now intentionally paused until sandbox-dev workflow trust work is no longer the main blocker.
 
-Planned audits:
-
-1. information architecture / duplicate-information audit
-2. interaction-model / redesign-necessity audit
-
-#### 10. Visual Feedback and Polish
+#### 8. Visual Feedback and Polish
 
 This phase should happen after the IA simplification decisions are made, not before.
 
@@ -251,41 +236,36 @@ An external model should specifically challenge these points:
 
 ### A. Is the current roadmap still in the right order?
 
-The present recommendation is to continue with update-source diagnostics before doing the bigger UX consolidation phase.
+The current recommendation is to keep the sandbox dev-loop track ahead of more generic UX consolidation.
 
 Question:
 
-> Is that the right order, or has the UI reached the point where consolidation should happen sooner?
+> Is it correct to keep sandbox launch/sync/promotion ergonomics ahead of more UI consolidation and polish?
 
-### B. Should update diagnostics become a real service/domain contract?
-
-Right now they are mostly UI-derived from existing states/messages.
+### B. Should live promotion stay conservative longer?
 
 Question:
 
-> Is it time to add a first-class update-source diagnostics model below the UI, or is that premature?
+> Should `sandbox -> real` remain block-on-conflict until a preview/archive-replace flow exists, or is the current product value too limited without the next safety-managed replace step?
 
 ### C. What should remain global vs tab-local?
 
 The app now has:
 
 - a global status strip
-- tab-local outputs
-- local summary/explanation/facts in `Plan & Install`
+- tab-local workflow surfaces
 - selected-row guidance in `Inventory`
-- a legacy bottom detail surface
+- a bottom detailed-output surface
 
 Question:
 
 > Which of these should remain, collapse, or be retired?
 
-### D. Is the current desktop interaction model still too dense?
-
-The current UI is functionally coherent, but still visually crowded.
+### D. What is the next best sandbox-dev ergonomics increment?
 
 Question:
 
-> Where should the app adopt progressive disclosure, modals, expanders, or a stronger task-oriented layout?
+> After launch/sync/promotion foundation exists, which one improvement most increases trust and repeated use: preview, archive-replace, open-folder conveniences, or launch-after-action convenience?
 
 ## Explicit Constraints for the External Audit
 
@@ -297,6 +277,7 @@ The external audit should respect these repository/product constraints:
 - sandbox remains the recommended path until live flows are fully validated
 - destructive or live-Mods operations require archive/recovery semantics
 - product-facing workflow completion is favored over refactor churn
+- real->sandbox and sandbox->real are intentionally asymmetric workflows
 
 ## Recommended Files To Read First
 
@@ -317,8 +298,8 @@ A useful audit response should include:
 
 - architecture risks ordered by severity
 - roadmap-order challenges, if any
-- whether update-source diagnostics should stay UI-level or move below the UI
-- concrete suggestions for simplifying the current UI without breaking workflow clarity
-- criteria for when the app is ready for the later UI/UX consolidation phase
-- whether persistence hardening is correctly placed early enough in the roadmap
+- whether the sandbox dev-loop track is correctly prioritized
+- whether the promotion flow should stay conservative or move to archive-aware replace
+- concrete suggestions for improving sandbox-dev ergonomics without weakening real-Mods safety
+- criteria for when the app is ready to resume later UI/UX consolidation work
 - the next 3-5 smallest safe increments, ordered by product value

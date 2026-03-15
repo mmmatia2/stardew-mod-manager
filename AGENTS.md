@@ -45,6 +45,10 @@ It does not replace the thread-specific role prompt for the ARCHITECT or the EXE
 
 - Preserve safe-by-default and reversible workflow semantics.
 - Sandbox remains the recommended path until managed live-install flows are fully validated.
+- Treat `real -> sandbox` sync and `sandbox -> real` promotion as intentionally asymmetric:
+  - `real -> sandbox` may be an explicit selected-mod sync
+  - `sandbox -> real` must remain a managed promotion flow with real-Mods safety semantics
+- Do not introduce raw bidirectional mirroring that bypasses archive/recovery guarantees for live Mods.
 - No premium-bypass behavior.
 - No scraping or browser automation for downloads.
 - Automatic downloads are allowed only when they use official provider mechanisms, valid user credentials, and provider-compliant flows.
@@ -58,6 +62,7 @@ It does not replace the thread-specific role prompt for the ARCHITECT or the EXE
 ## Product roadmap discipline
 
 - Prefer product-facing workflow completion and trust features over further UI decomposition.
+- When the sandbox dev loop is blocking real product use, prioritize launch/sync/promotion trust work ahead of more shell polish or decomposition.
 - Treat destructive or real-Mods operations as requiring backup/archive and a recovery path.
 - Optimize for public-user clarity, not only power-user personal workflow speed.
 - Do not reopen paused extraction tracks without a concrete product reason.

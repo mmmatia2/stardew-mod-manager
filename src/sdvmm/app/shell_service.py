@@ -55,6 +55,7 @@ from sdvmm.domain.models import (
     SmapiLogReport,
     SmapiUpdateStatus,
     SandboxInstallPlan,
+    SandboxInstallPlanEntry,
     SandboxInstallResult,
 )
 from sdvmm.domain.nexus_codes import (
@@ -198,6 +199,28 @@ class SandboxModsSyncResult:
     sandbox_mods_path: Path
     source_mod_paths: tuple[Path, ...]
     synced_target_paths: tuple[Path, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxModsPromotionReadiness:
+    ready: bool
+    message: str
+    real_mods_path: Path | None = None
+    sandbox_mods_path: Path | None = None
+    archive_path: Path | None = None
+    selected_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxModsPromotionResult:
+    destination_kind: InstallTargetKind
+    real_mods_path: Path
+    sandbox_mods_path: Path
+    archive_path: Path
+    source_mod_paths: tuple[Path, ...]
+    promoted_target_paths: tuple[Path, ...]
+    scan_context_path: Path
+    inventory: ModsInventory
 
 
 @dataclass(frozen=True, slots=True)
@@ -855,6 +878,144 @@ class AppShellService:
             sandbox_mods_path=sandbox_mods_path,
             source_mod_paths=source_paths,
             synced_target_paths=tuple(synced_target_paths),
+        )
+
+    def get_sandbox_mods_promotion_readiness(
+        self,
+        *,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        selected_mod_folder_paths_text: Iterable[str],
+        existing_config: AppConfig | None = None,
+    ) -> SandboxModsPromotionReadiness:
+        try:
+            real_mods_path, sandbox_mods_path, archive_path, source_paths, _ = (
+                self._resolve_sandbox_mod_promotion_context(
+                    configured_mods_path_text=configured_mods_path_text,
+                    sandbox_mods_path_text=sandbox_mods_path_text,
+                    real_archive_path_text=real_archive_path_text,
+                    selected_mod_folder_paths_text=selected_mod_folder_paths_text,
+                    existing_config=existing_config,
+                )
+            )
+        except AppShellError as exc:
+            return SandboxModsPromotionReadiness(ready=False, message=str(exc))
+
+        return SandboxModsPromotionReadiness(
+            ready=True,
+            message=(
+                f"Ready to promote {len(source_paths)} selected mod(s) "
+                "from sandbox Mods into the configured real Mods path."
+            ),
+            real_mods_path=real_mods_path,
+            sandbox_mods_path=sandbox_mods_path,
+            archive_path=archive_path,
+            selected_count=len(source_paths),
+        )
+
+    def promote_installed_mods_from_sandbox_to_real(
+        self,
+        *,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        selected_mod_folder_paths_text: Iterable[str],
+        existing_config: AppConfig | None = None,
+    ) -> SandboxModsPromotionResult:
+        real_mods_path, sandbox_mods_path, archive_path, source_paths, source_inventory = (
+            self._resolve_sandbox_mod_promotion_context(
+                configured_mods_path_text=configured_mods_path_text,
+                sandbox_mods_path_text=sandbox_mods_path_text,
+                real_archive_path_text=real_archive_path_text,
+                selected_mod_folder_paths_text=selected_mod_folder_paths_text,
+                existing_config=existing_config,
+            )
+        )
+
+        selected_mods_by_path = {
+            str(mod.folder_path): mod
+            for mod in source_inventory.mods
+            if str(mod.folder_path) in {str(path) for path in source_paths}
+        }
+        copied_targets: list[Path] = []
+        try:
+            for source_path in source_paths:
+                target_path = real_mods_path / source_path.name
+                shutil.copytree(source_path, target_path)
+                copied_targets.append(target_path)
+        except OSError as exc:
+            for copied_target in reversed(copied_targets):
+                if copied_target.exists():
+                    shutil.rmtree(copied_target, ignore_errors=True)
+            raise AppShellError(f"Sandbox promotion failed: {exc}") from exc
+
+        inventory = scan_mods_directory(
+            real_mods_path,
+            excluded_paths=(archive_path, real_mods_path / _LEGACY_ARCHIVE_DIRNAME),
+        )
+        plan = SandboxInstallPlan(
+            package_path=_promotion_history_source_marker(
+                sandbox_mods_path=sandbox_mods_path,
+                source_paths=source_paths,
+            ),
+            sandbox_mods_path=real_mods_path,
+            sandbox_archive_path=archive_path,
+            entries=tuple(
+                SandboxInstallPlanEntry(
+                    name=selected_mods_by_path.get(str(source_path), None).name
+                    if str(source_path) in selected_mods_by_path
+                    else source_path.name,
+                    unique_id=selected_mods_by_path.get(str(source_path), None).unique_id
+                    if str(source_path) in selected_mods_by_path
+                    else source_path.name,
+                    version=selected_mods_by_path.get(str(source_path), None).version
+                    if str(source_path) in selected_mods_by_path
+                    else "",
+                    source_manifest_path=str(
+                        selected_mods_by_path.get(str(source_path), None).manifest_path
+                    )
+                    if str(source_path) in selected_mods_by_path
+                    else str(source_path / "manifest.json"),
+                    source_root_path=str(source_path),
+                    target_path=real_mods_path / source_path.name,
+                    action=INSTALL_NEW,
+                    target_exists=False,
+                    archive_path=None,
+                    can_install=True,
+                    warnings=(
+                        "Promoted from sandbox Mods selection via explicit managed action.",
+                    ),
+                )
+                for source_path in source_paths
+            ),
+            package_findings=tuple(),
+            package_warnings=tuple(),
+            plan_warnings=(
+                "Sandbox promotion writes new targets into the configured real Mods path.",
+            ),
+            dependency_findings=tuple(),
+            remote_requirements=tuple(),
+            destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        )
+        result = SandboxInstallResult(
+            plan=plan,
+            installed_targets=tuple(copied_targets),
+            archived_targets=tuple(),
+            scan_context_path=real_mods_path,
+            inventory=inventory,
+            destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        )
+        self._record_completed_install_operation(plan=plan, result=result)
+        return SandboxModsPromotionResult(
+            destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+            real_mods_path=real_mods_path,
+            sandbox_mods_path=sandbox_mods_path,
+            archive_path=archive_path,
+            source_mod_paths=source_paths,
+            promoted_target_paths=tuple(copied_targets),
+            scan_context_path=real_mods_path,
+            inventory=inventory,
         )
 
     def check_smapi_update_status(
@@ -2192,6 +2353,68 @@ class AppShellService:
 
         return real_mods_path, sandbox_mods_path, source_paths
 
+    def _resolve_sandbox_mod_promotion_context(
+        self,
+        *,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        selected_mod_folder_paths_text: Iterable[str],
+        existing_config: AppConfig | None,
+    ) -> tuple[Path, Path, Path, tuple[Path, ...], ModsInventory]:
+        real_mods_path = self._resolve_optional_real_mods_path(
+            configured_mods_path_text=configured_mods_path_text,
+            existing_config=existing_config,
+        )
+        if real_mods_path is None:
+            raise AppShellError("Configured real Mods directory is required for sandbox promotion.")
+
+        sandbox_mods_path = self._resolve_optional_sandbox_mods_path(
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            existing_config=existing_config,
+        )
+        if sandbox_mods_path is None:
+            raise AppShellError("Sandbox Mods directory is required for sandbox promotion.")
+
+        if _paths_deterministically_match(real_mods_path, sandbox_mods_path):
+            raise AppShellError(
+                "Sandbox promotion is blocked: sandbox Mods path matches the configured real Mods path."
+            )
+
+        archive_path = self._parse_and_validate_archive_path(
+            archive_path_text=real_archive_path_text,
+            destination_mods_path=real_mods_path,
+            field_label="Real Mods archive path",
+            default_archive_dir_name=_DEFAULT_REAL_ARCHIVE_DIRNAME,
+        )
+
+        source_paths = self._resolve_selected_sandbox_mod_paths(
+            sandbox_mods_path=sandbox_mods_path,
+            selected_mod_folder_paths_text=selected_mod_folder_paths_text,
+        )
+        conflicting_targets = tuple(
+            real_mods_path / source_path.name
+            for source_path in source_paths
+            if (real_mods_path / source_path.name).exists()
+        )
+        if conflicting_targets:
+            conflict_names = ", ".join(target.name for target in conflicting_targets[:3])
+            if len(conflicting_targets) == 1:
+                raise AppShellError(
+                    "Sandbox promotion blocked: real Mods target already exists for "
+                    f"{conflict_names}. This stage does not overwrite live mods."
+                )
+            raise AppShellError(
+                "Sandbox promotion blocked: real Mods targets already exist for "
+                f"{conflict_names}. This stage does not overwrite live mods."
+            )
+
+        source_inventory = scan_mods_directory(
+            sandbox_mods_path,
+            excluded_paths=(sandbox_mods_path / _LEGACY_ARCHIVE_DIRNAME,),
+        )
+        return real_mods_path, sandbox_mods_path, archive_path, source_paths, source_inventory
+
     def _resolve_selected_real_mod_paths(
         self,
         *,
@@ -2219,6 +2442,39 @@ class AppShellService:
         validated_paths = [
             self._parse_and_validate_selected_mod_path(
                 mods_path=real_mods_path,
+                mod_folder_path_text=str(source_path),
+            )
+            for source_path in deduplicated_paths
+        ]
+        return tuple(validated_paths)
+
+    def _resolve_selected_sandbox_mod_paths(
+        self,
+        *,
+        sandbox_mods_path: Path,
+        selected_mod_folder_paths_text: Iterable[str],
+    ) -> tuple[Path, ...]:
+        deduplicated_paths: list[Path] = []
+        seen_keys: set[str] = set()
+        for raw_value in selected_mod_folder_paths_text:
+            path_text = str(raw_value).strip()
+            if not path_text:
+                continue
+            source_path = Path(path_text).expanduser()
+            key = str(source_path.resolve(strict=False))
+            if os.name == "nt":
+                key = key.casefold()
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduplicated_paths.append(source_path)
+
+        if not deduplicated_paths:
+            raise AppShellError("Select at least one installed sandbox mod row to promote.")
+
+        validated_paths = [
+            self._parse_and_validate_selected_mod_path(
+                mods_path=sandbox_mods_path,
                 mod_folder_path_text=str(source_path),
             )
             for source_path in deduplicated_paths
@@ -2750,6 +3006,16 @@ def _is_path_within_or_equal(candidate: Path, container: Path) -> bool:
         return candidate_resolved.is_relative_to(container_resolved)
     except ValueError:
         return False
+
+
+def _promotion_history_source_marker(
+    *,
+    sandbox_mods_path: Path,
+    source_paths: tuple[Path, ...],
+) -> Path:
+    if len(source_paths) == 1:
+        return source_paths[0]
+    return sandbox_mods_path / ".sdvmm-sandbox-promotion-selection"
 
 
 def _sorted_unique_ids(values: Iterable[str]) -> tuple[str, ...]:

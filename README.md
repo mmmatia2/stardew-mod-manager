@@ -15,16 +15,24 @@ Current maturity is best described as:
 - safety-oriented and increasingly test-covered
 - still evolving, with some UX and product-completion gaps called out below
 
+Current workflow emphasis:
+- sandbox-first mod development and validation
+- explicit, user-triggered movement between sandbox and real Mods
+- no hidden mirroring or blind overwrite of live Mods
+
 ## Current supported workflow
 
 1. Scan installed mods (`configured real Mods` or `sandbox Mods` target).
 2. Check updates for installed mods.
-3. Open remote provider page for actionable rows.
-4. Download mod archives manually.
-5. Let watcher/package intake detect new zip files.
-6. Stage selected package into Plan & Install.
-7. Build plan, review safety/summary/facts, then run install.
-8. Inspect recovery readiness and run recovery from recorded install history when allowed.
+3. Optionally sync selected installed mods from `real Mods -> sandbox Mods`.
+4. Launch the game through SMAPI against the sandbox Mods path only.
+5. Open remote provider page for actionable rows.
+6. Download mod archives manually.
+7. Let watcher/package intake detect new zip files.
+8. Stage selected package into Plan & Install.
+9. Build plan, review safety/summary/facts, then run install.
+10. Promote selected sandbox mods into real Mods through an explicit managed action when ready.
+11. Inspect recovery readiness and run recovery from recorded install history when allowed.
 
 Recommended path:
 - use **Sandbox Mods** as the default destination for testing
@@ -59,6 +67,11 @@ Live Mods safety expectations:
   - persisted app-level intent per mod (`local/private`, `no-tracking`, `manual source association`)
   - intent-aware diagnostics in Inventory
   - manual association now participates in update resolution
+- **Sandbox dev loop**
+  - sandbox-only SMAPI launch using the configured sandbox Mods path
+  - explicit selected-mod `real -> sandbox` sync
+  - explicit selected-mod `sandbox -> real` promotion
+  - conflict-blocking live promotion policy in the current stage
 
 ## Manual source guidance
 
@@ -97,6 +110,8 @@ Live Mods safety expectations:
 - no premium-bypass behavior
 - no one-click install-from-search
 - sandbox remains the recommended testing path
+- no raw bidirectional mirroring between real and sandbox Mods
+- live writes should remain explicit, reviewable, and recoverable
 
 ## Practical local usage (Windows)
 
@@ -135,6 +150,7 @@ You can still run focused suites when iterating:
 ## Known limitations (current)
 
 - no automated provider-compliant download pipeline yet (manual download remains required)
+- sandbox->real promotion currently blocks on existing live-target conflicts instead of replacing/archive-promoting in one step
 - no broad history browser UX; recovery is available through focused inspection/execution paths
 - no profiles/instances workflow
 - no packaging/installer/release hardening yet

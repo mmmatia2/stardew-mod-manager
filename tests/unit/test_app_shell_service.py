@@ -466,6 +466,117 @@ def test_sync_installed_mods_to_sandbox_rejects_mod_outside_real_mods(tmp_path: 
         )
 
 
+def test_get_sandbox_mods_promotion_readiness_requires_selection(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+
+    readiness = service.get_sandbox_mods_promotion_readiness(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        selected_mod_folder_paths_text=tuple(),
+        existing_config=None,
+    )
+
+    assert readiness.ready is False
+    assert readiness.message == "Select at least one installed sandbox mod row to promote."
+
+
+def test_promote_installed_mods_from_sandbox_to_real_copies_and_records_history(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    source_mod = _create_mod(sandbox_mods, "SampleMod", "Sample.Mod")
+    (source_mod / "dev.txt").write_text("sandbox", encoding="utf-8")
+
+    result = service.promote_installed_mods_from_sandbox_to_real(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        selected_mod_folder_paths_text=(str(source_mod),),
+        existing_config=None,
+    )
+
+    promoted_target = real_mods / "SampleMod"
+    assert result.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert result.real_mods_path == real_mods
+    assert result.sandbox_mods_path == sandbox_mods
+    assert result.archive_path == real_mods.parent / ".sdvmm-real-archive"
+    assert result.source_mod_paths == (source_mod,)
+    assert result.promoted_target_paths == (promoted_target,)
+    assert result.scan_context_path == real_mods
+    assert (promoted_target / "manifest.json").exists()
+    assert (promoted_target / "dev.txt").read_text(encoding="utf-8") == "sandbox"
+
+    history = service.load_install_operation_history()
+    assert len(history.operations) == 1
+    operation = history.operations[0]
+    assert operation.destination_kind == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert operation.destination_mods_path == real_mods
+    assert operation.archive_path == real_mods.parent / ".sdvmm-real-archive"
+    assert operation.installed_targets == (promoted_target,)
+    assert operation.archived_targets == tuple()
+    assert len(operation.entries) == 1
+    assert operation.entries[0].action == INSTALL_NEW
+    assert operation.entries[0].source_root_path == str(source_mod)
+    assert operation.entries[0].target_path == promoted_target
+
+
+def test_get_sandbox_mods_promotion_readiness_reports_live_target_conflict(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    source_mod = _create_mod(sandbox_mods, "SampleMod", "Sample.Mod")
+    _create_mod(real_mods, "SampleMod", "Sample.Mod")
+
+    readiness = service.get_sandbox_mods_promotion_readiness(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        selected_mod_folder_paths_text=(str(source_mod),),
+        existing_config=None,
+    )
+
+    assert readiness.ready is False
+    assert "real Mods target already exists for SampleMod" in readiness.message
+
+
+def test_promote_installed_mods_from_sandbox_to_real_rejects_mod_outside_sandbox(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    external_mods = tmp_path / "OtherMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    external_mods.mkdir()
+    external_mod = _create_mod(external_mods, "OutsideMod", "Outside.Mod")
+
+    with pytest.raises(
+        AppShellError,
+        match="Selected mod folder must be a direct child of the selected Mods destination.",
+    ):
+        service.promote_installed_mods_from_sandbox_to_real(
+            configured_mods_path_text=str(real_mods),
+            sandbox_mods_path_text=str(sandbox_mods),
+            real_archive_path_text="",
+            selected_mod_folder_paths_text=(str(external_mod),),
+            existing_config=None,
+        )
+
+
 def test_check_smapi_update_status_uses_saved_game_path_when_input_empty(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     game_path = tmp_path / "Game"

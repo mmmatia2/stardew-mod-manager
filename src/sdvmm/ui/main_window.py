@@ -70,6 +70,7 @@ from sdvmm.app.shell_service import (
     AppShellService,
     IntakeUpdateCorrelation,
     ScanResult,
+    SandboxModsPromotionResult,
     SandboxModsSyncResult,
 )
 from sdvmm.domain.models import (
@@ -285,6 +286,11 @@ class MainWindow(QMainWindow):
             "inventory_sync_selected_to_sandbox_button"
         )
         _set_secondary_button_style(self._sync_selected_to_sandbox_button)
+        self._promote_selected_to_real_button = QPushButton("Promote selected to real Mods")
+        self._promote_selected_to_real_button.setObjectName(
+            "inventory_promote_selected_to_real_button"
+        )
+        _set_secondary_button_style(self._promote_selected_to_real_button)
         self._inventory_sandbox_sync_actions_widget = QWidget()
         self._inventory_sandbox_sync_actions_widget.setObjectName(
             "inventory_sandbox_sync_actions"
@@ -298,6 +304,7 @@ class MainWindow(QMainWindow):
             self._inventory_sandbox_sync_actions_label
         )
         inventory_sandbox_sync_actions_layout.addWidget(self._sync_selected_to_sandbox_button)
+        inventory_sandbox_sync_actions_layout.addWidget(self._promote_selected_to_real_button)
         inventory_sandbox_sync_actions_layout.addStretch(1)
         self._inventory_sandbox_sync_actions_widget.setVisible(False)
         self._open_remote_page_button = QPushButton("Open remote page")
@@ -532,6 +539,9 @@ class MainWindow(QMainWindow):
         self._sandbox_archive_path_input.textChanged.connect(self._refresh_install_safety_panel)
         self._real_archive_path_input.textChanged.connect(self._invalidate_pending_plan)
         self._real_archive_path_input.textChanged.connect(self._refresh_install_safety_panel)
+        self._real_archive_path_input.textChanged.connect(
+            self._refresh_inventory_sandbox_sync_action_state
+        )
         self._overwrite_checkbox.toggled.connect(self._invalidate_pending_plan)
         self._scan_target_combo.currentIndexChanged.connect(self._refresh_scan_context_preview)
         self._scan_target_combo.currentIndexChanged.connect(
@@ -573,6 +583,9 @@ class MainWindow(QMainWindow):
         self._clear_source_intent_button.clicked.connect(self._on_clear_selected_mod_source_intent)
         self._sync_selected_to_sandbox_button.clicked.connect(
             self._on_sync_selected_mods_to_sandbox
+        )
+        self._promote_selected_to_real_button.clicked.connect(
+            self._on_promote_selected_mods_to_real
         )
         self._discovery_filter_input.textChanged.connect(self._apply_discovery_filter)
         self._intake_filter_input.textChanged.connect(self._refresh_intake_selector)
@@ -1069,6 +1082,7 @@ class MainWindow(QMainWindow):
             self._launch_smapi_button,
             self._launch_sandbox_dev_button,
             self._sync_selected_to_sandbox_button,
+            self._promote_selected_to_real_button,
         )
 
         self.setCentralWidget(container)
@@ -3211,6 +3225,10 @@ class MainWindow(QMainWindow):
             self._sync_selected_to_sandbox_button.setToolTip(
                 "Select one or more installed real-mod rows to sync to sandbox."
             )
+            self._promote_selected_to_real_button.setEnabled(False)
+            self._promote_selected_to_real_button.setToolTip(
+                "Select one or more installed sandbox-mod rows to promote to the configured real Mods path."
+            )
             return
 
         if self._active_operation_name is not None:
@@ -3218,23 +3236,51 @@ class MainWindow(QMainWindow):
             self._sync_selected_to_sandbox_button.setToolTip(
                 "Wait for the active operation to finish before syncing to sandbox."
             )
+            self._promote_selected_to_real_button.setEnabled(False)
+            self._promote_selected_to_real_button.setToolTip(
+                "Wait for the active operation to finish before promoting to the configured real Mods path."
+            )
             return
 
-        if self._current_scan_target() != SCAN_TARGET_CONFIGURED_REAL_MODS:
+        if self._current_scan_target() == SCAN_TARGET_CONFIGURED_REAL_MODS:
+            readiness = self._shell_service.get_sandbox_mods_sync_readiness(
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                selected_mod_folder_paths_text=selected_mod_folder_paths,
+                existing_config=self._config,
+            )
+            self._sync_selected_to_sandbox_button.setEnabled(readiness.ready)
+            self._sync_selected_to_sandbox_button.setToolTip(readiness.message)
+            self._promote_selected_to_real_button.setEnabled(False)
+            self._promote_selected_to_real_button.setToolTip(
+                "Promote selected to real Mods only works while scanning sandbox Mods."
+            )
+            return
+
+        if self._current_scan_target() != SCAN_TARGET_SANDBOX_MODS:
             self._sync_selected_to_sandbox_button.setEnabled(False)
             self._sync_selected_to_sandbox_button.setToolTip(
                 "Sync selected to sandbox only works while scanning the configured real Mods path."
             )
+            self._promote_selected_to_real_button.setEnabled(False)
+            self._promote_selected_to_real_button.setToolTip(
+                "Promote selected to real Mods only works while scanning sandbox Mods."
+            )
             return
 
-        readiness = self._shell_service.get_sandbox_mods_sync_readiness(
+        self._sync_selected_to_sandbox_button.setEnabled(False)
+        self._sync_selected_to_sandbox_button.setToolTip(
+            "Sync selected to sandbox only works while scanning the configured real Mods path."
+        )
+        promotion_readiness = self._shell_service.get_sandbox_mods_promotion_readiness(
             configured_mods_path_text=self._mods_path_input.text(),
             sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+            real_archive_path_text=self._real_archive_path_input.text(),
             selected_mod_folder_paths_text=selected_mod_folder_paths,
             existing_config=self._config,
         )
-        self._sync_selected_to_sandbox_button.setEnabled(readiness.ready)
-        self._sync_selected_to_sandbox_button.setToolTip(readiness.message)
+        self._promote_selected_to_real_button.setEnabled(promotion_readiness.ready)
+        self._promote_selected_to_real_button.setToolTip(promotion_readiness.message)
 
     def _set_selected_mod_update_source_intent(self, intent_state: str) -> None:
         selected_context = self._selected_inventory_source_intent_context()
@@ -3378,6 +3424,76 @@ class MainWindow(QMainWindow):
         self._set_details_text(_build_sandbox_mods_sync_result_text(result))
         self._set_status(
             f"Sandbox sync complete: {len(result.synced_target_paths)} mod(s) copied."
+        )
+
+    def _on_promote_selected_mods_to_real(self) -> None:
+        selected_mod_folder_paths = self._selected_inventory_mod_folder_paths()
+        if not selected_mod_folder_paths:
+            message = "Select at least one installed sandbox mod row to promote."
+            self._set_status(message)
+            return
+
+        if self._current_scan_target() != SCAN_TARGET_SANDBOX_MODS:
+            message = "Promote selected to real Mods only works while scanning sandbox Mods."
+            self._set_status(message)
+            return
+
+        readiness = self._shell_service.get_sandbox_mods_promotion_readiness(
+            configured_mods_path_text=self._mods_path_input.text(),
+            sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+            real_archive_path_text=self._real_archive_path_input.text(),
+            selected_mod_folder_paths_text=selected_mod_folder_paths,
+            existing_config=self._config,
+        )
+        if not readiness.ready:
+            self._set_status(readiness.message)
+            return
+
+        yes = QMessageBox.question(
+            self,
+            "Confirm sandbox promotion to REAL Mods",
+            _build_sandbox_mods_promotion_confirmation_message(
+                selected_count=len(selected_mod_folder_paths),
+                sandbox_mods_path=readiness.sandbox_mods_path,
+                real_mods_path=readiness.real_mods_path,
+                archive_path=readiness.archive_path,
+            ),
+        )
+        if yes != QMessageBox.StandardButton.Yes:
+            self._set_status("Sandbox promotion cancelled.")
+            return
+
+        selected_count = len(selected_mod_folder_paths)
+        self._run_background_operation(
+            operation_name="Sandbox promotion",
+            running_label="Sandbox promotion",
+            started_status=(
+                f"Promoting {selected_count} selected mod(s) from sandbox Mods to REAL Mods..."
+            ),
+            error_title="Sandbox promotion failed",
+            task_fn=lambda _paths=selected_mod_folder_paths: self._shell_service.promote_installed_mods_from_sandbox_to_real(
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                selected_mod_folder_paths_text=_paths,
+                existing_config=self._config,
+            ),
+            on_success=self._on_promote_selected_mods_to_real_completed,
+        )
+
+    def _on_promote_selected_mods_to_real_completed(
+        self,
+        result: SandboxModsPromotionResult,
+    ) -> None:
+        self._render_inventory(result.inventory)
+        self._set_current_scan_target(result.destination_kind)
+        self._set_scan_context(
+            result.scan_context_path,
+            self._scan_target_label(result.destination_kind),
+        )
+        self._set_details_text(_build_sandbox_mods_promotion_result_text(result))
+        self._set_status(
+            f"Sandbox promotion complete: {len(result.promoted_target_paths)} mod(s) copied into REAL Mods."
         )
 
     def _apply_discovery_filter(self, *_: object) -> None:
@@ -4236,6 +4352,47 @@ def _build_sandbox_mods_sync_result_text(result: SandboxModsSyncResult) -> str:
         lines.extend(f"- {path}" for path in result.synced_target_paths)
     lines.append("")
     lines.append("Next step: switch scan source to Sandbox Mods and Scan to inspect the copied dev set.")
+    return "\n".join(lines)
+
+
+def _build_sandbox_mods_promotion_confirmation_message(
+    *,
+    selected_count: int,
+    sandbox_mods_path: Path | None,
+    real_mods_path: Path | None,
+    archive_path: Path | None,
+) -> str:
+    return (
+        "Promote selected sandbox mod(s) into the configured REAL Mods path?\n\n"
+        f"Selected mods: {selected_count}\n"
+        f"Sandbox Mods source: {sandbox_mods_path}\n"
+        f"REAL Mods destination: {real_mods_path}\n"
+        f"Recovery archive root: {archive_path}\n\n"
+        "This is an explicit promotion flow, not a raw sync-back.\n"
+        "This stage blocks if a live REAL Mods target already exists.\n"
+        "No blind overwrite is performed."
+    )
+
+
+def _build_sandbox_mods_promotion_result_text(result: SandboxModsPromotionResult) -> str:
+    lines = [
+        "Sandbox promotion result",
+        "Direction: sandbox Mods -> REAL Mods",
+        f"Sandbox Mods path: {result.sandbox_mods_path}",
+        f"REAL Mods path: {result.real_mods_path}",
+        f"Recovery archive root: {result.archive_path}",
+        f"Promoted targets: {len(result.promoted_target_paths)}",
+    ]
+    if result.source_mod_paths:
+        lines.append("Source sandbox mod folders")
+        lines.extend(f"- {path}" for path in result.source_mod_paths)
+    if result.promoted_target_paths:
+        lines.append("REAL Mods target folders")
+        lines.extend(f"- {path}" for path in result.promoted_target_paths)
+    lines.append("")
+    lines.append(
+        "Recovery history was recorded for this explicit promotion so the new REAL targets remain inspectable."
+    )
     return "\n".join(lines)
 
 

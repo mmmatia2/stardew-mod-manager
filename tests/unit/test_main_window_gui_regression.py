@@ -671,6 +671,198 @@ def test_main_window_sandbox_sync_conflict_sets_clear_status(
     assert "sandbox target already exists for AlphaMod" in main_window._status_strip_label.text()
 
 
+def test_main_window_sandbox_promotion_button_enables_only_for_sandbox_scan_context(
+    main_window: MainWindow,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    (sandbox_mods / "AlphaMod").mkdir()
+
+    inventory = _inventory_for_sandbox_sync_ui_tests(sandbox_mods)
+    sync_button = main_window.findChild(QPushButton, "inventory_sync_selected_to_sandbox_button")
+    promote_button = main_window.findChild(
+        QPushButton, "inventory_promote_selected_to_real_button"
+    )
+    scan_target_combo = main_window._scan_target_combo
+
+    assert sync_button is not None
+    assert promote_button is not None
+
+    main_window._mods_path_input.setText(str(real_mods))
+    main_window._sandbox_mods_path_input.setText(str(sandbox_mods))
+    main_window._render_inventory(inventory)
+    alpha_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    assert alpha_row >= 0
+
+    sandbox_index = scan_target_combo.findData(SCAN_TARGET_SANDBOX_MODS)
+    assert sandbox_index >= 0
+    scan_target_combo.setCurrentIndex(sandbox_index)
+    main_window._mods_table.setCurrentCell(alpha_row, 0)
+    qapp.processEvents()
+
+    assert sync_button.isEnabled() is False
+    assert promote_button.isEnabled() is True
+    assert "Ready to promote 1 selected mod(s)" in promote_button.toolTip()
+
+    real_index = scan_target_combo.findData(SCAN_TARGET_CONFIGURED_REAL_MODS)
+    assert real_index >= 0
+    scan_target_combo.setCurrentIndex(real_index)
+    qapp.processEvents()
+
+    assert promote_button.isEnabled() is False
+    assert "only works while scanning sandbox Mods" in promote_button.toolTip()
+
+
+def test_main_window_sandbox_promotion_is_inert_without_selection(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    main_window._on_promote_selected_mods_to_real()
+    qapp.processEvents()
+
+    assert (
+        main_window._status_strip_label.text()
+        == "Select at least one installed sandbox mod row to promote."
+    )
+
+
+def test_main_window_sandbox_promotion_delegates_after_confirmation_and_updates_ui(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    source_mod = sandbox_mods / "AlphaMod"
+    promoted_target = real_mods / "AlphaMod"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    source_mod.mkdir()
+    inventory = _inventory_for_sandbox_sync_ui_tests(sandbox_mods)
+    promote_button = main_window.findChild(
+        QPushButton, "inventory_promote_selected_to_real_button"
+    )
+    captured: dict[str, object] = {}
+
+    assert promote_button is not None
+
+    main_window._mods_path_input.setText(str(real_mods))
+    main_window._sandbox_mods_path_input.setText(str(sandbox_mods))
+    main_window._render_inventory(inventory)
+    sandbox_index = main_window._scan_target_combo.findData(SCAN_TARGET_SANDBOX_MODS)
+    assert sandbox_index >= 0
+    main_window._scan_target_combo.setCurrentIndex(sandbox_index)
+    alpha_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    assert alpha_row >= 0
+    main_window._mods_table.setCurrentCell(alpha_row, 0)
+    qapp.processEvents()
+
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QMessageBox.question",
+        lambda *args: QMessageBox.StandardButton.Yes,
+    )
+
+    def _fake_promote(**kwargs):
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            destination_kind=SCAN_TARGET_CONFIGURED_REAL_MODS,
+            real_mods_path=real_mods,
+            sandbox_mods_path=sandbox_mods,
+            archive_path=real_mods.parent / ".sdvmm-real-archive",
+            source_mod_paths=(source_mod,),
+            promoted_target_paths=(promoted_target,),
+            scan_context_path=real_mods,
+            inventory=_inventory_for_sandbox_sync_ui_tests(real_mods),
+        )
+
+    def _run_immediately(
+        *,
+        operation_name: str,
+        running_label: str,
+        started_status: str,
+        error_title: str,
+        task_fn,
+        on_success,
+    ) -> None:
+        captured["operation_name"] = operation_name
+        captured["running_label"] = running_label
+        captured["started_status"] = started_status
+        captured["error_title"] = error_title
+        on_success(task_fn())
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "promote_installed_mods_from_sandbox_to_real",
+        _fake_promote,
+    )
+    monkeypatch.setattr(main_window, "_run_background_operation", _run_immediately)
+
+    promote_button.click()
+    qapp.processEvents()
+
+    assert captured["operation_name"] == "Sandbox promotion"
+    assert captured["running_label"] == "Sandbox promotion"
+    assert captured["error_title"] == "Sandbox promotion failed"
+    assert "Promoting 1 selected mod(s)" in str(captured["started_status"])
+    assert captured["kwargs"] == {
+        "configured_mods_path_text": str(real_mods),
+        "sandbox_mods_path_text": str(sandbox_mods),
+        "real_archive_path_text": "",
+        "selected_mod_folder_paths_text": (str(source_mod),),
+        "existing_config": None,
+    }
+    assert main_window._current_scan_target() == SCAN_TARGET_CONFIGURED_REAL_MODS
+    assert main_window._status_strip_label.text() == (
+        "Sandbox promotion complete: 1 mod(s) copied into REAL Mods."
+    )
+    assert "Sandbox promotion result" in main_window._findings_box.toPlainText()
+    assert str(promoted_target) in main_window._findings_box.toPlainText()
+
+
+def test_main_window_sandbox_promotion_conflict_sets_clear_status(
+    main_window: MainWindow,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    source_mod = sandbox_mods / "AlphaMod"
+    promoted_target = real_mods / "AlphaMod"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    source_mod.mkdir()
+    promoted_target.mkdir()
+    inventory = _inventory_for_sandbox_sync_ui_tests(sandbox_mods)
+    promote_button = main_window.findChild(
+        QPushButton, "inventory_promote_selected_to_real_button"
+    )
+
+    assert promote_button is not None
+
+    main_window._mods_path_input.setText(str(real_mods))
+    main_window._sandbox_mods_path_input.setText(str(sandbox_mods))
+    main_window._render_inventory(inventory)
+    sandbox_index = main_window._scan_target_combo.findData(SCAN_TARGET_SANDBOX_MODS)
+    assert sandbox_index >= 0
+    main_window._scan_target_combo.setCurrentIndex(sandbox_index)
+    alpha_row = _find_mod_row(main_window._mods_table, "Alpha Mod")
+    assert alpha_row >= 0
+    main_window._mods_table.setCurrentCell(alpha_row, 0)
+    qapp.processEvents()
+
+    assert promote_button.isEnabled() is False
+
+    main_window._on_promote_selected_mods_to_real()
+    qapp.processEvents()
+
+    assert "real Mods target already exists for AlphaMod" in main_window._status_strip_label.text()
+
+
 def test_main_window_inventory_update_actionability_filter_exists_with_default_all(
     main_window: MainWindow,
 ) -> None:
