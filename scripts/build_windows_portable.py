@@ -27,6 +27,25 @@ def main() -> int:
         str(spec_path),
     ]
     subprocess.run(command, cwd=repo_root, check=True)
+    packaged_exe = dist_path / "Stardew Mod Manager.exe"
+    qwindows_plugin = (
+        dist_path
+        / "_internal"
+        / "PySide6"
+        / "plugins"
+        / "platforms"
+        / "qwindows.dll"
+    )
+    if not packaged_exe.exists():
+        raise RuntimeError(f"Packaged executable not found: {packaged_exe}")
+    if not qwindows_plugin.exists():
+        raise RuntimeError(
+            "Qt Windows platform plugin is missing from packaged output: "
+            f"{qwindows_plugin}"
+        )
+
+    print(packaged_exe)
+    print(qwindows_plugin)
     print(dist_path)
     return 0
 

@@ -17,12 +17,14 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from sdvmm.app.main import _resolve_app_icon
 from sdvmm.app.shell_service import AppShellError
 from sdvmm.app.shell_service import AppShellService
 from sdvmm.app.shell_service import DiscoveryContextCorrelation
@@ -37,9 +39,12 @@ from sdvmm.domain.discovery_codes import DISCOVERY_SOURCE_NEXUS
 from sdvmm.domain.discovery_codes import SMAPI_COMPATIBILITY_LIST_PROVIDER
 from sdvmm.domain.install_codes import INSTALL_NEW, OVERWRITE_WITH_ARCHIVE
 from sdvmm.domain.package_codes import INVALID_MANIFEST_PACKAGE
+from sdvmm.domain.smapi_codes import SMAPI_UP_TO_DATE
+from sdvmm.domain.smapi_log_codes import SMAPI_LOG_NOT_FOUND, SMAPI_LOG_SOURCE_AUTO_DETECTED
 from sdvmm.domain.update_codes import MISSING_UPDATE_KEY, UNSUPPORTED_UPDATE_KEY_FORMAT
 from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.domain.models import DownloadsIntakeResult
+from sdvmm.domain.models import GameEnvironmentStatus
 from sdvmm.domain.models import InstalledMod
 from sdvmm.domain.models import InstallOperationEntryRecord
 from sdvmm.domain.models import InstallOperationRecord
@@ -53,6 +58,8 @@ from sdvmm.domain.models import PackageFinding
 from sdvmm.domain.models import RecoveryExecutionRecord
 from sdvmm.domain.models import SandboxInstallPlan
 from sdvmm.domain.models import SandboxInstallPlanEntry
+from sdvmm.domain.models import SmapiLogReport
+from sdvmm.domain.models import SmapiUpdateStatus
 from sdvmm.ui.main_window import MainWindow
 from sdvmm.ui.main_window import _ROLE_DISCOVERY_INDEX
 from sdvmm.ui.main_window import _ROLE_MOD_UPDATE_STATUS
@@ -83,6 +90,108 @@ def main_window(tmp_path: Path, qapp: QApplication) -> MainWindow:
 def test_main_window_instantiates_in_qt_context(main_window: MainWindow) -> None:
     assert main_window is not None
     assert main_window.windowTitle() != ""
+
+
+def test_runtime_icon_asset_resolves_for_dev_runtime() -> None:
+    icon = _resolve_app_icon()
+
+    assert icon is not None
+    assert icon.isNull() is False
+
+
+def test_main_window_startup_auto_checks_skip_without_meaningful_game_path(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    window = MainWindow(shell_service=AppShellService(state_file=tmp_path / "app-state.json"))
+    captured: list[str] = []
+    monkeypatch.setattr(
+        window,
+        "_run_background_operation",
+        lambda **kwargs: captured.append(str(kwargs["operation_name"])),
+    )
+
+    window.show()
+    qapp.processEvents()
+    qapp.processEvents()
+
+    assert captured == []
+    assert window._startup_checks_completed is True
+
+    window.close()
+    qapp.processEvents()
+
+
+def test_main_window_startup_auto_checks_run_in_sequence_when_game_path_is_ready(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    game_path = tmp_path / "Game"
+    _create_launchable_game_install_for_ui(game_path)
+
+    window = MainWindow(shell_service=AppShellService(state_file=tmp_path / "app-state.json"))
+    window._game_path_input.setText(str(game_path))
+
+    environment_status = GameEnvironmentStatus(
+        game_path=game_path,
+        mods_path=game_path / "Mods",
+        smapi_path=game_path / "StardewModdingAPI.exe",
+        state_codes=("game_path_detected", "mods_path_detected", "smapi_detected"),
+    )
+    smapi_status = SmapiUpdateStatus(
+        state=SMAPI_UP_TO_DATE,
+        game_path=game_path,
+        smapi_path=game_path / "StardewModdingAPI.exe",
+        installed_version="4.1.0",
+        latest_version="4.1.0",
+        update_page_url="https://smapi.io",
+        message="SMAPI is up to date.",
+    )
+    smapi_log_report = SmapiLogReport(
+        state=SMAPI_LOG_NOT_FOUND,
+        source=SMAPI_LOG_SOURCE_AUTO_DETECTED,
+        log_path=None,
+        game_path=game_path,
+        findings=tuple(),
+        notes=tuple(),
+        message="No SMAPI log found yet.",
+    )
+    captured: list[str] = []
+
+    def _fake_run_background_operation(**kwargs) -> None:
+        operation_name = str(kwargs["operation_name"])
+        captured.append(operation_name)
+        if operation_name == "Startup environment check":
+            kwargs["on_success"](environment_status)
+            return
+        if operation_name == "Startup SMAPI update check":
+            kwargs["on_success"](smapi_status)
+            return
+        if operation_name == "Startup SMAPI log check":
+            kwargs["on_success"](smapi_log_report)
+            return
+        raise AssertionError(f"Unexpected startup operation: {operation_name}")
+
+    monkeypatch.setattr(window, "_run_background_operation", _fake_run_background_operation)
+
+    window.show()
+    for _ in range(6):
+        qapp.processEvents()
+
+    assert captured == [
+        "Startup environment check",
+        "Startup SMAPI update check",
+        "Startup SMAPI log check",
+    ]
+    assert window._environment_status_label.text() == "mods detected, SMAPI detected"
+    assert window._smapi_update_status_label.text() == "Up to date (4.1.0)"
+    assert window._smapi_log_status_label.text() == "Log not found"
+    assert window._startup_checks_completed is True
+
+    window.close()
+    qapp.processEvents()
 
 
 def test_main_window_has_separate_status_strip_and_bottom_details_region(
@@ -388,11 +497,12 @@ def test_main_window_install_target_combo_uses_readability_contract(
     install_target_combo = main_window.findChild(QComboBox, "plan_install_target_combo")
 
     assert install_target_combo is not None
-    assert install_target_combo.minimumContentsLength() >= 28
+    assert 12 <= install_target_combo.minimumContentsLength() <= 24
     assert (
         install_target_combo.sizeAdjustPolicy()
-        == QComboBox.SizeAdjustPolicy.AdjustToContentsOnFirstShow
+        == QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
     )
+    assert install_target_combo.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
     assert install_target_combo.view().minimumWidth() > 0
     assert install_target_combo.itemText(0) == "Sandbox Mods destination (safe/test)"
     assert install_target_combo.itemText(1) == "Game Mods destination (real)"
@@ -1965,6 +2075,8 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (0, 5, 0, 0)
     assert "QTabWidget::pane { margin-top: 4px; }" in inventory_tabs.styleSheet()
     assert "QTabWidget::pane { margin-top: 4px; }" in context_tabs.styleSheet()
+    assert "QTabBar::tab {" in inventory_tabs.styleSheet()
+    assert "QTabBar::tab:selected {" in context_tabs.styleSheet()
 
     assert plan_scroll.parentWidget() is plan_tab
     assert plan_scroll.widget() is plan_content
@@ -2067,8 +2179,10 @@ def test_main_window_plan_install_safety_panel_updates_when_paths_change(
 def test_main_window_plan_install_surface_key_controls_exist(
     main_window: MainWindow,
 ) -> None:
+    plan_tab = main_window.findChild(QWidget, "plan_install_tab")
     install_target_combo = main_window.findChild(QComboBox, "plan_install_target_combo")
     overwrite_checkbox = main_window.findChild(QCheckBox, "plan_install_overwrite_checkbox")
+    overwrite_help_label = main_window.findChild(QLabel, "plan_install_overwrite_help_label")
     install_archive_label = main_window.findChild(QLabel, "plan_install_archive_label")
     staged_package_group = main_window.findChild(QGroupBox, "plan_install_staged_package_group")
     staged_package_label = main_window.findChild(QLineEdit, "plan_install_staged_package_value")
@@ -2082,6 +2196,7 @@ def test_main_window_plan_install_surface_key_controls_exist(
 
     assert install_target_combo is not None
     assert overwrite_checkbox is not None
+    assert overwrite_help_label is not None
     assert install_archive_label is not None
     assert staged_package_group is not None
     assert staged_package_label is not None
@@ -2090,6 +2205,9 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert plan_facts_label is not None
     assert plan_button is not None
     assert run_button is not None
+    assert plan_tab is not None
+
+    main_window._context_tabs.setCurrentWidget(plan_tab)
 
     assert main_window._install_target_combo is install_target_combo
     assert main_window._overwrite_checkbox is overwrite_checkbox
@@ -2099,6 +2217,9 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert main_window._plan_review_explanation_label is plan_review_explanation_label
     assert main_window._plan_facts_label is plan_facts_label
     assert staged_package_label.isReadOnly() is True
+    assert overwrite_checkbox.text() == "Enable archive-aware replace"
+    assert overwrite_checkbox.isVisible() is True
+    assert "archive-aware replace" in overwrite_help_label.text().casefold()
     assert (
         plan_review_explanation_label.text()
         == "Plan detail: no plan selected."
@@ -2110,6 +2231,21 @@ def test_main_window_plan_install_surface_key_controls_exist(
         "Approval required: -\n"
         "Blocked entries: -"
     )
+
+
+def test_main_window_recovery_selector_uses_readability_contract(
+    main_window: MainWindow,
+) -> None:
+    recovery_combo = main_window.findChild(QComboBox, "recovery_inspection_operation_combo")
+
+    assert recovery_combo is not None
+    assert 16 <= recovery_combo.minimumContentsLength() <= 26
+    assert (
+        recovery_combo.sizeAdjustPolicy()
+        == QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
+    assert recovery_combo.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    assert recovery_combo.view().minimumWidth() > 0
 
 
 def test_main_window_plan_and_recovery_output_routes_to_shared_detail_surface(
@@ -3717,6 +3853,26 @@ def test_main_window_archive_surface_key_controls_exist(
     assert main_window._refresh_archives_button is refresh_button
     assert main_window._restore_archived_button is restore_button
     assert main_window._delete_archived_button is delete_button
+
+
+def test_main_window_archive_surface_uses_tighter_spacing_between_actions_and_results(
+    main_window: MainWindow,
+) -> None:
+    archive_controls_group = main_window.findChild(QGroupBox, "archive_controls_group")
+    archive_results_group = main_window.findChild(QGroupBox, "archive_results_group")
+
+    assert archive_controls_group is not None
+    assert archive_results_group is not None
+    assert (
+        archive_controls_group.sizePolicy().verticalPolicy()
+        == QSizePolicy.Policy.Maximum
+    )
+
+    results_layout = archive_results_group.layout()
+    assert isinstance(results_layout, QVBoxLayout)
+    margins = results_layout.contentsMargins()
+    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (8, 2, 8, 6)
+    assert results_layout.spacing() == 2
 
 
 def test_main_window_archive_buttons_toggle_with_row_selection(

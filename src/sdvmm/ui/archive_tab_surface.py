@@ -33,7 +33,7 @@ class ArchiveTabSurface(QWidget):
         archive_controls_group.setObjectName("archive_controls_group")
         archive_controls_group.setFlat(True)
         archive_controls_group.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
         )
         archive_controls_layout = QGridLayout(archive_controls_group)
         archive_controls_layout.setContentsMargins(8, 6, 8, 6)
@@ -52,8 +52,8 @@ class ArchiveTabSurface(QWidget):
         archive_results_group.setFlat(True)
         archive_results_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         archive_results_layout = QVBoxLayout(archive_results_group)
-        archive_results_layout.setContentsMargins(8, 0, 8, 6)
-        archive_results_layout.setSpacing(0)
+        archive_results_layout.setContentsMargins(8, 2, 8, 6)
+        archive_results_layout.setSpacing(2)
         archive_results_layout.addWidget(archive_table)
         layout.addWidget(archive_results_group, 1)
 

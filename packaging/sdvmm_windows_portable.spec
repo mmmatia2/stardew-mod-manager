@@ -10,8 +10,9 @@ PYPROJECT = ROOT / "pyproject.toml"
 PROJECT = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
 VERSION = PROJECT["version"]
 DIST_NAME = f"stardew-mod-manager-{VERSION}-windows-portable"
+APP_ICON = ROOT / "assets" / "stardew-mod-manager.ico"
 
-datas = copy_metadata("stardew-mod-manager")
+datas = copy_metadata("stardew-mod-manager") + [(str(APP_ICON), "assets")]
 
 a = Analysis(
     [str(ROOT / "src" / "sdvmm" / "app" / "main.py")],
@@ -21,7 +22,7 @@ a = Analysis(
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(ROOT / "packaging" / "pyi_rth_qt_paths.py")],
     excludes=[],
     noarchive=False,
     optimize=0,
@@ -40,6 +41,7 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
+    icon=str(APP_ICON),
 )
 
 coll = COLLECT(

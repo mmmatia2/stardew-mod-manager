@@ -148,7 +148,7 @@ You can still run focused suites when iterating:
 .\.venv\Scripts\python.exe -m pytest tests\unit\test_main_window_gui_regression.py -q
 ```
 
-### 4) Build Windows portable folder (`0.2.0`)
+### 4) Build Windows portable folder (`0.2.1`)
 
 Packaging baseline in this repo uses **PyInstaller one-folder** output because it is the smallest practical Windows desktop packaging path here without introducing installer/signing work.
 
@@ -167,19 +167,20 @@ Build the portable folder:
 Output folder:
 
 ```text
-dist\stardew-mod-manager-0.2.0-windows-portable\
+dist\stardew-mod-manager-0.2.1-windows-portable\
 ```
 
 Launch the packaged app:
 
 ```powershell
-.\dist\stardew-mod-manager-0.2.0-windows-portable\Stardew Mod Manager.exe
+.\dist\stardew-mod-manager-0.2.1-windows-portable\Stardew Mod Manager.exe
 ```
 
 Current caveats:
 - this is a portable folder build, not an installer
 - no code signing yet, so Windows reputation prompts are still expected
 - no auto-update or release-hardening work yet
+- packaged runtime is pinned to bundled Qt plugin paths (`_internal\PySide6\plugins`) to avoid host Qt path conflicts
 
 ## Known limitations (current)
 

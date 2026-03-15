@@ -175,6 +175,8 @@ class MainWindow(QMainWindow):
         self._active_operation_name: str | None = None
         self._active_background_task: BackgroundTask | None = None
         self._background_action_buttons: tuple[QPushButton, ...] = tuple()
+        self._startup_checks_scheduled = False
+        self._startup_checks_completed = False
 
         self.setWindowTitle("Stardew Mod Manager (Sandbox-first)")
         self.setMinimumSize(980, 640)
@@ -325,8 +327,11 @@ class MainWindow(QMainWindow):
         self._nexus_api_key_input.setObjectName("setup_nexus_api_key_input")
         self._nexus_api_key_input.setPlaceholderText("Nexus API key")
         self._nexus_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self._overwrite_checkbox = QCheckBox("Allow overwrite with archive")
+        self._overwrite_checkbox = QCheckBox("Enable archive-aware replace")
         self._overwrite_checkbox.setObjectName("plan_install_overwrite_checkbox")
+        self._overwrite_checkbox.setToolTip(
+            "Archive the existing target before replacing it during planning."
+        )
         self._install_target_combo = QComboBox()
         self._install_target_combo.setObjectName("plan_install_target_combo")
         self._install_target_combo.addItem(
@@ -337,19 +342,10 @@ class MainWindow(QMainWindow):
             "Game Mods destination (real)",
             INSTALL_TARGET_CONFIGURED_REAL_MODS,
         )
-        self._install_target_combo.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToContentsOnFirstShow
-        )
-        self._install_target_combo.setMinimumContentsLength(28)
-        install_target_view = self._install_target_combo.view()
-        install_target_view.setMinimumWidth(
-            max(
-                install_target_view.minimumWidth(),
-                self._install_target_combo.fontMetrics().horizontalAdvance(
-                    "Sandbox Mods destination (safe/test)"
-                )
-                + 48,
-            )
+        _configure_combo_box_readability(
+            self._install_target_combo,
+            minimum_contents_length=24,
+            sample_text="Sandbox Mods destination (safe/test)",
         )
         self._scan_target_combo = QComboBox()
         self._scan_target_combo.addItem("Real Mods path (scan only)", SCAN_TARGET_CONFIGURED_REAL_MODS)
@@ -363,6 +359,11 @@ class MainWindow(QMainWindow):
         self._staged_package_label.setReadOnly(True)
         self._install_history_combo = QComboBox()
         self._install_history_combo.setObjectName("recovery_inspection_operation_combo")
+        _configure_combo_box_readability(
+            self._install_history_combo,
+            minimum_contents_length=26,
+            sample_text="ExamplePack.zip | 2026-03-15T12:00:00Z | REAL Mods",
+        )
         self._install_history_filter_combo = QComboBox()
         self._install_history_filter_combo.setObjectName("recovery_selector_filter_combo")
         self._install_history_filter_combo.addItem("all", "all")
@@ -603,7 +604,25 @@ class MainWindow(QMainWindow):
         object_name: str,
         top_margin: int = 4,
     ) -> QWidget:
-        tabs.setStyleSheet("QTabWidget::pane { margin-top: 4px; }")
+        tabs.setStyleSheet(
+            "QTabWidget::pane { margin-top: 4px; }"
+            "QTabBar::tab {"
+            " padding: 5px 12px;"
+            " margin-right: 3px;"
+            " border: 1px solid palette(mid);"
+            " border-bottom: none;"
+            " border-top-left-radius: 4px;"
+            " border-top-right-radius: 4px;"
+            " background: palette(button);"
+            " font-weight: 600;"
+            "}"
+            "QTabBar::tab:selected {"
+            " background: palette(base);"
+            "}"
+            "QTabBar::tab:!selected {"
+            " margin-top: 2px;"
+            "}"
+        )
         shell = QWidget()
         shell.setObjectName(object_name)
         shell_layout = QVBoxLayout(shell)
@@ -1016,12 +1035,14 @@ class MainWindow(QMainWindow):
             recovery_layout = QVBoxLayout(recovery_group)
             recovery_layout.setContentsMargins(8, 6, 8, 6)
             recovery_layout.setSpacing(6)
-            recovery_controls = QHBoxLayout()
-            recovery_controls.setSpacing(6)
-            recovery_controls.addWidget(QLabel("Recorded install"))
-            recovery_controls.addWidget(self._install_history_combo, 1)
-            recovery_controls.addWidget(QLabel("Filter"))
-            recovery_controls.addWidget(self._install_history_filter_combo)
+            recovery_controls = QGridLayout()
+            recovery_controls.setHorizontalSpacing(6)
+            recovery_controls.setVerticalSpacing(4)
+            recovery_controls.setColumnStretch(1, 1)
+            recovery_controls.addWidget(QLabel("Recorded install"), 0, 0)
+            recovery_controls.addWidget(self._install_history_combo, 0, 1)
+            recovery_controls.addWidget(QLabel("Filter"), 0, 2)
+            recovery_controls.addWidget(self._install_history_filter_combo, 0, 3)
             self._install_history_combo.currentIndexChanged.connect(
                 self._on_selected_install_operation_changed
             )
@@ -1030,11 +1051,11 @@ class MainWindow(QMainWindow):
             )
             self._inspect_recovery_button.clicked.connect(self._on_inspect_selected_install_recovery)
             _set_secondary_button_style(self._inspect_recovery_button)
-            recovery_controls.addWidget(self._inspect_recovery_button)
+            recovery_controls.addWidget(self._inspect_recovery_button, 1, 2)
             self._run_recovery_button.clicked.connect(self._on_run_selected_install_recovery)
             _set_primary_button_style(self._run_recovery_button)
             self._run_recovery_button.setEnabled(False)
-            recovery_controls.addWidget(self._run_recovery_button)
+            recovery_controls.addWidget(self._run_recovery_button, 1, 3)
             recovery_layout.addLayout(recovery_controls)
             recovery_layout.addWidget(self._recovery_selection_summary_label)
             plan_tab_layout.insertWidget(6, recovery_group)
@@ -1124,9 +1145,113 @@ class MainWindow(QMainWindow):
         self._refresh_inventory_sandbox_sync_action_state()
         self._refresh_responsive_panel_bounds()
 
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if self._startup_checks_scheduled:
+            return
+        self._startup_checks_scheduled = True
+        QTimer.singleShot(0, self._run_startup_checks_if_meaningful)
+
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         self._refresh_responsive_panel_bounds()
+
+    def _run_startup_checks_if_meaningful(self) -> None:
+        if self._startup_checks_completed:
+            return
+        if self._active_operation_name is not None:
+            QTimer.singleShot(150, self._run_startup_checks_if_meaningful)
+            return
+        if not self._has_meaningful_startup_game_path():
+            self._startup_checks_completed = True
+            return
+
+        self._run_background_operation(
+            operation_name="Startup environment check",
+            running_label="Startup environment check",
+            started_status="Running startup environment checks...",
+            error_title="Startup environment check failed",
+            task_fn=lambda: self._shell_service.detect_game_environment(
+                self._game_path_input.text()
+            ),
+            on_success=self._on_startup_environment_check_completed,
+            on_failure=self._on_startup_environment_check_failed,
+            show_error_dialog=False,
+        )
+
+    def _has_meaningful_startup_game_path(self) -> bool:
+        raw_game_path = self._game_path_input.text().strip()
+        if not raw_game_path:
+            return False
+        game_path = Path(raw_game_path).expanduser()
+        return game_path.exists() and game_path.is_dir()
+
+    def _on_startup_environment_check_completed(
+        self,
+        status: GameEnvironmentStatus,
+    ) -> None:
+        self._apply_environment_status(status)
+        self._set_status("Startup environment check complete.")
+        if "invalid_game_path" in status.state_codes:
+            self._startup_checks_completed = True
+            return
+        QTimer.singleShot(0, self._run_startup_smapi_update_check)
+
+    def _on_startup_environment_check_failed(self, message: str) -> None:
+        self._set_status(message)
+        self._startup_checks_completed = True
+
+    def _run_startup_smapi_update_check(self) -> None:
+        if not self._has_meaningful_startup_game_path():
+            self._startup_checks_completed = True
+            return
+        self._run_background_operation(
+            operation_name="Startup SMAPI update check",
+            running_label="Startup SMAPI update check",
+            started_status="Checking SMAPI update status on startup...",
+            error_title="Startup SMAPI update check failed",
+            task_fn=lambda: self._shell_service.check_smapi_update_status(
+                game_path_text=self._game_path_input.text(),
+                existing_config=self._config,
+            ),
+            on_success=self._on_startup_smapi_update_check_completed,
+            on_failure=self._on_startup_smapi_update_check_failed,
+            show_error_dialog=False,
+        )
+
+    def _on_startup_smapi_update_check_completed(self, status: SmapiUpdateStatus) -> None:
+        self._on_check_smapi_update_completed(status)
+        QTimer.singleShot(0, self._run_startup_smapi_log_check)
+
+    def _on_startup_smapi_update_check_failed(self, message: str) -> None:
+        self._set_status(message)
+        QTimer.singleShot(0, self._run_startup_smapi_log_check)
+
+    def _run_startup_smapi_log_check(self) -> None:
+        if not self._has_meaningful_startup_game_path():
+            self._startup_checks_completed = True
+            return
+        self._run_background_operation(
+            operation_name="Startup SMAPI log check",
+            running_label="Startup SMAPI log check",
+            started_status="Checking SMAPI log on startup...",
+            error_title="Startup SMAPI log check failed",
+            task_fn=lambda: self._shell_service.check_smapi_log_troubleshooting(
+                game_path_text=self._game_path_input.text(),
+                existing_config=self._config,
+            ),
+            on_success=self._on_startup_smapi_log_check_completed,
+            on_failure=self._on_startup_smapi_log_check_failed,
+            show_error_dialog=False,
+        )
+
+    def _on_startup_smapi_log_check_completed(self, report: SmapiLogReport) -> None:
+        self._on_check_smapi_log_completed(report)
+        self._startup_checks_completed = True
+
+    def _on_startup_smapi_log_check_failed(self, message: str) -> None:
+        self._set_status(message)
+        self._startup_checks_completed = True
 
     def _on_browse_game(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -1246,21 +1371,7 @@ class MainWindow(QMainWindow):
             self._set_status(str(exc))
             return
 
-        self._last_environment_status = status
-        if status.mods_path is not None and not self._mods_path_input.text().strip():
-            self._mods_path_input.setText(str(status.mods_path))
-
-        self._environment_status_label.setText(_environment_summary_label(status))
-        if status.smapi_path is None:
-            self._smapi_update_status_label.setText("SMAPI not detected")
-            self._smapi_update_status_label.setToolTip(
-                "SMAPI entrypoint was not detected for this game path."
-            )
-        if "invalid_game_path" in status.state_codes:
-            self._smapi_log_status_label.setText("Need valid game path")
-            self._smapi_log_status_label.setToolTip(
-                "SMAPI log auto-detection requires a valid game path context."
-            )
+        self._apply_environment_status(status)
         self._set_details_text(build_environment_status_text(status))
         self._refresh_sandbox_dev_launch_state()
         self._set_status("Environment detection complete.")
@@ -1457,6 +1568,7 @@ class MainWindow(QMainWindow):
             self._current_recovery_inspection = None
             self._install_history_combo.clear()
             self._install_history_combo.addItem("<install history unavailable>")
+            self._install_history_combo.setToolTip("<install history unavailable>")
             self._install_history_combo.setEnabled(False)
             self._inspect_recovery_button.setEnabled(False)
             self._run_recovery_button.setEnabled(False)
@@ -1475,6 +1587,7 @@ class MainWindow(QMainWindow):
         self._install_history_combo.clear()
         if not history.operations:
             self._install_history_combo.addItem("<no recorded installs>")
+            self._install_history_combo.setToolTip("<no recorded installs>")
             self._install_history_combo.setEnabled(False)
             self._inspect_recovery_button.setEnabled(False)
             self._run_recovery_button.setEnabled(False)
@@ -1489,6 +1602,7 @@ class MainWindow(QMainWindow):
         ]
         if not visible_indexes:
             self._install_history_combo.addItem("<no recorded installs match filter>")
+            self._install_history_combo.setToolTip("<no recorded installs match filter>")
             self._install_history_combo.setEnabled(False)
             self._inspect_recovery_button.setEnabled(False)
             self._run_recovery_button.setEnabled(False)
@@ -1516,6 +1630,7 @@ class MainWindow(QMainWindow):
         else:
             self._install_history_combo.setCurrentIndex(0)
         self._install_history_combo.setEnabled(True)
+        self._install_history_combo.setToolTip(self._install_history_combo.currentText())
         self._inspect_recovery_button.setEnabled(True)
         self._run_recovery_button.setEnabled(False)
         self._refresh_recovery_selection_summary()
@@ -1555,6 +1670,7 @@ class MainWindow(QMainWindow):
 
     def _on_selected_install_operation_changed(self, *_: object) -> None:
         self._current_recovery_inspection = None
+        self._install_history_combo.setToolTip(self._install_history_combo.currentText())
         self._run_recovery_button.setEnabled(False)
         self._refresh_recovery_selection_summary()
 
@@ -2734,6 +2850,8 @@ class MainWindow(QMainWindow):
         error_title: str,
         task_fn: Callable[[], object],
         on_success: Callable[[object], None],
+        on_failure: Callable[[str], None] | None = None,
+        show_error_dialog: bool = True,
     ) -> None:
         if self._active_operation_name is not None:
             self._set_status(
@@ -2756,10 +2874,12 @@ class MainWindow(QMainWindow):
             )
         )
         task.signals.failed.connect(
-            lambda exc, _name=operation_name, _title=error_title: self._on_background_operation_failed(
+            lambda exc, _name=operation_name, _title=error_title, _on_failure=on_failure, _show_error_dialog=show_error_dialog: self._on_background_operation_failed(
                 _name,
                 _title,
                 exc,
+                on_failure=_on_failure,
+                show_error_dialog=_show_error_dialog,
             )
         )
         self._thread_pool.start(task)
@@ -2787,11 +2907,17 @@ class MainWindow(QMainWindow):
         operation_name: str,
         error_title: str,
         exc: object,
+        *,
+        on_failure: Callable[[str], None] | None = None,
+        show_error_dialog: bool = True,
     ) -> None:
         message = str(exc)
-        QMessageBox.critical(self, error_title, message)
+        if show_error_dialog:
+            QMessageBox.critical(self, error_title, message)
         self._set_details_text(message)
         self._set_status(message)
+        if on_failure is not None:
+            on_failure(message)
         self._finish_background_operation(operation_name, success=False)
 
     def _finish_background_operation(self, operation_name: str, *, success: bool) -> None:
@@ -2877,6 +3003,24 @@ class MainWindow(QMainWindow):
         path_text = str(path)
         self._scan_context_label.setText(f"{label} selected")
         self._scan_context_label.setToolTip(path_text)
+
+    def _apply_environment_status(self, status: GameEnvironmentStatus) -> None:
+        self._last_environment_status = status
+        if status.mods_path is not None and not self._mods_path_input.text().strip():
+            self._mods_path_input.setText(str(status.mods_path))
+
+        self._environment_status_label.setText(_environment_summary_label(status))
+        self._environment_status_label.setToolTip(str(status.game_path))
+        if status.smapi_path is None:
+            self._smapi_update_status_label.setText("SMAPI not detected")
+            self._smapi_update_status_label.setToolTip(
+                "SMAPI entrypoint was not detected for this game path."
+            )
+        if "invalid_game_path" in status.state_codes:
+            self._smapi_log_status_label.setText("Need valid game path")
+            self._smapi_log_status_label.setToolTip(
+                "SMAPI log auto-detection requires a valid game path context."
+            )
 
     def _invalidate_pending_plan(self, *_: object) -> None:
         self._pending_install_plan = None
@@ -4502,6 +4646,21 @@ def _set_secondary_button_style(button: QPushButton) -> None:
 def _set_danger_button_style(button: QPushButton) -> None:
     button.setMinimumHeight(26)
     _set_button_emphasis_style(button, bold=True)
+
+
+def _configure_combo_box_readability(
+    combo: QComboBox,
+    *,
+    minimum_contents_length: int,
+    sample_text: str,
+) -> None:
+    combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+    combo.setSizeAdjustPolicy(
+        QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
+    combo.setMinimumContentsLength(minimum_contents_length)
+    popup_width = combo.fontMetrics().horizontalAdvance(sample_text) + 72
+    combo.view().setMinimumWidth(max(combo.view().minimumWidth(), popup_width))
 
 
 def _smapi_update_summary_label(status: SmapiUpdateStatus) -> str:

@@ -58,10 +58,20 @@ class PlanInstallTabSurface(QWidget):
         destination_layout.setContentsMargins(8, 6, 8, 6)
         destination_layout.setHorizontalSpacing(8)
         destination_layout.setVerticalSpacing(4)
+        destination_layout.setColumnStretch(1, 1)
+        destination_layout.setColumnStretch(2, 0)
         destination_layout.addWidget(QLabel("Install destination"), 0, 0)
-        destination_layout.addWidget(install_target_combo, 0, 1)
-        destination_layout.addWidget(overwrite_checkbox, 0, 2)
-        destination_layout.addWidget(install_archive_label, 1, 0, 1, 3)
+        destination_layout.addWidget(install_target_combo, 0, 1, 1, 2)
+        destination_layout.addWidget(QLabel("Replace existing"), 1, 0)
+        destination_layout.addWidget(overwrite_checkbox, 1, 1, 1, 2)
+        overwrite_help_label = QLabel(
+            "Use archive-aware replace when planning into an existing target."
+        )
+        overwrite_help_label.setObjectName("plan_install_overwrite_help_label")
+        overwrite_help_label.setWordWrap(True)
+        _set_auxiliary_label_style(overwrite_help_label)
+        destination_layout.addWidget(overwrite_help_label, 2, 0, 1, 3)
+        destination_layout.addWidget(install_archive_label, 3, 0, 1, 3)
         content_layout.addWidget(destination_group)
 
         execute_group = QGroupBox("Plan and Execute")
