@@ -127,17 +127,18 @@ The product now has explicit:
 - selected `real -> sandbox` sync
 - selected `sandbox -> real` promotion
 
-The remaining question is not whether the dev loop exists. It is how aggressive live promotion should become next.
+The remaining question is not whether the dev loop exists. It is how far to extend ergonomics without weakening trust semantics.
 
 Current behavior is intentionally conservative:
 
-- block on conflict
+- preview/review before live writes
+- archive-aware replace for conflicts
 - no blind overwrite
 - archive/recovery trust preserved for real writes
 
 The next unresolved product question is:
 
-> How should the app land preview + archive-aware replace without making live promotion feel casual or opaque?
+> How should the app improve promotion speed and clarity now that preview + archive-aware replace already exists, without making live promotion feel casual or opaque?
 
 ### 2. `MainWindow` is still the densest integration point
 
@@ -205,11 +206,13 @@ Already completed or effectively implemented:
 - sandbox-only SMAPI dev launch
 - selected `real -> sandbox` sync
 - selected `sandbox -> real` managed promotion
+- promotion preview/review + archive-aware replace conflict handling
+- partial-failure safety handling for archive-aware promotion paths
 
 Current recommendation:
 
-- close manual validation on live promotion wording/UX
-- then move to the next smallest ergonomics and conflict-preview increment
+- continue with the next smallest ergonomics increment (orientation and reduced friction)
+- preserve explicit confirmation and recovery trust semantics as non-negotiable
 
 ### Next likely phase
 
@@ -217,10 +220,9 @@ Current recommendation:
 
 This phase should determine which one small improvement matters most:
 
-- conflict preview before promotion
-- preview + archive-aware replace policy
 - open sandbox / real Mods convenience actions
 - auto-rescan / destination-focus after sync or promotion
+- clearer promotion preview orientation for multi-mod operations
 
 ### Later planned phase
 
@@ -248,7 +250,7 @@ Question:
 
 Question:
 
-> Should `sandbox -> real` remain block-on-conflict until a preview/archive-replace flow exists, or is the current product value too limited without the next safety-managed replace step?
+> How conservative should `sandbox -> real` remain now that preview/archive-aware replace exists, and what safeguards should be added before any faster promotion path is considered?
 
 ### C. What should remain global vs tab-local?
 

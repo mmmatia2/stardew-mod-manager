@@ -71,7 +71,8 @@ Live Mods safety expectations:
   - sandbox-only SMAPI launch using the configured sandbox Mods path
   - explicit selected-mod `real -> sandbox` sync
   - explicit selected-mod `sandbox -> real` promotion
-  - conflict-blocking live promotion policy in the current stage
+  - promotion preview/review with explicit confirmation for live writes
+  - archive-aware replace on live-target conflicts (no blind overwrite)
 
 ## Manual source guidance
 
@@ -150,7 +151,7 @@ You can still run focused suites when iterating:
 ## Known limitations (current)
 
 - no automated provider-compliant download pipeline yet (manual download remains required)
-- sandbox->real promotion currently blocks on existing live-target conflicts instead of replacing/archive-promoting in one step
+- sandbox->real promotion is intentionally explicit and safety-first; there is no casual one-click "sync back all" workflow
 - no broad history browser UX; recovery is available through focused inspection/execution paths
 - no profiles/instances workflow
 - no packaging/installer/release hardening yet

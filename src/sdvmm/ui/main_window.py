@@ -70,6 +70,7 @@ from sdvmm.app.shell_service import (
     AppShellService,
     IntakeUpdateCorrelation,
     ScanResult,
+    SandboxModsPromotionPreview,
     SandboxModsPromotionResult,
     SandboxModsSyncResult,
 )
@@ -3438,32 +3439,33 @@ class MainWindow(QMainWindow):
             self._set_status(message)
             return
 
-        readiness = self._shell_service.get_sandbox_mods_promotion_readiness(
-            configured_mods_path_text=self._mods_path_input.text(),
-            sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
-            real_archive_path_text=self._real_archive_path_input.text(),
-            selected_mod_folder_paths_text=selected_mod_folder_paths,
-            existing_config=self._config,
-        )
-        if not readiness.ready:
-            self._set_status(readiness.message)
+        try:
+            preview = self._shell_service.build_sandbox_mods_promotion_preview(
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                selected_mod_folder_paths_text=selected_mod_folder_paths,
+                existing_config=self._config,
+            )
+        except AppShellError as exc:
+            self._set_status(str(exc))
+            return
+
+        if not preview.review.allowed:
+            self._set_status(preview.review.message)
             return
 
         yes = QMessageBox.question(
             self,
-            "Confirm sandbox promotion to REAL Mods",
-            _build_sandbox_mods_promotion_confirmation_message(
-                selected_count=len(selected_mod_folder_paths),
-                sandbox_mods_path=readiness.sandbox_mods_path,
-                real_mods_path=readiness.real_mods_path,
-                archive_path=readiness.archive_path,
-            ),
+            "Review sandbox promotion to REAL Mods",
+            _build_sandbox_mods_promotion_confirmation_message(preview),
         )
         if yes != QMessageBox.StandardButton.Yes:
             self._set_status("Sandbox promotion cancelled.")
             return
 
         selected_count = len(selected_mod_folder_paths)
+        history_before = self._install_operation_history
         self._run_background_operation(
             operation_name="Sandbox promotion",
             running_label="Sandbox promotion",
@@ -3471,29 +3473,35 @@ class MainWindow(QMainWindow):
                 f"Promoting {selected_count} selected mod(s) from sandbox Mods to REAL Mods..."
             ),
             error_title="Sandbox promotion failed",
-            task_fn=lambda _paths=selected_mod_folder_paths: self._shell_service.promote_installed_mods_from_sandbox_to_real(
-                configured_mods_path_text=self._mods_path_input.text(),
-                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
-                real_archive_path_text=self._real_archive_path_input.text(),
-                selected_mod_folder_paths_text=_paths,
-                existing_config=self._config,
+            task_fn=lambda _preview=preview: self._shell_service.execute_sandbox_mods_promotion_preview(
+                _preview
             ),
-            on_success=self._on_promote_selected_mods_to_real_completed,
+            on_success=lambda result, _history_before=history_before: self._on_promote_selected_mods_to_real_completed(
+                result,
+                history_before=_history_before,
+            ),
         )
 
     def _on_promote_selected_mods_to_real_completed(
         self,
         result: SandboxModsPromotionResult,
+        *,
+        history_before: tuple[InstallOperationRecord, ...],
     ) -> None:
-        self._render_inventory(result.inventory)
-        self._set_current_scan_target(result.destination_kind)
-        self._set_scan_context(
-            result.scan_context_path,
-            self._scan_target_label(result.destination_kind),
-        )
+        self._refresh_install_operation_selector()
+        self._select_new_install_operation_for_recovery(history_before)
         self._set_details_text(_build_sandbox_mods_promotion_result_text(result))
+        replaced_count = len(result.replaced_target_paths)
+        if replaced_count > 0:
+            self._set_status(
+                "Sandbox promotion complete: "
+                f"{len(result.promoted_target_paths)} mod(s) promoted, "
+                f"{replaced_count} live target(s) archived and replaced."
+            )
+            return
+
         self._set_status(
-            f"Sandbox promotion complete: {len(result.promoted_target_paths)} mod(s) copied into REAL Mods."
+            f"Sandbox promotion complete: {len(result.promoted_target_paths)} mod(s) promoted into REAL Mods."
         )
 
     def _apply_discovery_filter(self, *_: object) -> None:
@@ -4356,22 +4364,37 @@ def _build_sandbox_mods_sync_result_text(result: SandboxModsSyncResult) -> str:
 
 
 def _build_sandbox_mods_promotion_confirmation_message(
-    *,
-    selected_count: int,
-    sandbox_mods_path: Path | None,
-    real_mods_path: Path | None,
-    archive_path: Path | None,
+    preview: SandboxModsPromotionPreview,
 ) -> str:
-    return (
-        "Promote selected sandbox mod(s) into the configured REAL Mods path?\n\n"
-        f"Selected mods: {selected_count}\n"
-        f"Sandbox Mods source: {sandbox_mods_path}\n"
-        f"REAL Mods destination: {real_mods_path}\n"
-        f"Recovery archive root: {archive_path}\n\n"
-        "This is an explicit promotion flow, not a raw sync-back.\n"
-        "This stage blocks if a live REAL Mods target already exists.\n"
-        "No blind overwrite is performed."
+    install_new_count = sum(1 for entry in preview.plan.entries if entry.action == "install_new")
+    replace_entries = tuple(
+        entry for entry in preview.plan.entries if entry.action == "overwrite_with_archive"
     )
+    lines = [
+        "Review sandbox promotion into the REAL Mods path.",
+        "",
+        preview.review.message,
+        "",
+        "Execute promotion now?",
+        f"Source: {preview.sandbox_mods_path}",
+        f"Destination: {preview.real_mods_path}",
+        f"Archive root: {preview.archive_path}",
+        f"Entries: {preview.review.summary.total_entry_count}",
+        f"New targets: {install_new_count}",
+        f"Archive-aware replace: {len(replace_entries)}",
+        "",
+        "This is an explicit promotion flow, not a raw sync-back.",
+        "Conflicts are handled by archiving the live target before replacement.",
+        "No blind overwrite is performed.",
+    ]
+    if replace_entries:
+        lines.append("")
+        lines.append("Conflicting live targets")
+        lines.extend(f"- {entry.target_path.name}" for entry in replace_entries[:5])
+        remaining_count = len(replace_entries) - min(len(replace_entries), 5)
+        if remaining_count > 0:
+            lines.append(f"- ... and {remaining_count} more")
+    return "\n".join(lines)
 
 
 def _build_sandbox_mods_promotion_result_text(result: SandboxModsPromotionResult) -> str:
@@ -4383,15 +4406,30 @@ def _build_sandbox_mods_promotion_result_text(result: SandboxModsPromotionResult
         f"Recovery archive root: {result.archive_path}",
         f"Promoted targets: {len(result.promoted_target_paths)}",
     ]
+    if result.replaced_target_paths:
+        lines.append(
+            f"Archive-aware replacements: {len(result.replaced_target_paths)}"
+        )
+    else:
+        lines.append("Archive-aware replacements: 0")
     if result.source_mod_paths:
         lines.append("Source sandbox mod folders")
         lines.extend(f"- {path}" for path in result.source_mod_paths)
     if result.promoted_target_paths:
         lines.append("REAL Mods target folders")
         lines.extend(f"- {path}" for path in result.promoted_target_paths)
+    if result.replaced_target_paths:
+        lines.append("Replaced live REAL Mods targets")
+        lines.extend(f"- {path}" for path in result.replaced_target_paths)
+    if result.archived_target_paths:
+        lines.append("Archived live targets")
+        lines.extend(f"- {path}" for path in result.archived_target_paths)
     lines.append("")
     lines.append(
-        "Recovery history was recorded for this explicit promotion so the new REAL targets remain inspectable."
+        "Destination was rescanned after promotion. Current scan context was left unchanged."
+    )
+    lines.append(
+        "Recovery history was recorded for this explicit promotion so archive-aware replacements remain inspectable."
     )
     return "\n".join(lines)
 

@@ -48,7 +48,7 @@ It does not replace the thread-specific role prompt for the ARCHITECT or the EXE
 - Treat `real -> sandbox` sync and `sandbox -> real` promotion as intentionally asymmetric:
   - `real -> sandbox` may be an explicit selected-mod sync
   - `sandbox -> real` must remain a managed promotion flow with real-Mods safety semantics
-- When `sandbox -> real` promotion grows beyond block-on-conflict, prefer preview/review plus archive-aware replace over overwrite shortcuts.
+- For `sandbox -> real` promotion conflict handling, prefer preview/review plus archive-aware replace over overwrite shortcuts.
 - Do not introduce raw bidirectional mirroring that bypasses archive/recovery guarantees for live Mods.
 - No premium-bypass behavior.
 - No scraping or browser automation for downloads.
@@ -122,6 +122,15 @@ A stage is ready to commit only when it is:
 Do not recommend bundling unrelated changes into one commit.
 
 Prefer one commit per approved stage.
+
+---
+
+## Versioning discipline
+
+- Bump version only for approved stages that are user-facing or packaging-impacting.
+- Use patch bumps (`x.y.Z`) for fixes and narrow corrective behavior changes.
+- Use minor bumps (`x.Y.0`) for meaningful workflow expansions that change practical product capability.
+- Do not bump version for analysis-only, prompt-only, or non-impacting internal refactor stages.
 
 ---
 

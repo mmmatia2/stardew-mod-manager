@@ -96,6 +96,9 @@ from sdvmm.services.dependency_preflight import (
 )
 from sdvmm.services.sandbox_installer import (
     SandboxInstallError,
+    _build_archive_destination as _build_archive_destination_service,
+    _ensure_archive_root as _ensure_archive_root_service,
+    _overwrite_target_with_archive as _overwrite_target_with_archive_service,
     build_sandbox_install_plan as build_sandbox_install_plan_service,
     execute_sandbox_install_plan as execute_sandbox_install_plan_service,
     remove_mod_to_archive as remove_mod_to_archive_service,
@@ -209,6 +212,17 @@ class SandboxModsPromotionReadiness:
     sandbox_mods_path: Path | None = None
     archive_path: Path | None = None
     selected_count: int = 0
+    replace_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxModsPromotionPreview:
+    plan: SandboxInstallPlan
+    review: InstallExecutionReview
+    real_mods_path: Path
+    sandbox_mods_path: Path
+    archive_path: Path
+    source_mod_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +233,8 @@ class SandboxModsPromotionResult:
     archive_path: Path
     source_mod_paths: tuple[Path, ...]
     promoted_target_paths: tuple[Path, ...]
+    archived_target_paths: tuple[Path, ...]
+    replaced_target_paths: tuple[Path, ...]
     scan_context_path: Path
     inventory: ModsInventory
 
@@ -890,28 +906,84 @@ class AppShellService:
         existing_config: AppConfig | None = None,
     ) -> SandboxModsPromotionReadiness:
         try:
-            real_mods_path, sandbox_mods_path, archive_path, source_paths, _ = (
-                self._resolve_sandbox_mod_promotion_context(
-                    configured_mods_path_text=configured_mods_path_text,
-                    sandbox_mods_path_text=sandbox_mods_path_text,
-                    real_archive_path_text=real_archive_path_text,
-                    selected_mod_folder_paths_text=selected_mod_folder_paths_text,
-                    existing_config=existing_config,
-                )
+            preview = self.build_sandbox_mods_promotion_preview(
+                configured_mods_path_text=configured_mods_path_text,
+                sandbox_mods_path_text=sandbox_mods_path_text,
+                real_archive_path_text=real_archive_path_text,
+                selected_mod_folder_paths_text=selected_mod_folder_paths_text,
+                existing_config=existing_config,
             )
         except AppShellError as exc:
             return SandboxModsPromotionReadiness(ready=False, message=str(exc))
 
+        replace_count = sum(
+            1 for entry in preview.plan.entries if entry.action == OVERWRITE_WITH_ARCHIVE
+        )
+        if not preview.review.allowed:
+            return SandboxModsPromotionReadiness(
+                ready=False,
+                message=preview.review.message,
+                real_mods_path=preview.real_mods_path,
+                sandbox_mods_path=preview.sandbox_mods_path,
+                archive_path=preview.archive_path,
+                selected_count=len(preview.source_mod_paths),
+                replace_count=replace_count,
+            )
+
+        if replace_count > 0:
+            message = (
+                f"Review required: {len(preview.source_mod_paths)} selected mod(s) include "
+                f"{replace_count} archive-aware live replacement(s) for REAL Mods."
+            )
+        else:
+            message = (
+                f"Ready to review {len(preview.source_mod_paths)} selected mod(s) "
+                "for promotion into the configured real Mods path."
+            )
+
         return SandboxModsPromotionReadiness(
             ready=True,
-            message=(
-                f"Ready to promote {len(source_paths)} selected mod(s) "
-                "from sandbox Mods into the configured real Mods path."
-            ),
+            message=message,
+            real_mods_path=preview.real_mods_path,
+            sandbox_mods_path=preview.sandbox_mods_path,
+            archive_path=preview.archive_path,
+            selected_count=len(preview.source_mod_paths),
+            replace_count=replace_count,
+        )
+
+    def build_sandbox_mods_promotion_preview(
+        self,
+        *,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        selected_mod_folder_paths_text: Iterable[str],
+        existing_config: AppConfig | None = None,
+    ) -> SandboxModsPromotionPreview:
+        real_mods_path, sandbox_mods_path, archive_path, source_paths, source_inventory = (
+            self._resolve_sandbox_mod_promotion_context(
+                configured_mods_path_text=configured_mods_path_text,
+                sandbox_mods_path_text=sandbox_mods_path_text,
+                real_archive_path_text=real_archive_path_text,
+                selected_mod_folder_paths_text=selected_mod_folder_paths_text,
+                existing_config=existing_config,
+            )
+        )
+        plan = self._build_sandbox_mods_promotion_plan(
             real_mods_path=real_mods_path,
             sandbox_mods_path=sandbox_mods_path,
             archive_path=archive_path,
-            selected_count=len(source_paths),
+            source_paths=source_paths,
+            source_inventory=source_inventory,
+        )
+        review = self.review_install_execution(plan)
+        return SandboxModsPromotionPreview(
+            plan=plan,
+            review=review,
+            real_mods_path=real_mods_path,
+            sandbox_mods_path=sandbox_mods_path,
+            archive_path=archive_path,
+            source_mod_paths=source_paths,
         )
 
     def promote_installed_mods_from_sandbox_to_real(
@@ -923,98 +995,165 @@ class AppShellService:
         selected_mod_folder_paths_text: Iterable[str],
         existing_config: AppConfig | None = None,
     ) -> SandboxModsPromotionResult:
-        real_mods_path, sandbox_mods_path, archive_path, source_paths, source_inventory = (
-            self._resolve_sandbox_mod_promotion_context(
-                configured_mods_path_text=configured_mods_path_text,
-                sandbox_mods_path_text=sandbox_mods_path_text,
-                real_archive_path_text=real_archive_path_text,
-                selected_mod_folder_paths_text=selected_mod_folder_paths_text,
-                existing_config=existing_config,
-            )
+        preview = self.build_sandbox_mods_promotion_preview(
+            configured_mods_path_text=configured_mods_path_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            real_archive_path_text=real_archive_path_text,
+            selected_mod_folder_paths_text=selected_mod_folder_paths_text,
+            existing_config=existing_config,
         )
+        return self.execute_sandbox_mods_promotion_preview(preview)
 
-        selected_mods_by_path = {
-            str(mod.folder_path): mod
-            for mod in source_inventory.mods
-            if str(mod.folder_path) in {str(path) for path in source_paths}
-        }
-        copied_targets: list[Path] = []
+    def execute_sandbox_mods_promotion_preview(
+        self,
+        preview: SandboxModsPromotionPreview,
+    ) -> SandboxModsPromotionResult:
+        if not preview.review.allowed:
+            raise AppShellError(preview.review.message)
+
+        _ensure_archive_root_service(preview.archive_path)
+        staging_root = (
+            preview.real_mods_path / f".sdvmm-promotion-stage-{uuid4().hex[:10]}"
+        )
+        applied_entries: list[SandboxInstallPlanEntry] = []
+        installed_targets: list[Path] = []
+        archived_targets: list[Path] = []
+        replaced_targets: list[Path] = []
         try:
-            for source_path in source_paths:
-                target_path = real_mods_path / source_path.name
-                shutil.copytree(source_path, target_path)
-                copied_targets.append(target_path)
-        except OSError as exc:
-            for copied_target in reversed(copied_targets):
-                if copied_target.exists():
-                    shutil.rmtree(copied_target, ignore_errors=True)
-            raise AppShellError(f"Sandbox promotion failed: {exc}") from exc
+            staging_root.mkdir(parents=False, exist_ok=False)
 
-        inventory = scan_mods_directory(
-            real_mods_path,
-            excluded_paths=(archive_path, real_mods_path / _LEGACY_ARCHIVE_DIRNAME),
-        )
-        plan = SandboxInstallPlan(
-            package_path=_promotion_history_source_marker(
-                sandbox_mods_path=sandbox_mods_path,
-                source_paths=source_paths,
-            ),
-            sandbox_mods_path=real_mods_path,
-            sandbox_archive_path=archive_path,
-            entries=tuple(
-                SandboxInstallPlanEntry(
-                    name=selected_mods_by_path.get(str(source_path), None).name
-                    if str(source_path) in selected_mods_by_path
-                    else source_path.name,
-                    unique_id=selected_mods_by_path.get(str(source_path), None).unique_id
-                    if str(source_path) in selected_mods_by_path
-                    else source_path.name,
-                    version=selected_mods_by_path.get(str(source_path), None).version
-                    if str(source_path) in selected_mods_by_path
-                    else "",
-                    source_manifest_path=str(
-                        selected_mods_by_path.get(str(source_path), None).manifest_path
-                    )
-                    if str(source_path) in selected_mods_by_path
-                    else str(source_path / "manifest.json"),
-                    source_root_path=str(source_path),
-                    target_path=real_mods_path / source_path.name,
-                    action=INSTALL_NEW,
-                    target_exists=False,
-                    archive_path=None,
-                    can_install=True,
-                    warnings=(
-                        "Promoted from sandbox Mods selection via explicit managed action.",
-                    ),
+            for entry in preview.plan.entries:
+                staged_target = staging_root / entry.target_path.name
+                shutil.copytree(Path(entry.source_root_path), staged_target)
+
+            for entry in preview.plan.entries:
+                staged_target = staging_root / entry.target_path.name
+                if entry.action == INSTALL_NEW:
+                    try:
+                        staged_target.rename(entry.target_path)
+                    except OSError as exc:
+                        raise AppShellError(
+                            "Sandbox promotion failed while creating a new REAL Mods target: "
+                            f"{entry.target_path}: {exc}"
+                        ) from exc
+                    installed_targets.append(entry.target_path)
+                    applied_entries.append(entry)
+                    continue
+
+                if entry.action == OVERWRITE_WITH_ARCHIVE:
+                    if entry.archive_path is None:
+                        raise AppShellError(
+                            "Sandbox promotion preview is invalid: overwrite entry is missing "
+                            f"archive path for {entry.target_path}."
+                        )
+                    try:
+                        _overwrite_target_with_archive_service(
+                            staged_target=staged_target,
+                            target_path=entry.target_path,
+                            archive_path=entry.archive_path,
+                        )
+                    except SandboxInstallError as exc:
+                        raise AppShellError(f"Sandbox promotion failed: {exc}") from exc
+                    installed_targets.append(entry.target_path)
+                    archived_targets.append(entry.archive_path)
+                    replaced_targets.append(entry.target_path)
+                    applied_entries.append(entry)
+                    continue
+
+                raise AppShellError(
+                    f"Sandbox promotion preview contains a blocked entry: {entry.target_path}"
                 )
-                for source_path in source_paths
-            ),
-            package_findings=tuple(),
-            package_warnings=tuple(),
-            plan_warnings=(
-                "Sandbox promotion writes new targets into the configured real Mods path.",
-            ),
-            dependency_findings=tuple(),
-            remote_requirements=tuple(),
-            destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
-        )
-        result = SandboxInstallResult(
-            plan=plan,
-            installed_targets=tuple(copied_targets),
-            archived_targets=tuple(),
-            scan_context_path=real_mods_path,
-            inventory=inventory,
-            destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
-        )
-        self._record_completed_install_operation(plan=plan, result=result)
+            inventory = scan_mods_directory(
+                preview.real_mods_path,
+                excluded_paths=(
+                    preview.archive_path,
+                    preview.real_mods_path / _LEGACY_ARCHIVE_DIRNAME,
+                ),
+            )
+            result = SandboxInstallResult(
+                plan=preview.plan,
+                installed_targets=tuple(
+                    sorted(installed_targets, key=lambda path: path.name.lower())
+                ),
+                archived_targets=tuple(
+                    sorted(archived_targets, key=lambda path: path.name.lower())
+                ),
+                scan_context_path=preview.real_mods_path,
+                inventory=inventory,
+                destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+            )
+            self._record_completed_install_operation(plan=preview.plan, result=result)
+        except (AppShellError, SandboxInstallError, OSError) as exc:
+            if not applied_entries:
+                raise _normalize_sandbox_promotion_error(exc) from exc
+
+            rollback_errors = self._rollback_sandbox_mods_promotion_entries(
+                tuple(applied_entries)
+            )
+            (
+                remaining_entries,
+                remaining_installed_targets,
+                remaining_archived_targets,
+            ) = self._remaining_sandbox_mods_promotion_state(tuple(applied_entries))
+            if not remaining_entries:
+                raise AppShellError(
+                    f"{_normalize_sandbox_promotion_error(exc)} "
+                    "Promotion rollback restored prior REAL Mods state."
+                ) from exc
+
+            partial_plan = replace(
+                preview.plan,
+                entries=remaining_entries,
+                plan_warnings=preview.plan.plan_warnings
+                + (
+                    "Partial sandbox promotion failure left remaining live changes after rollback.",
+                    "Recovery inspection depends on this recorded partial promotion state.",
+                ),
+            )
+            partial_record_error: AppShellError | None = None
+            try:
+                self._record_install_operation_state(
+                    plan=partial_plan,
+                    installed_targets=remaining_installed_targets,
+                    archived_targets=remaining_archived_targets,
+                )
+            except AppShellError as record_exc:
+                partial_record_error = record_exc
+
+            rollback_detail = ""
+            if rollback_errors:
+                rollback_detail = " Rollback details: " + "; ".join(rollback_errors)
+
+            if partial_record_error is None:
+                raise AppShellError(
+                    f"{_normalize_sandbox_promotion_error(exc)} "
+                    "Promotion rollback could not fully restore prior REAL Mods state. "
+                    "Remaining live changes were recorded in install history for recovery inspection."
+                    f"{rollback_detail}"
+                ) from exc
+
+            raise AppShellError(
+                f"{_normalize_sandbox_promotion_error(exc)} "
+                "Promotion rollback could not fully restore prior REAL Mods state, and "
+                "recording partial install history failed. Manual recovery is required. "
+                f"Recording error: {partial_record_error}.{rollback_detail}"
+            ) from exc
+        finally:
+            if staging_root.exists():
+                shutil.rmtree(staging_root, ignore_errors=True)
+
         return SandboxModsPromotionResult(
             destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
-            real_mods_path=real_mods_path,
-            sandbox_mods_path=sandbox_mods_path,
-            archive_path=archive_path,
-            source_mod_paths=source_paths,
-            promoted_target_paths=tuple(copied_targets),
-            scan_context_path=real_mods_path,
+            real_mods_path=preview.real_mods_path,
+            sandbox_mods_path=preview.sandbox_mods_path,
+            archive_path=preview.archive_path,
+            source_mod_paths=preview.source_mod_paths,
+            promoted_target_paths=result.installed_targets,
+            archived_target_paths=result.archived_targets,
+            replaced_target_paths=tuple(
+                sorted(replaced_targets, key=lambda path: path.name.lower())
+            ),
+            scan_context_path=preview.real_mods_path,
             inventory=inventory,
         )
 
@@ -2392,28 +2531,204 @@ class AppShellService:
             sandbox_mods_path=sandbox_mods_path,
             selected_mod_folder_paths_text=selected_mod_folder_paths_text,
         )
-        conflicting_targets = tuple(
-            real_mods_path / source_path.name
-            for source_path in source_paths
-            if (real_mods_path / source_path.name).exists()
-        )
-        if conflicting_targets:
-            conflict_names = ", ".join(target.name for target in conflicting_targets[:3])
-            if len(conflicting_targets) == 1:
-                raise AppShellError(
-                    "Sandbox promotion blocked: real Mods target already exists for "
-                    f"{conflict_names}. This stage does not overwrite live mods."
-                )
-            raise AppShellError(
-                "Sandbox promotion blocked: real Mods targets already exist for "
-                f"{conflict_names}. This stage does not overwrite live mods."
-            )
-
         source_inventory = scan_mods_directory(
             sandbox_mods_path,
             excluded_paths=(sandbox_mods_path / _LEGACY_ARCHIVE_DIRNAME,),
         )
         return real_mods_path, sandbox_mods_path, archive_path, source_paths, source_inventory
+
+    def _build_sandbox_mods_promotion_plan(
+        self,
+        *,
+        real_mods_path: Path,
+        sandbox_mods_path: Path,
+        archive_path: Path,
+        source_paths: tuple[Path, ...],
+        source_inventory: ModsInventory,
+    ) -> SandboxInstallPlan:
+        selected_mods_by_path = {
+            str(mod.folder_path): mod
+            for mod in source_inventory.mods
+            if str(mod.folder_path) in {str(path) for path in source_paths}
+        }
+        entries: list[SandboxInstallPlanEntry] = []
+        has_replace_entries = False
+
+        for source_path in source_paths:
+            target_path = real_mods_path / source_path.name
+            target_exists = target_path.exists()
+            archive_target_path: Path | None = None
+            action = INSTALL_NEW
+            warnings = ["Promoted from sandbox Mods selection via explicit managed action."]
+            source_mod = selected_mods_by_path.get(str(source_path))
+
+            if target_exists:
+                has_replace_entries = True
+                action = OVERWRITE_WITH_ARCHIVE
+                archive_target_path = _build_archive_destination_service(
+                    archive_root=archive_path,
+                    target_folder_name=target_path.name,
+                )
+                warnings.append(
+                    "Existing REAL Mods target will be archived before replacement."
+                )
+
+            entries.append(
+                SandboxInstallPlanEntry(
+                    name=source_mod.name if source_mod is not None else source_path.name,
+                    unique_id=(
+                        source_mod.unique_id if source_mod is not None else source_path.name
+                    ),
+                    version=source_mod.version if source_mod is not None else "",
+                    source_manifest_path=(
+                        str(source_mod.manifest_path)
+                        if source_mod is not None
+                        else str(source_path / "manifest.json")
+                    ),
+                    source_root_path=str(source_path),
+                    target_path=target_path,
+                    action=action,
+                    target_exists=target_exists,
+                    archive_path=archive_target_path,
+                    can_install=True,
+                    warnings=tuple(warnings),
+                )
+            )
+
+        entries.sort(key=lambda item: (item.target_path.name.lower(), item.unique_id.casefold()))
+        plan_warnings = [
+            "Sandbox promotion writes into the configured real Mods path.",
+        ]
+        if has_replace_entries:
+            plan_warnings.append(
+                "Conflicting live targets will be archived before replacement."
+            )
+            plan_warnings.append(
+                "Recovery remains per-entry and depends on recorded archive history."
+            )
+
+        return SandboxInstallPlan(
+            package_path=_promotion_history_source_marker(
+                sandbox_mods_path=sandbox_mods_path,
+                source_paths=source_paths,
+            ),
+            sandbox_mods_path=real_mods_path,
+            sandbox_archive_path=archive_path,
+            entries=tuple(entries),
+            package_findings=tuple(),
+            package_warnings=tuple(),
+            plan_warnings=tuple(plan_warnings),
+            dependency_findings=tuple(),
+            remote_requirements=tuple(),
+            destination_kind=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        )
+
+    def _rollback_sandbox_mods_promotion_entries(
+        self,
+        entries: tuple[SandboxInstallPlanEntry, ...],
+    ) -> tuple[str, ...]:
+        errors: list[str] = []
+        for entry in reversed(entries):
+            if entry.action == INSTALL_NEW:
+                if not entry.target_path.exists():
+                    continue
+                try:
+                    _remove_path_for_promotion_rollback(entry.target_path)
+                except OSError as exc:
+                    errors.append(
+                        f"could not remove promoted target {entry.target_path}: {exc}"
+                    )
+                continue
+
+            if entry.action == OVERWRITE_WITH_ARCHIVE:
+                archive_path = entry.archive_path
+                if entry.target_path.exists():
+                    try:
+                        _remove_path_for_promotion_rollback(entry.target_path)
+                    except OSError as exc:
+                        errors.append(
+                            f"could not remove replaced target {entry.target_path}: {exc}"
+                        )
+                        continue
+
+                if archive_path is None:
+                    errors.append(
+                        f"missing archive path for rollback of {entry.target_path}"
+                    )
+                    continue
+                if not archive_path.exists():
+                    errors.append(
+                        f"archived target is missing for rollback of {entry.target_path}: "
+                        f"{archive_path}"
+                    )
+                    continue
+                try:
+                    archive_path.rename(entry.target_path)
+                except OSError as exc:
+                    errors.append(
+                        f"could not restore archived target {archive_path} -> "
+                        f"{entry.target_path}: {exc}"
+                    )
+        return tuple(errors)
+
+    def _remaining_sandbox_mods_promotion_state(
+        self,
+        entries: tuple[SandboxInstallPlanEntry, ...],
+    ) -> tuple[
+        tuple[SandboxInstallPlanEntry, ...],
+        tuple[Path, ...],
+        tuple[Path, ...],
+    ]:
+        remaining_entries: list[SandboxInstallPlanEntry] = []
+        installed_targets: list[Path] = []
+        archived_targets: list[Path] = []
+
+        for entry in entries:
+            if entry.action == INSTALL_NEW:
+                if not entry.target_path.exists():
+                    continue
+                remaining_entries.append(
+                    replace(
+                        entry,
+                        warnings=entry.warnings
+                        + (
+                            "Partial sandbox promotion failure: rollback did not remove this REAL Mods target.",
+                        ),
+                    )
+                )
+                installed_targets.append(entry.target_path)
+                continue
+
+            if entry.action != OVERWRITE_WITH_ARCHIVE:
+                continue
+
+            archive_exists = entry.archive_path is not None and entry.archive_path.exists()
+            target_exists = entry.target_path.exists()
+            if not archive_exists and not target_exists:
+                continue
+
+            remaining_entries.append(
+                replace(
+                    entry,
+                    warnings=entry.warnings
+                    + (
+                        "Partial sandbox promotion failure: rollback did not fully restore this REAL Mods target.",
+                    ),
+                )
+            )
+            if target_exists:
+                installed_targets.append(entry.target_path)
+            if archive_exists and entry.archive_path is not None:
+                archived_targets.append(entry.archive_path)
+
+        remaining_entries.sort(
+            key=lambda item: (item.target_path.name.lower(), item.unique_id.casefold())
+        )
+        return (
+            tuple(remaining_entries),
+            tuple(sorted(installed_targets, key=lambda path: path.name.lower())),
+            tuple(sorted(archived_targets, key=lambda path: path.name.lower())),
+        )
 
     def _resolve_selected_real_mod_paths(
         self,
@@ -2893,6 +3208,19 @@ class AppShellService:
         plan: SandboxInstallPlan,
         result: SandboxInstallResult,
     ) -> None:
+        self._record_install_operation_state(
+            plan=plan,
+            installed_targets=result.installed_targets,
+            archived_targets=result.archived_targets,
+        )
+
+    def _record_install_operation_state(
+        self,
+        *,
+        plan: SandboxInstallPlan,
+        installed_targets: tuple[Path, ...],
+        archived_targets: tuple[Path, ...],
+    ) -> None:
         operation = InstallOperationRecord(
             operation_id=_new_operation_id("install"),
             timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -2900,8 +3228,8 @@ class AppShellService:
             destination_kind=plan.destination_kind,
             destination_mods_path=plan.sandbox_mods_path,
             archive_path=plan.sandbox_archive_path,
-            installed_targets=result.installed_targets,
-            archived_targets=result.archived_targets,
+            installed_targets=installed_targets,
+            archived_targets=archived_targets,
             entries=tuple(
                 InstallOperationEntryRecord(
                     name=entry.name,
@@ -3232,6 +3560,25 @@ def _build_real_install_review_message(summary: InstallExecutionSummary) -> str:
 
 def _entry_count_label(count: int) -> str:
     return "entry" if count == 1 else "entries"
+
+
+def _normalize_sandbox_promotion_error(
+    exc: AppShellError | SandboxInstallError | OSError,
+) -> AppShellError:
+    if isinstance(exc, AppShellError):
+        return exc
+    if isinstance(exc, SandboxInstallError):
+        return AppShellError(f"Sandbox promotion failed: {exc}")
+    return AppShellError(f"Sandbox promotion failed: {exc}")
+
+
+def _remove_path_for_promotion_rollback(path: Path) -> None:
+    if not path.exists():
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+        return
+    path.unlink()
 
 
 def _derive_install_operation_recovery_entry(

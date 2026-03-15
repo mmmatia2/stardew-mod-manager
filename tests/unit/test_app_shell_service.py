@@ -485,6 +485,38 @@ def test_get_sandbox_mods_promotion_readiness_requires_selection(tmp_path: Path)
     assert readiness.message == "Select at least one installed sandbox mod row to promote."
 
 
+def test_build_sandbox_mods_promotion_preview_reports_non_conflicting_real_write_review(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    source_mod = _create_mod(sandbox_mods, "SampleMod", "Sample.Mod")
+
+    preview = service.build_sandbox_mods_promotion_preview(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        selected_mod_folder_paths_text=(str(source_mod),),
+        existing_config=None,
+    )
+
+    assert preview.real_mods_path == real_mods
+    assert preview.sandbox_mods_path == sandbox_mods
+    assert preview.archive_path == real_mods.parent / ".sdvmm-real-archive"
+    assert preview.source_mod_paths == (source_mod,)
+    assert preview.review.allowed is True
+    assert preview.review.requires_explicit_approval is True
+    assert preview.review.summary.has_existing_targets_to_replace is False
+    assert preview.review.summary.has_archive_writes is False
+    assert len(preview.plan.entries) == 1
+    assert preview.plan.entries[0].action == INSTALL_NEW
+    assert preview.plan.entries[0].target_exists is False
+    assert preview.plan.entries[0].archive_path is None
+
+
 def test_promote_installed_mods_from_sandbox_to_real_copies_and_records_history(
     tmp_path: Path,
 ) -> None:
@@ -529,7 +561,7 @@ def test_promote_installed_mods_from_sandbox_to_real_copies_and_records_history(
     assert operation.entries[0].target_path == promoted_target
 
 
-def test_get_sandbox_mods_promotion_readiness_reports_live_target_conflict(
+def test_get_sandbox_mods_promotion_readiness_reports_archive_aware_replace_review_for_conflict(
     tmp_path: Path,
 ) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
@@ -548,8 +580,147 @@ def test_get_sandbox_mods_promotion_readiness_reports_live_target_conflict(
         existing_config=None,
     )
 
-    assert readiness.ready is False
-    assert "real Mods target already exists for SampleMod" in readiness.message
+    assert readiness.ready is True
+    assert readiness.replace_count == 1
+    assert "archive-aware live replacement" in readiness.message
+
+
+def test_promote_installed_mods_from_sandbox_to_real_replaces_conflicting_target_with_archive(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    source_mod = _create_mod(sandbox_mods, "SampleMod", "Sample.Mod")
+    (source_mod / "dev.txt").write_text("sandbox", encoding="utf-8")
+    existing_target = _create_mod(real_mods, "SampleMod", "Sample.Mod")
+    (existing_target / "dev.txt").write_text("live", encoding="utf-8")
+
+    result = service.promote_installed_mods_from_sandbox_to_real(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        real_archive_path_text="",
+        selected_mod_folder_paths_text=(str(source_mod),),
+        existing_config=None,
+    )
+
+    promoted_target = real_mods / "SampleMod"
+    assert result.promoted_target_paths == (promoted_target,)
+    assert result.replaced_target_paths == (promoted_target,)
+    assert len(result.archived_target_paths) == 1
+    archived_target = result.archived_target_paths[0]
+    assert archived_target.parent == real_mods.parent / ".sdvmm-real-archive"
+    assert archived_target.name.startswith("SampleMod__sdvmm_archive_")
+    assert (promoted_target / "dev.txt").read_text(encoding="utf-8") == "sandbox"
+    assert (archived_target / "dev.txt").read_text(encoding="utf-8") == "live"
+    assert any(mod.folder_path == promoted_target for mod in result.inventory.mods)
+
+    history = service.load_install_operation_history()
+    assert len(history.operations) == 1
+    operation = history.operations[0]
+    assert operation.installed_targets == (promoted_target,)
+    assert operation.archived_targets == (archived_target,)
+    assert len(operation.entries) == 1
+    assert operation.entries[0].action == OVERWRITE_WITH_ARCHIVE
+    assert operation.entries[0].target_exists_before is True
+    assert operation.entries[0].archive_path == archived_target
+
+
+def test_promote_installed_mods_from_sandbox_to_real_rolls_back_earlier_live_writes_on_later_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    alpha_source = _create_mod(sandbox_mods, "AlphaMod", "Alpha.Mod")
+    beta_source = _create_mod(sandbox_mods, "BetaMod", "Beta.Mod")
+    original_rename = Path.rename
+
+    def fake_rename(self: Path, target: Path):
+        if self.name == "BetaMod" and target == real_mods / "BetaMod":
+            raise OSError("simulated beta promotion failure")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+
+    with pytest.raises(
+        AppShellError,
+        match="Promotion rollback restored prior REAL Mods state",
+    ):
+        service.promote_installed_mods_from_sandbox_to_real(
+            configured_mods_path_text=str(real_mods),
+            sandbox_mods_path_text=str(sandbox_mods),
+            real_archive_path_text="",
+            selected_mod_folder_paths_text=(str(alpha_source), str(beta_source)),
+            existing_config=None,
+        )
+
+    assert not (real_mods / "AlphaMod").exists()
+    assert not (real_mods / "BetaMod").exists()
+    history = service.load_install_operation_history()
+    assert history.operations == tuple()
+
+
+def test_promote_installed_mods_from_sandbox_to_real_records_partial_history_when_rollback_cannot_restore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+    alpha_source = _create_mod(sandbox_mods, "AlphaMod", "Alpha.Mod")
+    beta_source = _create_mod(sandbox_mods, "BetaMod", "Beta.Mod")
+    original_rename = Path.rename
+    original_remove = shell_service_module._remove_path_for_promotion_rollback
+
+    def fake_rename(self: Path, target: Path):
+        if self.name == "BetaMod" and target == real_mods / "BetaMod":
+            raise OSError("simulated beta promotion failure")
+        return original_rename(self, target)
+
+    def fake_remove(path: Path) -> None:
+        if path == real_mods / "AlphaMod":
+            raise OSError("simulated rollback removal failure")
+        return original_remove(path)
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+    monkeypatch.setattr(shell_service_module, "_remove_path_for_promotion_rollback", fake_remove)
+
+    with pytest.raises(
+        AppShellError,
+        match="Remaining live changes were recorded in install history for recovery inspection",
+    ):
+        service.promote_installed_mods_from_sandbox_to_real(
+            configured_mods_path_text=str(real_mods),
+            sandbox_mods_path_text=str(sandbox_mods),
+            real_archive_path_text="",
+            selected_mod_folder_paths_text=(str(alpha_source), str(beta_source)),
+            existing_config=None,
+        )
+
+    alpha_target = real_mods / "AlphaMod"
+    assert alpha_target.exists()
+    assert not (real_mods / "BetaMod").exists()
+
+    history = service.load_install_operation_history()
+    assert len(history.operations) == 1
+    operation = history.operations[0]
+    assert operation.installed_targets == (alpha_target,)
+    assert operation.archived_targets == tuple()
+    assert len(operation.entries) == 1
+    assert operation.entries[0].target_path == alpha_target
+    assert operation.entries[0].action == INSTALL_NEW
+    assert any(
+        "Partial sandbox promotion failure" in warning
+        for warning in operation.entries[0].warnings
+    )
 
 
 def test_promote_installed_mods_from_sandbox_to_real_rejects_mod_outside_sandbox(

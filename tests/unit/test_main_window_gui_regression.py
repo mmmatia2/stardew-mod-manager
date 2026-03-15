@@ -706,7 +706,7 @@ def test_main_window_sandbox_promotion_button_enables_only_for_sandbox_scan_cont
 
     assert sync_button.isEnabled() is False
     assert promote_button.isEnabled() is True
-    assert "Ready to promote 1 selected mod(s)" in promote_button.toolTip()
+    assert "Ready to review 1 selected mod(s)" in promote_button.toolTip()
 
     real_index = scan_target_combo.findData(SCAN_TARGET_CONFIGURED_REAL_MODS)
     assert real_index >= 0
@@ -764,11 +764,38 @@ def test_main_window_sandbox_promotion_delegates_after_confirmation_and_updates_
 
     monkeypatch.setattr(
         "sdvmm.ui.main_window.QMessageBox.question",
-        lambda *args: QMessageBox.StandardButton.Yes,
+        lambda parent, title, text: (
+            captured.update({"question_title": title, "question_text": text})
+            or QMessageBox.StandardButton.Yes
+        ),
     )
 
-    def _fake_promote(**kwargs):
-        captured["kwargs"] = kwargs
+    def _fake_preview(**kwargs):
+        captured["preview_kwargs"] = kwargs
+        return SimpleNamespace(
+            plan=SimpleNamespace(
+                entries=(SimpleNamespace(action="install_new", target_path=promoted_target),)
+            ),
+            review=SimpleNamespace(
+                allowed=True,
+                requires_explicit_approval=True,
+                message="Real Mods install targets 1 entry in review.",
+                summary=SimpleNamespace(
+                    total_entry_count=1,
+                    destination_mods_path=real_mods,
+                    archive_path=real_mods.parent / ".sdvmm-real-archive",
+                    has_existing_targets_to_replace=False,
+                    has_archive_writes=False,
+                ),
+            ),
+            real_mods_path=real_mods,
+            sandbox_mods_path=sandbox_mods,
+            archive_path=real_mods.parent / ".sdvmm-real-archive",
+            source_mod_paths=(source_mod,),
+        )
+
+    def _fake_execute(preview):
+        captured["execute_preview"] = preview
         return SimpleNamespace(
             destination_kind=SCAN_TARGET_CONFIGURED_REAL_MODS,
             real_mods_path=real_mods,
@@ -776,6 +803,8 @@ def test_main_window_sandbox_promotion_delegates_after_confirmation_and_updates_
             archive_path=real_mods.parent / ".sdvmm-real-archive",
             source_mod_paths=(source_mod,),
             promoted_target_paths=(promoted_target,),
+            archived_target_paths=tuple(),
+            replaced_target_paths=tuple(),
             scan_context_path=real_mods,
             inventory=_inventory_for_sandbox_sync_ui_tests(real_mods),
         )
@@ -797,8 +826,13 @@ def test_main_window_sandbox_promotion_delegates_after_confirmation_and_updates_
 
     monkeypatch.setattr(
         main_window._shell_service,
-        "promote_installed_mods_from_sandbox_to_real",
-        _fake_promote,
+        "build_sandbox_mods_promotion_preview",
+        _fake_preview,
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "execute_sandbox_mods_promotion_preview",
+        _fake_execute,
     )
     monkeypatch.setattr(main_window, "_run_background_operation", _run_immediately)
 
@@ -809,23 +843,25 @@ def test_main_window_sandbox_promotion_delegates_after_confirmation_and_updates_
     assert captured["running_label"] == "Sandbox promotion"
     assert captured["error_title"] == "Sandbox promotion failed"
     assert "Promoting 1 selected mod(s)" in str(captured["started_status"])
-    assert captured["kwargs"] == {
+    assert captured["preview_kwargs"] == {
         "configured_mods_path_text": str(real_mods),
         "sandbox_mods_path_text": str(sandbox_mods),
         "real_archive_path_text": "",
         "selected_mod_folder_paths_text": (str(source_mod),),
         "existing_config": None,
     }
-    assert main_window._current_scan_target() == SCAN_TARGET_CONFIGURED_REAL_MODS
-    assert main_window._status_strip_label.text() == (
-        "Sandbox promotion complete: 1 mod(s) copied into REAL Mods."
-    )
+    assert captured["question_title"] == "Review sandbox promotion to REAL Mods"
+    assert "Archive-aware replace: 0" in str(captured["question_text"])
+    assert main_window._current_scan_target() == SCAN_TARGET_SANDBOX_MODS
+    assert main_window._status_strip_label.text() == "Sandbox promotion complete: 1 mod(s) promoted into REAL Mods."
     assert "Sandbox promotion result" in main_window._findings_box.toPlainText()
     assert str(promoted_target) in main_window._findings_box.toPlainText()
+    assert "Current scan context was left unchanged" in main_window._findings_box.toPlainText()
 
 
-def test_main_window_sandbox_promotion_conflict_sets_clear_status(
+def test_main_window_sandbox_promotion_conflict_review_stays_enabled_and_describes_archive_replace(
     main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
     qapp: QApplication,
     tmp_path: Path,
 ) -> None:
@@ -855,12 +891,26 @@ def test_main_window_sandbox_promotion_conflict_sets_clear_status(
     main_window._mods_table.setCurrentCell(alpha_row, 0)
     qapp.processEvents()
 
-    assert promote_button.isEnabled() is False
+    captured: dict[str, str] = {}
+
+    def fake_question(parent, title, text):
+        captured["title"] = title
+        captured["text"] = text
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.question", fake_question)
+
+    assert promote_button.isEnabled() is True
+    assert "archive-aware live replacement" in promote_button.toolTip()
 
     main_window._on_promote_selected_mods_to_real()
     qapp.processEvents()
 
-    assert "real Mods target already exists for AlphaMod" in main_window._status_strip_label.text()
+    assert captured["title"] == "Review sandbox promotion to REAL Mods"
+    assert "Archive-aware replace: 1" in captured["text"]
+    assert "Conflicting live targets" in captured["text"]
+    assert "AlphaMod" in captured["text"]
+    assert main_window._status_strip_label.text() == "Sandbox promotion cancelled."
 
 
 def test_main_window_inventory_update_actionability_filter_exists_with_default_all(

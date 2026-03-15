@@ -78,19 +78,16 @@ Paused because:
 
 ### 7. Sandbox Dev Loop Foundation
 
-Completed or in hand:
+Completed:
 
 - sandbox-only SMAPI dev launch using `--mods-path <sandbox>`
 - runtime readiness/status for sandbox launch
 - explicit selected-mod `real -> sandbox` sync
-- block-on-conflict, no-overwrite sync policy
-
-Current stage in review:
-
 - explicit selected-mod `sandbox -> real` managed promotion
-- confirmation-first live write flow
-- block-on-conflict live-target policy
-- synthetic install-history recording so promotion remains inspectable/recoverable
+- promotion preview/review before live writes
+- archive-aware replace for live-target conflicts (no blind overwrite)
+- explicit confirmation-first live write flow
+- safety handling for partial-failure paths so live-write trust/recovery semantics remain coherent
 
 Why this phase is current priority:
 
@@ -104,11 +101,9 @@ Why this phase is current priority:
 
 Likely scope:
 
-- conflict preview / promotion clarity
-- preview + archive-aware replace for sandbox -> real conflicts
 - open sandbox / real Mods convenience actions
 - automatic rescan of the destination after sync/promotion without switching context unless necessary
-- clearer launch/readiness explanation for sandbox workflow
+- clearer launch/readiness and promotion-state orientation for sandbox workflow
 
 Validation gate:
 
@@ -127,8 +122,7 @@ Explicitly out of scope:
 
 Planned scope:
 
-- extend preview/review and archive-aware replace once the first ergonomics slice proves the policy shape
-- stronger preview/review surfaces for live promotion and recovery
+- stronger preview/review surfaces for multi-mod live promotion and recovery
 - auditability improvements for live-write workflows
 
 ### 10. Information Architecture Follow-up
