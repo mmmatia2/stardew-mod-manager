@@ -193,10 +193,14 @@ Current caveats:
 - no profiles/instances workflow
 - no packaging/installer/release hardening yet
 - no cross-platform polish emphasis yet (Windows workflow is the primary dev path)
-- near-term usability priorities still pending: stronger session persistence ergonomics, backup/restore/migration baseline, real-vs-sandbox compare view, and Steam prelaunch best-effort behavior
+- restore/import workflow is still deferred; the current backup foundation is export-first
+- near-term usability priorities still pending: fuller backup restore/migration workflow, real-vs-sandbox compare view, and Steam prelaunch best-effort behavior
 
 ## Data and persistence notes
 
 - local file-based app state (JSON), no database
 - install and recovery history are recorded for audit/recovery workflows
 - update-source intent overlay is persisted separately and merged at app-layer update check time
+- `Export backup bundle` creates a local folder snapshot using the current validated setup values, not just the last saved `app-state.json`
+- the export bundle can include app state/config, install/recovery history, update-source intent overlay, real/sandbox Mods, and app-managed archive roots when they exist
+- the export is intentionally inspectable and non-destructive; restore/import UX is not implemented yet

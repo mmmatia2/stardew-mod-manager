@@ -30,6 +30,7 @@ class SetupConfigurationSurface(QScrollArea):
         check_nexus_button: QPushButton,
         save_button: QPushButton,
         detect_environment_button: QPushButton,
+        export_backup_button: QPushButton,
     ) -> None:
         super().__init__()
         self.setWidgetResizable(True)
@@ -71,6 +72,7 @@ class SetupConfigurationSurface(QScrollArea):
         setup_actions = QHBoxLayout()
         setup_actions.addWidget(save_button)
         setup_actions.addWidget(detect_environment_button)
+        setup_actions.addWidget(export_backup_button)
         setup_actions.addStretch(1)
         setup_layout.addLayout(setup_actions, 6, 0, 1, 3)
 

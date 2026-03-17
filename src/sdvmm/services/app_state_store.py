@@ -262,6 +262,16 @@ def save_update_source_intent_overlay(
     _write_json_atomic(overlay_file, payload)
 
 
+def write_json_file_atomic(target_file: Path, payload: dict[str, object]) -> None:
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(target_file, payload)
+
+
+def write_text_file_atomic(target_file: Path, content: str) -> None:
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    _write_text_atomic(target_file, content)
+
+
 def _load_json_object(*, history_file: Path, subject: str) -> dict[str, object]:
     try:
         raw = json.loads(history_file.read_text(encoding="utf-8"))

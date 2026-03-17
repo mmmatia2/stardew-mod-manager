@@ -85,6 +85,8 @@ from sdvmm.services.app_state_store import (
     load_update_source_intent_overlay,
     save_update_source_intent_overlay,
     update_source_intent_overlay_file,
+    write_json_file_atomic,
+    write_text_file_atomic,
 )
 from sdvmm.services.mod_scanner import scan_mods_directory
 from sdvmm.services.package_inspector import inspect_zip_package
@@ -285,6 +287,33 @@ class DiscoveryContextCorrelation:
     next_step: str
 
 
+@dataclass(frozen=True, slots=True)
+class BackupBundleExportItem:
+    key: str
+    label: str
+    kind: Literal["file", "directory"]
+    status: Literal["copied", "not_present", "not_configured", "configured_missing"]
+    relative_path: Path
+    source_path: Path | None
+    note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BackupBundleExportResult:
+    bundle_path: Path
+    manifest_path: Path
+    summary_path: Path
+    created_at_utc: str
+    items: tuple[BackupBundleExportItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _BackupBundleSourceResolution:
+    path: Path | None
+    missing_status: Literal["not_present", "not_configured", "configured_missing"]
+    note: str | None = None
+
+
 _ACTIONABLE_INTAKE_CLASSIFICATIONS = {
     "new_install_candidate",
     "update_replace_candidate",
@@ -394,6 +423,176 @@ class AppShellService:
         except AppStateStoreError as exc:
             raise AppShellError(f"Could not save update-source intent overlay: {exc}") from exc
         return updated
+
+    def export_backup_bundle(
+        self,
+        *,
+        destination_root_text: str,
+        game_path_text: str,
+        mods_dir_text: str,
+        sandbox_mods_path_text: str,
+        sandbox_archive_path_text: str,
+        watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
+        real_archive_path_text: str = "",
+        nexus_api_key_text: str = "",
+        scan_target: ScanTargetKind,
+        install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
+        existing_config: AppConfig | None,
+    ) -> BackupBundleExportResult:
+        destination_root = Path(destination_root_text.strip()).expanduser()
+        if not destination_root_text.strip():
+            raise AppShellError("Select a destination folder for the backup export first.")
+        if not destination_root.exists() or not destination_root.is_dir():
+            raise AppShellError(f"Backup export destination is not accessible: {destination_root}")
+
+        export_config = self._build_validated_operational_config(
+            game_path_text=game_path_text,
+            mods_dir_text=mods_dir_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+            watched_downloads_path_text=watched_downloads_path_text,
+            secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
+            real_archive_path_text=real_archive_path_text,
+            nexus_api_key_text=nexus_api_key_text,
+            scan_target=scan_target,
+            install_target=install_target,
+            existing_config=existing_config,
+        )
+
+        real_mods_source = self._resolve_existing_export_source(
+            export_config.mods_path,
+            field_label="Real Mods directory",
+        )
+        sandbox_mods_source = self._resolve_existing_export_source(
+            export_config.sandbox_mods_path,
+            field_label="Sandbox Mods directory",
+        )
+        real_archive_source = self._resolve_existing_export_source(
+            export_config.real_archive_path,
+            field_label="Real Mods archive root",
+        )
+        sandbox_archive_source = self._resolve_existing_export_source(
+            export_config.sandbox_archive_path,
+            field_label="Sandbox archive root",
+        )
+
+        bundle_path = self._allocate_backup_bundle_path(destination_root)
+        manifest_path = bundle_path / "manifest.json"
+        summary_path = bundle_path / "README.txt"
+        created_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        plan = (
+            BackupBundleExportItem(
+                key="app_state",
+                label="App state/config",
+                kind="file",
+                status="copied",
+                relative_path=Path("manager-state") / self._state_file.name,
+                source_path=None,
+                note="Generated from the current export configuration snapshot.",
+            ),
+            self._backup_bundle_item_plan(
+                key="install_history",
+                label="Install history",
+                kind="file",
+                resolution=_BackupBundleSourceResolution(
+                    path=self._install_operation_history_file,
+                    missing_status="not_present",
+                    note="No install history has been recorded yet.",
+                ),
+                relative_path=Path("manager-state") / self._install_operation_history_file.name,
+            ),
+            self._backup_bundle_item_plan(
+                key="recovery_history",
+                label="Recovery history",
+                kind="file",
+                resolution=_BackupBundleSourceResolution(
+                    path=self._recovery_execution_history_file,
+                    missing_status="not_present",
+                    note="No recovery history has been recorded yet.",
+                ),
+                relative_path=Path("manager-state") / self._recovery_execution_history_file.name,
+            ),
+            self._backup_bundle_item_plan(
+                key="update_source_intent_overlay",
+                label="Update-source intent overlay",
+                kind="file",
+                resolution=_BackupBundleSourceResolution(
+                    path=self._update_source_intent_overlay_file,
+                    missing_status="not_present",
+                    note="No persisted update-source intent overlay exists yet.",
+                ),
+                relative_path=Path("manager-state") / self._update_source_intent_overlay_file.name,
+            ),
+            self._backup_bundle_item_plan(
+                key="real_mods",
+                label="Real Mods directory",
+                kind="directory",
+                resolution=real_mods_source,
+                relative_path=Path("mods") / "real-mods",
+            ),
+            self._backup_bundle_item_plan(
+                key="sandbox_mods",
+                label="Sandbox Mods directory",
+                kind="directory",
+                resolution=sandbox_mods_source,
+                relative_path=Path("mods") / "sandbox-mods",
+            ),
+            self._backup_bundle_item_plan(
+                key="real_archive",
+                label="Real Mods archive root",
+                kind="directory",
+                resolution=real_archive_source,
+                relative_path=Path("archives") / "real-archive",
+            ),
+            self._backup_bundle_item_plan(
+                key="sandbox_archive",
+                label="Sandbox archive root",
+                kind="directory",
+                resolution=sandbox_archive_source,
+                relative_path=Path("archives") / "sandbox-archive",
+            ),
+        )
+
+        if not any(item.status == "copied" for item in plan):
+            raise AppShellError(
+                "Nothing is available to export yet. Save config or create managed history/archive data first."
+            )
+
+        try:
+            bundle_path.mkdir(parents=True, exist_ok=False)
+            save_app_config(bundle_path / "manager-state" / self._state_file.name, export_config)
+            for item in plan:
+                self._copy_backup_bundle_item(bundle_path=bundle_path, item=item)
+            summary_text = build_backup_bundle_export_text(
+                BackupBundleExportResult(
+                    bundle_path=bundle_path,
+                    manifest_path=manifest_path,
+                    summary_path=summary_path,
+                    created_at_utc=created_at_utc,
+                    items=plan,
+                )
+            )
+            write_json_file_atomic(
+                manifest_path,
+                self._serialize_backup_bundle_manifest(
+                    bundle_path=bundle_path,
+                    created_at_utc=created_at_utc,
+                    items=plan,
+                ),
+            )
+            write_text_file_atomic(summary_path, summary_text)
+        except (AppStateStoreError, OSError) as exc:
+            shutil.rmtree(bundle_path, ignore_errors=True)
+            raise AppShellError(f"Could not create backup bundle: {exc}") from exc
+
+        return BackupBundleExportResult(
+            bundle_path=bundle_path,
+            manifest_path=manifest_path,
+            summary_path=summary_path,
+            created_at_utc=created_at_utc,
+            items=plan,
+        )
 
     def inspect_install_recovery_by_operation_id(
         self,
@@ -700,6 +899,42 @@ class AppShellService:
         install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
         existing_config: AppConfig | None,
     ) -> AppConfig:
+        config = self._build_validated_operational_config(
+            game_path_text=game_path_text,
+            mods_dir_text=mods_dir_text,
+            sandbox_mods_path_text=sandbox_mods_path_text,
+            sandbox_archive_path_text=sandbox_archive_path_text,
+            watched_downloads_path_text=watched_downloads_path_text,
+            secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
+            real_archive_path_text=real_archive_path_text,
+            nexus_api_key_text=nexus_api_key_text,
+            scan_target=scan_target,
+            install_target=install_target,
+            existing_config=existing_config,
+        )
+
+        try:
+            save_app_config(state_file=self._state_file, config=config)
+        except OSError as exc:
+            raise AppShellError(f"Could not save configuration: {exc}") from exc
+
+        return config
+
+    def _build_validated_operational_config(
+        self,
+        *,
+        game_path_text: str,
+        mods_dir_text: str,
+        sandbox_mods_path_text: str,
+        sandbox_archive_path_text: str,
+        watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
+        real_archive_path_text: str = "",
+        nexus_api_key_text: str = "",
+        scan_target: ScanTargetKind,
+        install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
+        existing_config: AppConfig | None,
+    ) -> AppConfig:
         if scan_target not in {SCAN_TARGET_CONFIGURED_REAL_MODS, SCAN_TARGET_SANDBOX_MODS}:
             raise AppShellError(f"Unknown scan target: {scan_target}")
         if install_target not in {INSTALL_TARGET_CONFIGURED_REAL_MODS, INSTALL_TARGET_SANDBOX_MODS}:
@@ -761,12 +996,6 @@ class AppShellService:
             scan_target=scan_target,
             install_target=install_target,
         )
-
-        try:
-            save_app_config(state_file=self._state_file, config=config)
-        except OSError as exc:
-            raise AppShellError(f"Could not save configuration: {exc}") from exc
-
         return config
 
     def persist_session_config_if_valid(
@@ -3440,6 +3669,158 @@ class AppShellService:
             )
         return path
 
+    @staticmethod
+    def _resolve_existing_export_source(
+        path: Path | None,
+        *,
+        field_label: str,
+    ) -> _BackupBundleSourceResolution:
+        if path is None:
+            return _BackupBundleSourceResolution(
+                path=None,
+                missing_status="not_configured",
+                note=f"No {field_label.lower()} is configured.",
+            )
+        if path.exists():
+            return _BackupBundleSourceResolution(
+                path=path,
+                missing_status="configured_missing",
+                note=None,
+            )
+        return _BackupBundleSourceResolution(
+            path=path,
+            missing_status="configured_missing",
+            note=f"{field_label} is configured for export but does not exist yet.",
+        )
+
+    @staticmethod
+    def _allocate_backup_bundle_path(destination_root: Path) -> Path:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
+        base_name = f"sdvmm-backup-{timestamp}"
+        candidate = destination_root / base_name
+        suffix = 2
+        while candidate.exists():
+            candidate = destination_root / f"{base_name}-{suffix}"
+            suffix += 1
+        return candidate
+
+    @staticmethod
+    def _backup_bundle_item_plan(
+        *,
+        key: str,
+        label: str,
+        kind: Literal["file", "directory"],
+        resolution: _BackupBundleSourceResolution,
+        relative_path: Path,
+    ) -> BackupBundleExportItem:
+        source_path = resolution.path
+        if source_path is None:
+            return BackupBundleExportItem(
+                key=key,
+                label=label,
+                kind=kind,
+                status=resolution.missing_status,
+                relative_path=relative_path,
+                source_path=None,
+                note=resolution.note,
+            )
+
+        if not source_path.exists():
+            return BackupBundleExportItem(
+                key=key,
+                label=label,
+                kind=kind,
+                status=resolution.missing_status,
+                relative_path=relative_path,
+                source_path=source_path,
+                note=resolution.note,
+            )
+
+        if kind == "file" and not source_path.is_file():
+            return BackupBundleExportItem(
+                key=key,
+                label=label,
+                kind=kind,
+                status=resolution.missing_status,
+                relative_path=relative_path,
+                source_path=source_path,
+                note=f"{label} exists but is not a file.",
+            )
+
+        if kind == "directory" and not source_path.is_dir():
+            return BackupBundleExportItem(
+                key=key,
+                label=label,
+                kind=kind,
+                status=resolution.missing_status,
+                relative_path=relative_path,
+                source_path=source_path,
+                note=f"{label} exists but is not a directory.",
+            )
+
+        return BackupBundleExportItem(
+            key=key,
+            label=label,
+            kind=kind,
+            status="copied",
+            relative_path=relative_path,
+            source_path=source_path,
+            note=None,
+        )
+
+    @staticmethod
+    def _copy_backup_bundle_item(*, bundle_path: Path, item: BackupBundleExportItem) -> None:
+        if item.status != "copied" or item.source_path is None:
+            return
+
+        destination_path = bundle_path / item.relative_path
+        if item.kind == "file":
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item.source_path, destination_path)
+            return
+
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(item.source_path, destination_path)
+
+    @staticmethod
+    def _serialize_backup_bundle_manifest(
+        *,
+        bundle_path: Path,
+        created_at_utc: str,
+        items: tuple[BackupBundleExportItem, ...],
+    ) -> dict[str, object]:
+        status_counts = Counter(item.status for item in items)
+        return {
+            "bundle_format": "sdvmm-local-backup",
+            "format_version": 1,
+            "created_at_utc": created_at_utc,
+            "bundle_folder_name": bundle_path.name,
+            "summary": {
+                "copied": status_counts.get("copied", 0),
+                "not_present": status_counts.get("not_present", 0),
+                "not_configured": status_counts.get("not_configured", 0),
+                "configured_missing": status_counts.get("configured_missing", 0),
+            },
+            "items": [
+                {
+                    "key": item.key,
+                    "label": item.label,
+                    "kind": item.kind,
+                    "status": item.status,
+                    "relative_path": str(item.relative_path),
+                    "source_path": str(item.source_path) if item.source_path is not None else None,
+                    "note": item.note,
+                }
+                for item in items
+            ],
+            "intentionally_not_included": [
+                "Game binaries, Steam files, and SMAPI runtime executables.",
+                "Watcher download folders and other unmanaged download cache locations.",
+                "Transient UI state such as current selections, filters, and pending plans.",
+                "A restore/import workflow. This bundle is export-only in this stage.",
+            ],
+        }
+
     @property
     def _install_operation_history_file(self) -> Path:
         return install_operation_history_file(self._state_file)
@@ -3829,6 +4210,52 @@ def _remove_path_for_promotion_rollback(path: Path) -> None:
         shutil.rmtree(path)
         return
     path.unlink()
+
+
+def build_backup_bundle_export_text(result: BackupBundleExportResult) -> str:
+    copied_items = tuple(item for item in result.items if item.status == "copied")
+    unavailable_items = tuple(item for item in result.items if item.status != "copied")
+    lines = [
+        "Stardew Mod Manager backup export",
+        f"Created at (UTC): {result.created_at_utc}",
+        f"Bundle folder: {result.bundle_path}",
+        f"Manifest: {result.manifest_path}",
+        f"Summary: {result.summary_path}",
+        "",
+        "Copied into this bundle:",
+    ]
+    if copied_items:
+        for item in copied_items:
+            note = f" ({item.note})" if item.note else ""
+            if item.source_path is None:
+                lines.append(f"- {item.label}: {item.relative_path}{note}")
+                continue
+            lines.append(f"- {item.label}: {item.relative_path} <- {item.source_path}{note}")
+    else:
+        lines.append("- Nothing was copied.")
+
+    lines.extend(("", "Unavailable or skipped:"))
+    if unavailable_items:
+        for item in unavailable_items:
+            note = f" ({item.note})" if item.note else ""
+            source_path = str(item.source_path) if item.source_path is not None else "<none>"
+            lines.append(
+                f"- {item.label}: {item.status} | source={source_path} | bundle={item.relative_path}{note}"
+            )
+    else:
+        lines.append("- None.")
+
+    lines.extend(
+        (
+            "",
+            "This export intentionally does not include:",
+            "- Game binaries, Steam files, or SMAPI runtime executables.",
+            "- Watcher download folders or unmanaged caches.",
+            "- Transient UI state such as selections, filters, or pending plans.",
+            "- Restore/import automation. This bundle is export-only in this stage.",
+        )
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _derive_install_operation_recovery_entry(

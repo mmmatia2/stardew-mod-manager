@@ -61,6 +61,7 @@ from sdvmm.app.table_filters import row_matches_filter
 from sdvmm.app.shell_service import (
     ARCHIVE_SOURCE_REAL,
     ARCHIVE_SOURCE_SANDBOX,
+    BackupBundleExportResult,
     DiscoveryContextCorrelation,
     INSTALL_TARGET_CONFIGURED_REAL_MODS,
     INSTALL_TARGET_SANDBOX_MODS,
@@ -73,6 +74,7 @@ from sdvmm.app.shell_service import (
     SandboxModsPromotionPreview,
     SandboxModsPromotionResult,
     SandboxModsSyncResult,
+    build_backup_bundle_export_text,
 )
 from sdvmm.domain.models import (
     AppConfig,
@@ -722,6 +724,9 @@ class MainWindow(QMainWindow):
         detect_environment_button = QPushButton("Detect environment")
         detect_environment_button.setObjectName("setup_detect_environment_button")
         detect_environment_button.clicked.connect(self._on_detect_environment)
+        export_backup_button = QPushButton("Export backup bundle")
+        export_backup_button.setObjectName("setup_export_backup_button")
+        export_backup_button.clicked.connect(self._on_export_backup_bundle)
 
         setup_scroll = SetupConfigurationSurface(
             game_path_input=self._game_path_input,
@@ -738,6 +743,7 @@ class MainWindow(QMainWindow):
             check_nexus_button=check_nexus_button,
             save_button=save_button,
             detect_environment_button=detect_environment_button,
+            export_backup_button=export_backup_button,
         )
         setup_scroll.setObjectName("setup_workspace_tab")
         self._setup_group = setup_scroll.setup_group
@@ -1496,6 +1502,35 @@ class MainWindow(QMainWindow):
         self._set_details_text(build_environment_status_text(status))
         self._refresh_sandbox_dev_launch_state()
         self._set_status("Environment detection complete.")
+
+    def _on_export_backup_bundle(self) -> None:
+        destination_root = QFileDialog.getExistingDirectory(
+            self,
+            "Select backup export destination",
+            self._mods_path_input.text() or str(self._shell_service.state_file.parent),
+        )
+        if not destination_root:
+            self._set_status("Backup export cancelled.")
+            return
+
+        self._run_background_operation(
+            operation_name="Backup export",
+            running_label="Backup export",
+            started_status="Creating local backup bundle...",
+            error_title="Backup export failed",
+            task_fn=lambda: self._shell_service.export_backup_bundle(
+                destination_root_text=destination_root,
+                **self._current_operational_config_inputs(),
+            ),
+            on_success=self._on_backup_bundle_export_completed,
+        )
+
+    def _on_backup_bundle_export_completed(self, result: BackupBundleExportResult) -> None:
+        copied_count = sum(1 for item in result.items if item.status == "copied")
+        self._set_details_text(build_backup_bundle_export_text(result))
+        self._set_status(
+            f"Backup export complete: {copied_count} item(s) copied to {result.bundle_path}"
+        )
 
     def _on_launch_vanilla(self) -> None:
         try:

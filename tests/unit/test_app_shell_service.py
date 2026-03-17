@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 from zipfile import ZipFile
@@ -47,6 +48,7 @@ from sdvmm.domain.update_codes import UpdateState
 from sdvmm.domain.warning_codes import INVALID_MANIFEST
 from sdvmm.services.app_state_store import (
     AppStateStoreError,
+    load_app_config,
     save_app_config,
     save_update_source_intent_overlay,
     update_source_intent_overlay_file,
@@ -194,6 +196,281 @@ def test_clear_update_source_intent_removes_matching_record(tmp_path: Path) -> N
     )
     assert service.get_update_source_intent("sample.private") is None
     assert service.get_update_source_intent("sample.keep") == updated.records[0]
+
+
+def test_export_backup_bundle_copies_available_state_and_managed_directories(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    game_path = tmp_path / "Game"
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+
+    _create_launchable_game_install(game_path)
+    _create_mod(real_mods, "RealAlpha", "Sample.RealAlpha")
+    _create_mod(sandbox_mods, "SandboxAlpha", "Sample.SandboxAlpha")
+    _create_archived_entry(real_archive / "real-alpha", unique_id="Sample.RealAlpha", version="1.0.0")
+    _create_archived_entry(
+        sandbox_archive / "sandbox-alpha",
+        unique_id="Sample.SandboxAlpha",
+        version="1.1.0",
+    )
+
+    config = AppConfig(
+        game_path=game_path,
+        mods_path=real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=sandbox_mods,
+        sandbox_archive_path=sandbox_archive,
+        real_archive_path=real_archive,
+    )
+    save_app_config(state_file, config)
+
+    shell_service_module.append_install_operation_record(
+        shell_service_module.install_operation_history_file(state_file),
+        InstallOperationRecord(
+            operation_id="install_1",
+            timestamp="2026-03-17T12:00:00Z",
+            package_path=tmp_path / "downloads" / "alpha.zip",
+            destination_kind="sandbox_mods",
+            destination_mods_path=sandbox_mods,
+            archive_path=sandbox_archive,
+            installed_targets=(sandbox_mods / "SandboxAlpha",),
+            archived_targets=tuple(),
+            entries=(
+                InstallOperationEntryRecord(
+                    name="Sandbox Alpha",
+                    unique_id="Sample.SandboxAlpha",
+                    version="1.1.0",
+                    action="install_new",
+                    target_path=sandbox_mods / "SandboxAlpha",
+                    archive_path=None,
+                    source_manifest_path="SandboxAlpha/manifest.json",
+                    source_root_path="SandboxAlpha",
+                    target_exists_before=False,
+                    can_install=True,
+                    warnings=tuple(),
+                ),
+            ),
+        ),
+    )
+    shell_service_module.append_recovery_execution_record(
+        shell_service_module.recovery_execution_history_file(state_file),
+        shell_service_module.RecoveryExecutionRecord(
+            recovery_execution_id="recovery_1",
+            timestamp="2026-03-17T13:00:00Z",
+            related_install_operation_id="install_1",
+            related_install_operation_timestamp="2026-03-17T12:00:00Z",
+            related_install_package_path=tmp_path / "downloads" / "alpha.zip",
+            destination_kind="sandbox_mods",
+            destination_mods_path=sandbox_mods,
+            executed_entry_count=1,
+            removed_target_paths=(sandbox_mods / "SandboxAlpha",),
+            restored_target_paths=tuple(),
+            outcome_status="completed",
+            failure_message=None,
+        ),
+    )
+    save_update_source_intent_overlay(
+        update_source_intent_overlay_file(state_file),
+        UpdateSourceIntentOverlay(
+            records=(
+                UpdateSourceIntentRecord(
+                    unique_id="Sample.RealAlpha",
+                    normalized_unique_id="sample.realalpha",
+                    intent_state="local_private_mod",
+                ),
+            )
+        ),
+    )
+
+    result = service.export_backup_bundle(
+        destination_root_text=str(exports_root),
+        game_path_text=str(game_path),
+        mods_dir_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text=str(sandbox_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=config,
+    )
+
+    assert result.bundle_path.exists() is True
+    assert result.manifest_path.exists() is True
+    assert result.summary_path.exists() is True
+    assert (result.bundle_path / "manager-state" / "app-state.json").exists() is True
+    assert (result.bundle_path / "manager-state" / "install-operation-history.json").exists() is True
+    assert (result.bundle_path / "manager-state" / "recovery-execution-history.json").exists() is True
+    assert (result.bundle_path / "manager-state" / "update-source-intent-overlay.json").exists() is True
+    assert (result.bundle_path / "mods" / "real-mods" / "RealAlpha" / "manifest.json").exists() is True
+    assert (
+        result.bundle_path / "mods" / "sandbox-mods" / "SandboxAlpha" / "manifest.json"
+    ).exists() is True
+    assert (
+        result.bundle_path / "archives" / "real-archive" / "real-alpha" / "manifest.json"
+    ).exists() is True
+    assert (
+        result.bundle_path / "archives" / "sandbox-archive" / "sandbox-alpha" / "manifest.json"
+    ).exists() is True
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["bundle_format"] == "sdvmm-local-backup"
+    assert manifest["summary"]["copied"] == 8
+    assert "A restore/import workflow. This bundle is export-only in this stage." in manifest[
+        "intentionally_not_included"
+    ]
+    exported_config = load_app_config(result.bundle_path / "manager-state" / "app-state.json")
+    assert exported_config is not None
+    assert exported_config.mods_path == real_mods
+    assert exported_config.sandbox_mods_path == sandbox_mods
+    assert exported_config.real_archive_path == real_archive
+    assert exported_config.sandbox_archive_path == sandbox_archive
+    summary_text = result.summary_path.read_text(encoding="utf-8")
+    assert "Stardew Mod Manager backup export" in summary_text
+    assert "Generated from the current export configuration snapshot." in summary_text
+
+
+def test_export_backup_bundle_uses_current_validated_config_snapshot_without_mutating_saved_state(
+    tmp_path: Path,
+) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+
+    old_game_path = tmp_path / "OldGame"
+    old_real_mods = tmp_path / "OldRealMods"
+    old_sandbox_mods = tmp_path / "OldSandboxMods"
+    old_real_archive = tmp_path / "OldRealArchive"
+    old_sandbox_archive = tmp_path / "OldSandboxArchive"
+    _create_launchable_game_install(old_game_path)
+    old_real_mods.mkdir()
+    old_sandbox_mods.mkdir()
+    old_real_archive.mkdir()
+    old_sandbox_archive.mkdir()
+
+    saved_config = AppConfig(
+        game_path=old_game_path,
+        mods_path=old_real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=old_sandbox_mods,
+        sandbox_archive_path=old_sandbox_archive,
+        real_archive_path=old_real_archive,
+        watched_downloads_path=tmp_path / "OldDownloads",
+        secondary_watched_downloads_path=tmp_path / "OldBuilds",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+    )
+    save_app_config(state_file, saved_config)
+
+    new_game_path = tmp_path / "NewGame"
+    new_real_mods = tmp_path / "NewRealMods"
+    new_sandbox_mods = tmp_path / "NewSandboxMods"
+    new_real_archive = tmp_path / "NewRealArchive"
+    new_sandbox_archive = tmp_path / "NewSandboxArchive"
+    new_downloads = tmp_path / "NewDownloads"
+    new_builds = tmp_path / "NewBuilds"
+    _create_launchable_game_install(new_game_path)
+    _create_mod(new_real_mods, "NewRealAlpha", "Sample.NewRealAlpha")
+    _create_mod(new_sandbox_mods, "NewSandboxAlpha", "Sample.NewSandboxAlpha")
+    new_real_archive.mkdir()
+    new_sandbox_archive.mkdir()
+    new_downloads.mkdir()
+    new_builds.mkdir()
+
+    result = service.export_backup_bundle(
+        destination_root_text=str(exports_root),
+        game_path_text=str(new_game_path),
+        mods_dir_text=str(new_real_mods),
+        sandbox_mods_path_text=str(new_sandbox_mods),
+        sandbox_archive_path_text=str(new_sandbox_archive),
+        watched_downloads_path_text=str(new_downloads),
+        secondary_watched_downloads_path_text=str(new_builds),
+        real_archive_path_text=str(new_real_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=saved_config,
+    )
+
+    exported_config = load_app_config(result.bundle_path / "manager-state" / "app-state.json")
+    assert exported_config is not None
+    assert exported_config.game_path == new_game_path
+    assert exported_config.mods_path == new_real_mods
+    assert exported_config.sandbox_mods_path == new_sandbox_mods
+    assert exported_config.real_archive_path == new_real_archive
+    assert exported_config.sandbox_archive_path == new_sandbox_archive
+    assert exported_config.watched_downloads_path == new_downloads
+    assert exported_config.secondary_watched_downloads_path == new_builds
+    assert exported_config.scan_target == SCAN_TARGET_SANDBOX_MODS
+    assert exported_config.install_target == INSTALL_TARGET_SANDBOX_MODS
+
+    persisted_config = load_app_config(state_file)
+    assert persisted_config is not None
+    assert persisted_config.game_path == old_game_path
+    assert persisted_config.mods_path == old_real_mods
+    assert persisted_config.sandbox_mods_path == old_sandbox_mods
+    assert persisted_config.real_archive_path == old_real_archive
+    assert persisted_config.sandbox_archive_path == old_sandbox_archive
+    assert persisted_config.watched_downloads_path == tmp_path / "OldDownloads"
+    assert persisted_config.secondary_watched_downloads_path == tmp_path / "OldBuilds"
+    assert persisted_config.scan_target == SCAN_TARGET_CONFIGURED_REAL_MODS
+    assert persisted_config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
+
+
+def test_export_backup_bundle_reports_optional_missing_sources_honestly(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+    game_path = tmp_path / "Game"
+    real_mods = tmp_path / "RealMods"
+    _create_launchable_game_install(game_path)
+    _create_mod(real_mods, "RealAlpha", "Sample.RealAlpha")
+
+    config = AppConfig(
+        game_path=game_path,
+        mods_path=real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=tmp_path / "MissingSandboxMods",
+    )
+    save_app_config(state_file, config)
+
+    result = service.export_backup_bundle(
+        destination_root_text=str(exports_root),
+        game_path_text=str(game_path),
+        mods_dir_text=str(real_mods),
+        sandbox_mods_path_text="",
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text="",
+        sandbox_archive_path_text="",
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=config,
+    )
+
+    items_by_key = {item.key: item for item in result.items}
+
+    assert items_by_key["app_state"].status == "copied"
+    assert items_by_key["real_mods"].status == "copied"
+    assert items_by_key["sandbox_mods"].status == "not_configured"
+    assert items_by_key["sandbox_archive"].status == "not_configured"
+    assert items_by_key["update_source_intent_overlay"].status == "not_present"
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    manifest_items = {item["key"]: item for item in manifest["items"]}
+    assert manifest_items["sandbox_mods"]["status"] == "not_configured"
+    assert "No sandbox mods directory is configured." == manifest_items["sandbox_mods"]["note"]
+    assert "No sandbox archive root is configured." == manifest_items["sandbox_archive"]["note"]
 
 
 def test_scan_rejects_missing_mods_path(tmp_path: Path) -> None:

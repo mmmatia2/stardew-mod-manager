@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
 from sdvmm.app.main import _resolve_app_icon
 from sdvmm.app.shell_service import AppShellError
 from sdvmm.app.shell_service import AppShellService
+from sdvmm.app.shell_service import BackupBundleExportItem
+from sdvmm.app.shell_service import BackupBundleExportResult
 from sdvmm.app.shell_service import DiscoveryContextCorrelation
 from sdvmm.app.shell_service import INSTALL_TARGET_CONFIGURED_REAL_MODS
 from sdvmm.app.shell_service import INSTALL_TARGET_SANDBOX_MODS
@@ -2069,6 +2071,7 @@ def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: Mai
     button_names = (
         "setup_save_config_button",
         "setup_detect_environment_button",
+        "setup_export_backup_button",
     )
 
     for name in input_names:
@@ -2078,6 +2081,86 @@ def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: Mai
     for name in button_names:
         button = main_window.findChild(QPushButton, name)
         assert button is not None
+
+
+def test_main_window_export_backup_bundle_runs_service_and_updates_output(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    export_root = tmp_path / "Exports"
+    export_root.mkdir()
+    bundle_path = export_root / "sdvmm-backup-20260317-120000Z"
+    manifest_path = bundle_path / "manifest.json"
+    summary_path = bundle_path / "README.txt"
+    result = BackupBundleExportResult(
+        bundle_path=bundle_path,
+        manifest_path=manifest_path,
+        summary_path=summary_path,
+        created_at_utc="2026-03-17T12:00:00Z",
+        items=(
+            BackupBundleExportItem(
+                key="app_state",
+                label="App state/config",
+                kind="file",
+                status="copied",
+                relative_path=Path("manager-state") / "app-state.json",
+                source_path=tmp_path / "state" / "app-state.json",
+            ),
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
+        lambda *args, **kwargs: str(export_root),
+    )
+
+    def fake_export_backup_bundle(**kwargs: object) -> BackupBundleExportResult:
+        captured["service_kwargs"] = kwargs
+        return result
+
+    def fake_run_background_operation(**kwargs: object) -> None:
+        captured["operation_name"] = kwargs["operation_name"]
+        task_result = kwargs["task_fn"]()
+        kwargs["on_success"](task_result)
+
+    monkeypatch.setattr(main_window._shell_service, "export_backup_bundle", fake_export_backup_bundle)
+    monkeypatch.setattr(main_window, "_run_background_operation", fake_run_background_operation)
+
+    main_window._on_export_backup_bundle()
+
+    assert captured["operation_name"] == "Backup export"
+    assert captured["service_kwargs"] == {
+        "destination_root_text": str(export_root),
+        **main_window._current_operational_config_inputs(),
+    }
+    assert main_window._status_strip_label.text() == (
+        f"Backup export complete: 1 item(s) copied to {bundle_path}"
+    )
+    assert "Stardew Mod Manager backup export" in main_window._findings_box.toPlainText()
+    assert str(bundle_path) in main_window._findings_box.toPlainText()
+
+
+def test_main_window_export_backup_bundle_cancel_sets_status_without_running(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[str] = []
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
+        lambda *args, **kwargs: "",
+    )
+    monkeypatch.setattr(
+        main_window,
+        "_run_background_operation",
+        lambda **kwargs: captured.append(str(kwargs["operation_name"])),
+    )
+
+    main_window._on_export_backup_bundle()
+
+    assert captured == []
+    assert main_window._status_strip_label.text() == "Backup export cancelled."
 
 
 def test_main_window_start_watch_uses_both_watched_paths_and_updates_status(
