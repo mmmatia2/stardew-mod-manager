@@ -50,6 +50,8 @@ from sdvmm.domain.models import (
     UpdateSourceIntentState,
     ModsInventory,
     NexusIntegrationStatus,
+    PackageInspectionBatchEntry,
+    PackageInspectionBatchResult,
     PackageInspectionResult,
     PackageModEntry,
     SmapiLogReport,
@@ -1280,25 +1282,52 @@ class AppShellService:
         existing_config: AppConfig | None = None,
     ) -> PackageInspectionResult:
         base_result = self.inspect_zip(package_path_text)
-        nexus_api_key = self._resolve_nexus_api_key(
+        return self._enrich_package_inspection_result(
+            base_result,
+            inventory=inventory,
             nexus_api_key_text=nexus_api_key_text,
             existing_config=existing_config,
         )
-        dependency_findings = evaluate_package_dependencies(
-            package_mods=base_result.mods,
-            installed_mods=inventory.mods if inventory is not None else None,
-            source="package_inspection",
-        )
-        remote_requirements = evaluate_remote_requirements_for_package_mods(
-            base_result.mods,
-            source="package_inspection",
-            nexus_api_key=nexus_api_key,
-        )
-        return replace(
-            base_result,
-            dependency_findings=dependency_findings,
-            remote_requirements=remote_requirements,
-        )
+
+    def inspect_zip_batch_with_inventory_context(
+        self,
+        package_path_texts: Iterable[str],
+        inventory: ModsInventory | None,
+        *,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
+    ) -> PackageInspectionBatchResult:
+        path_texts = tuple(text.strip() for text in package_path_texts if text.strip())
+        if not path_texts:
+            raise AppShellError("Select one or more zip packages to inspect.")
+
+        entries: list[PackageInspectionBatchEntry] = []
+        for package_path_text in path_texts:
+            package_path = Path(package_path_text)
+            try:
+                inspection = self.inspect_zip_with_inventory_context(
+                    package_path_text,
+                    inventory,
+                    nexus_api_key_text=nexus_api_key_text,
+                    existing_config=existing_config,
+                )
+            except AppShellError as exc:
+                entries.append(
+                    PackageInspectionBatchEntry(
+                        package_path=package_path,
+                        error_message=str(exc),
+                    )
+                )
+                continue
+
+            entries.append(
+                PackageInspectionBatchEntry(
+                    package_path=inspection.package_path,
+                    inspection=inspection,
+                )
+            )
+
+        return PackageInspectionBatchResult(entries=tuple(entries))
 
     @staticmethod
     def evaluate_installed_dependency_preflight(
@@ -1326,6 +1355,34 @@ class AppShellService:
             )
         except OSError as exc:
             raise AppShellError(f"Could not check remote metadata: {exc}") from exc
+
+    def _enrich_package_inspection_result(
+        self,
+        base_result: PackageInspectionResult,
+        *,
+        inventory: ModsInventory | None,
+        nexus_api_key_text: str = "",
+        existing_config: AppConfig | None = None,
+    ) -> PackageInspectionResult:
+        nexus_api_key = self._resolve_nexus_api_key(
+            nexus_api_key_text=nexus_api_key_text,
+            existing_config=existing_config,
+        )
+        dependency_findings = evaluate_package_dependencies(
+            package_mods=base_result.mods,
+            installed_mods=inventory.mods if inventory is not None else None,
+            source="package_inspection",
+        )
+        remote_requirements = evaluate_remote_requirements_for_package_mods(
+            base_result.mods,
+            source="package_inspection",
+            nexus_api_key=nexus_api_key,
+        )
+        return replace(
+            base_result,
+            dependency_findings=dependency_findings,
+            remote_requirements=remote_requirements,
+        )
 
     def search_mod_discovery(
         self,

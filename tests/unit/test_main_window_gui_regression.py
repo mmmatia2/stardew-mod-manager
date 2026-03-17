@@ -53,8 +53,11 @@ from sdvmm.domain.models import ModDiscoveryResult
 from sdvmm.domain.models import ModUpdateReport
 from sdvmm.domain.models import ModUpdateStatus
 from sdvmm.domain.models import ModsInventory
+from sdvmm.domain.models import PackageInspectionBatchEntry
+from sdvmm.domain.models import PackageInspectionBatchResult
 from sdvmm.domain.models import PackageModEntry
 from sdvmm.domain.models import PackageFinding
+from sdvmm.domain.models import PackageInspectionResult
 from sdvmm.domain.models import RecoveryExecutionRecord
 from sdvmm.domain.models import SandboxInstallPlan
 from sdvmm.domain.models import SandboxInstallPlanEntry
@@ -2277,16 +2280,24 @@ def test_main_window_package_inspection_writes_to_shared_detail_surface(
     main_window: MainWindow,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    inspection = SimpleNamespace(mods=(object(), object()))
+    inspection = _package_inspection_result("InspectMe.zip", "Sample.InspectMe", mod_count=2)
+    batch_result = PackageInspectionBatchResult(
+        entries=(
+            PackageInspectionBatchEntry(
+                package_path=inspection.package_path,
+                inspection=inspection,
+            ),
+        )
+    )
 
     monkeypatch.setattr(
         main_window._shell_service,
-        "inspect_zip_with_inventory_context",
-        lambda *args, **kwargs: inspection,
+        "inspect_zip_batch_with_inventory_context",
+        lambda *args, **kwargs: batch_result,
     )
     monkeypatch.setattr(
         "sdvmm.ui.main_window.build_package_inspection_text",
-        lambda payload: "Inspection narrative output",
+        lambda payload: "Inspection narrative output" if payload is inspection else "unexpected",
     )
 
     main_window._zip_path_input.setText(r"C:\Downloads\InspectMe.zip")
@@ -2294,6 +2305,125 @@ def test_main_window_package_inspection_writes_to_shared_detail_surface(
 
     assert main_window._findings_box.toPlainText() == "Inspection narrative output"
     assert main_window._status_strip_label.text() == "Zip inspection complete: 2 mod(s) detected"
+
+
+def test_main_window_browse_zip_accepts_multiple_selected_packages(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected_paths = [
+        r"C:\Downloads\Alpha.zip",
+        r"C:\Downloads\Beta.zip",
+    ]
+
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QFileDialog.getOpenFileNames",
+        lambda *args, **kwargs: (selected_paths, "Zip packages (*.zip)"),
+    )
+
+    main_window._on_browse_zip()
+
+    assert main_window._zip_path_input.text() == selected_paths[0]
+    assert main_window._selected_zip_package_paths == tuple(Path(path) for path in selected_paths)
+    assert (
+        main_window._zip_selection_summary_label.text()
+        == "2 zip packages selected for inspection."
+    )
+    assert main_window._zip_selection_summary_label.toolTip() == "Alpha.zip\nBeta.zip"
+
+
+def test_main_window_zip_selection_summary_reflects_single_manual_path_entry(
+    main_window: MainWindow,
+) -> None:
+    main_window._zip_path_input.setText(r"C:\Downloads\Single.zip")
+
+    assert main_window._selected_zip_package_paths == (Path(r"C:\Downloads\Single.zip"),)
+    assert (
+        main_window._zip_selection_summary_label.text()
+        == "1 zip package selected: Single.zip"
+    )
+    assert main_window._zip_selection_summary_label.toolTip() == "Single.zip"
+
+
+def test_main_window_multi_zip_inspection_keeps_results_per_package(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _package_inspection_result("Alpha.zip", "Sample.Alpha")
+    second = _package_inspection_result("Broken.zip", "Sample.Broken")
+    batch_result = PackageInspectionBatchResult(
+        entries=(
+            PackageInspectionBatchEntry(package_path=first.package_path, inspection=first),
+            PackageInspectionBatchEntry(
+                package_path=second.package_path,
+                error_message="File is not a valid zip package: C:\\Downloads\\Broken.zip",
+            ),
+        )
+    )
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_zip_batch_with_inventory_context",
+        lambda *args, **kwargs: batch_result,
+    )
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.build_package_inspection_text",
+        lambda payload: f"Inspection detail for {payload.package_path.name}",
+    )
+
+    main_window._selected_zip_package_paths = (
+        first.package_path,
+        second.package_path,
+    )
+    main_window._zip_path_input.setText(str(first.package_path))
+    main_window._on_inspect_zip()
+
+    assert main_window._package_inspection_selector.count() == 2
+    assert "2 packages inspected" in main_window._package_inspection_summary_label.text()
+    assert main_window._package_inspection_result_box.toPlainText() == "Inspection detail for Alpha.zip"
+    assert "Package Inspection Batch" in main_window._findings_box.toPlainText()
+    assert "- Alpha.zip: 1 mod(s), 0 finding(s), 0 warning(s)" in main_window._findings_box.toPlainText()
+    assert "- Broken.zip: failed" in main_window._findings_box.toPlainText()
+    assert "select one inspected package at a time for planning" in main_window._findings_box.toPlainText()
+
+
+def test_main_window_packages_intake_shows_explicit_single_package_staging_rule(
+    main_window: MainWindow,
+) -> None:
+    assert (
+        main_window._zip_staging_rule_label.text()
+        == "Inspection supports multiple packages. Staging remains one package at a time."
+    )
+
+
+def test_main_window_staging_selected_inspected_package_uses_current_inspection_selection(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    first = _package_inspection_result("Alpha.zip", "Sample.Alpha")
+    second = _package_inspection_result("Beta.zip", "Sample.Beta")
+
+    main_window._show_package_inspection_results(
+        PackageInspectionBatchResult(
+            entries=(
+                PackageInspectionBatchEntry(package_path=first.package_path, inspection=first),
+                PackageInspectionBatchEntry(package_path=second.package_path, inspection=second),
+            )
+        )
+    )
+    main_window._package_inspection_selector.setCurrentIndex(1)
+    qapp.processEvents()
+
+    main_window._on_plan_selected_intake()
+    qapp.processEvents()
+
+    assert main_window._zip_path_input.text() == str(second.package_path)
+    assert main_window._staged_package_label.text() == str(second.package_path)
+    assert main_window._staged_package_label.toolTip() == str(second.package_path)
+    assert (
+        main_window._status_strip_label.text()
+        == "Staged package for planning: Beta.zip"
+    )
 
 
 def test_main_window_staging_valid_intake_switches_to_plan_install_and_updates_display(
@@ -4415,6 +4545,29 @@ def _intake_result(
         message=f"Detected {package_name}",
         mods=(mod_entry,),
         matched_installed_unique_ids=tuple(),
+        warnings=tuple(),
+        findings=tuple(),
+    )
+
+
+def _package_inspection_result(
+    package_name: str,
+    unique_id: str,
+    *,
+    mod_count: int = 1,
+) -> PackageInspectionResult:
+    mods = tuple(
+        PackageModEntry(
+            name=f"{Path(package_name).stem} Mod {index + 1}",
+            unique_id=unique_id if index == 0 else f"{unique_id}.{index + 1}",
+            version="1.0.0",
+            manifest_path=f"/{Path(package_name).stem}/manifest_{index + 1}.json",
+        )
+        for index in range(mod_count)
+    )
+    return PackageInspectionResult(
+        package_path=Path(r"C:\Downloads") / package_name,
+        mods=mods,
         warnings=tuple(),
         findings=tuple(),
     )

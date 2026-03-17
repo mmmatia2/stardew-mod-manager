@@ -308,6 +308,18 @@ class PackageInspectionResult:
     remote_requirements: tuple[RemoteRequirementGuidance, ...] = tuple()
 
 
+@dataclass(frozen=True, slots=True)
+class PackageInspectionBatchEntry:
+    package_path: Path
+    inspection: PackageInspectionResult | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PackageInspectionBatchResult:
+    entries: tuple[PackageInspectionBatchEntry, ...]
+
+
 IntakeClassification = Literal[
     "new_install_candidate",
     "update_replace_candidate",

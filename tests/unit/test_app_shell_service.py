@@ -29,6 +29,8 @@ from sdvmm.domain.models import (
     ModUpdateReport,
     ModUpdateStatus,
     NexusIntegrationStatus,
+    PackageInspectionBatchEntry,
+    PackageInspectionBatchResult,
     PackageFinding,
     PackageWarning,
     RemoteModLink,
@@ -931,6 +933,72 @@ def test_inspect_zip_with_inventory_context_includes_remote_requirement_guidance
     assert len(result.remote_requirements) == 1
     assert result.remote_requirements[0].unique_id == "Sample.Simple"
     assert result.remote_requirements[0].state == "no_remote_link"
+
+
+def test_inspect_zip_batch_with_inventory_context_returns_per_package_results(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    first_package = tmp_path / "first.zip"
+    second_package = tmp_path / "second.zip"
+
+    with ZipFile(first_package, "w") as archive:
+        archive.writestr(
+            "First/manifest.json",
+            '{"Name":"First","UniqueID":"Pkg.First","Version":"1.0.0"}',
+        )
+    with ZipFile(second_package, "w") as archive:
+        archive.writestr(
+            "Second/manifest.json",
+            '{"Name":"Second","UniqueID":"Pkg.Second","Version":"2.0.0"}',
+        )
+
+    result = service.inspect_zip_batch_with_inventory_context(
+        (str(first_package), str(second_package)),
+        _empty_inventory(),
+    )
+
+    assert isinstance(result, PackageInspectionBatchResult)
+    assert len(result.entries) == 2
+    assert result.entries[0] == PackageInspectionBatchEntry(
+        package_path=first_package,
+        inspection=result.entries[0].inspection,
+    )
+    assert result.entries[1] == PackageInspectionBatchEntry(
+        package_path=second_package,
+        inspection=result.entries[1].inspection,
+    )
+    assert result.entries[0].inspection is not None
+    assert result.entries[0].inspection.mods[0].unique_id == "Pkg.First"
+    assert result.entries[1].inspection is not None
+    assert result.entries[1].inspection.mods[0].unique_id == "Pkg.Second"
+
+
+def test_inspect_zip_batch_with_inventory_context_keeps_partial_failures_visible(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    valid_package = tmp_path / "valid.zip"
+    broken_package = tmp_path / "broken.zip"
+
+    with ZipFile(valid_package, "w") as archive:
+        archive.writestr(
+            "Valid/manifest.json",
+            '{"Name":"Valid","UniqueID":"Pkg.Valid","Version":"1.0.0"}',
+        )
+    broken_package.write_bytes(b"not a real zip")
+
+    result = service.inspect_zip_batch_with_inventory_context(
+        (str(valid_package), str(broken_package)),
+        _empty_inventory(),
+    )
+
+    assert len(result.entries) == 2
+    assert result.entries[0].inspection is not None
+    assert result.entries[0].error_message is None
+    assert result.entries[1].inspection is None
+    assert result.entries[1].package_path == broken_package
+    assert result.entries[1].error_message == f"File is not a valid zip package: {broken_package}"
 
 
 def test_inspect_zip_rejects_invalid_zip_content(tmp_path: Path) -> None:

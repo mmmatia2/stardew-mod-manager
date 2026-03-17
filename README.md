@@ -19,6 +19,7 @@ Current workflow emphasis:
 - sandbox-first mod development and validation
 - explicit, user-triggered movement between sandbox and real Mods
 - no hidden mirroring or blind overwrite of live Mods
+- explicit batch package inspection with single-package staging for planning
 
 ## Current supported workflow
 
@@ -28,8 +29,8 @@ Current workflow emphasis:
 4. Launch the game through SMAPI against the sandbox Mods path only.
 5. Open remote provider page for actionable rows.
 6. Download mod archives manually.
-7. Let watcher/package intake detect new zip files.
-8. Stage selected package into Plan & Install.
+7. Select one or more zip packages for batch inspection, or let watcher/package intake detect new zip files.
+8. Review per-package inspection results, then stage one selected package into Plan & Install.
 9. Build plan, review safety/summary/facts, then run install.
 10. Promote selected sandbox mods into real Mods through an explicit managed action when ready.
 11. Inspect recovery readiness and run recovery from recorded install history when allowed.
@@ -52,9 +53,10 @@ Live Mods safety expectations:
 - **Discovery/search**
   - discovery tab with provider/context correlation signals
 - **Packages & Intake**
-  - zip inspection
+  - multi-zip selection and batch inspection
+  - per-package inspection results with explicit selection
   - watcher-based downloads intake
-  - staging handoff to Plan & Install
+  - single-package staging handoff to Plan & Install
 - **Plan & Install**
   - destination selection (sandbox vs real)
   - plan review summary/explanation/facts
@@ -148,7 +150,7 @@ You can still run focused suites when iterating:
 .\.venv\Scripts\python.exe -m pytest tests\unit\test_main_window_gui_regression.py -q
 ```
 
-### 4) Build Windows portable folder (`0.2.1`)
+### 4) Build Windows portable folder (`0.3.0`)
 
 Packaging baseline in this repo uses **PyInstaller one-folder** output because it is the smallest practical Windows desktop packaging path here without introducing installer/signing work.
 
@@ -167,13 +169,13 @@ Build the portable folder:
 Output folder:
 
 ```text
-dist\stardew-mod-manager-0.2.1-windows-portable\
+dist\stardew-mod-manager-0.3.0-windows-portable\
 ```
 
 Launch the packaged app:
 
 ```powershell
-.\dist\stardew-mod-manager-0.2.1-windows-portable\Stardew Mod Manager.exe
+.\dist\stardew-mod-manager-0.3.0-windows-portable\Stardew Mod Manager.exe
 ```
 
 Current caveats:
@@ -185,6 +187,7 @@ Current caveats:
 ## Known limitations (current)
 
 - no automated provider-compliant download pipeline yet (manual download remains required)
+- multi-zip intake currently stops at batch inspection plus explicit single-package staging; it does not build or execute blind multi-package install plans
 - sandbox->real promotion is intentionally explicit and safety-first; there is no casual one-click "sync back all" workflow
 - no broad history browser UX; recovery is available through focused inspection/execution paths
 - no profiles/instances workflow

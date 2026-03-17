@@ -95,15 +95,30 @@ Why this phase is current priority:
 - it keeps real personal Mods isolated from dev/test iteration
 - it has higher product value than more generic UI decomposition
 
+### 8. Multi-Zip Intake Baseline
+
+Completed for `0.3.0`:
+
+- `Packages & Intake` can now select multiple zip files in one action
+- batch inspection preserves per-package visibility instead of collapsing results
+- partial batch failures stay visible per package
+- staging remains explicit and single-package in this first step
+
+Why this stopped here:
+
+- true multi-package planning/install would be harder to review safely in the current planner
+- single-package staging keeps plan review clear and avoids opaque batch execution semantics
+
 ## Next phase
 
-### 8. Sandbox Dev Loop Ergonomics
+### 9. Sandbox Dev Loop Ergonomics
 
 Likely scope:
 
 - open sandbox / real Mods convenience actions
 - automatic rescan of the destination after sync/promotion without switching context unless necessary
 - clearer launch/readiness and promotion-state orientation for sandbox workflow
+- private-testing feedback on multi-zip intake clarity before expanding batch planning behavior
 
 Validation gate:
 
@@ -118,14 +133,14 @@ Explicitly out of scope:
 
 ## Later planned phases
 
-### 9. Recovery and Promotion Hardening
+### 10. Recovery and Promotion Hardening
 
 Planned scope:
 
 - stronger preview/review surfaces for multi-mod live promotion and recovery
 - auditability improvements for live-write workflows
 
-### 10. Information Architecture Follow-up
+### 11. Information Architecture Follow-up
 
 Revisit only after the sandbox dev loop is no longer the main product blocker.
 
@@ -135,7 +150,7 @@ Planned scope:
 - `Plan & Install` / `Recovery` surface simplification if still justified
 - progressive disclosure for dense but stable workflows
 
-### 11. Visual Polish and Release UX
+### 12. Visual Polish and Release UX
 
 Planned scope:
 
@@ -143,7 +158,7 @@ Planned scope:
 - warning/disabled-state clarity
 - first-run and advanced-mode UX clarity
 
-### 12. Public Release Hardening
+### 13. Public Release Hardening
 
 Planned scope:
 
@@ -153,7 +168,7 @@ Planned scope:
 - CI
 - persistence migration discipline
 
-### 13. Provider-Compliant Automation
+### 14. Provider-Compliant Automation
 
 Planned scope:
 

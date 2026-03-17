@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stardew-mod-manager"
-version = "0.2.1"
+version = "0.3.0"
 description = "Local-first Stardew Valley mod workflow manager with sandbox-safe install, recovery, and dev-loop promotion flows"
 readme = "README.md"
 requires-python = ">=3.12"

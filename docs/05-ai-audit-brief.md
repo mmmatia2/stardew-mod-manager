@@ -18,7 +18,7 @@ The goal is not to restate the whole codebase. The goal is to give enough high-s
 - Entry point: `sdvmm-ui` -> [`src/sdvmm/app/main.py`](/Users/darth/Projects/stardew-mod-manager/src/sdvmm/app/main.py)
 - Current validation baseline:
   - `.\.venv\Scripts\python.exe -m pytest tests\unit -q`
-  - latest verified result in this thread: `415 passed, 1 skipped`
+  - latest verified result in this thread: `434 passed, 1 skipped`
   - UI startup smoke also passes offscreen
 - Product posture:
   - local-first
@@ -35,20 +35,22 @@ The app is no longer just a scanner. It now has a coherent local workflow:
 2. check update metadata
 3. open the selected mod's remote page manually
 4. download zip manually
-5. intake/inspect detected zips
-6. stage a package into `Plan & Install`
-7. build an install plan
-8. review/confirm execution
-9. record install history
-10. derive/review/execute recovery
-11. inspect linked recovery history
-12. launch Stardew/SMAPI against sandbox Mods only
-13. sync selected real Mods into sandbox Mods
-14. promote selected sandbox Mods into real Mods through an explicit managed flow
+5. intake/inspect one or more selected zips
+6. review per-package batch inspection results
+7. stage one package into `Plan & Install`
+8. build an install plan
+9. review/confirm execution
+10. record install history
+11. derive/review/execute recovery
+12. inspect linked recovery history
+13. launch Stardew/SMAPI against sandbox Mods only
+14. sync selected real Mods into sandbox Mods
+15. promote selected sandbox Mods into real Mods through an explicit managed flow
 
 The product is not feature-complete for public release, but it is materially beyond prototype state.
 
 The near-term product direction now explicitly includes a mod-development workflow, not only general end-user mod management.
+The current private-testing build also includes the first multi-zip intake step, but intentionally stops short of blind multi-package planning/install behavior.
 
 ## Current Architecture
 
@@ -102,6 +104,7 @@ The strongest part of the app right now is the install/recovery foundation:
 The previously fragmented workflow has been tightened:
 
 - `Packages & Intake` stages into `Plan & Install`
+- `Packages & Intake` can now inspect multiple selected zips while preserving per-package visibility
 - `Plan & Install` owns planning/review/execution
 - recovery is local to the same workflow surface
 - install completion now links back into recovery selection
@@ -161,6 +164,16 @@ Notably still pending:
 - CI/release hardening
 - migration discipline for public users
 
+### 5. Multi-package planning is intentionally not solved yet
+
+The app can now inspect multiple zip files in one explicit batch, but it does not yet build or execute a true multi-package install plan.
+
+That limitation is intentional:
+
+- per-package inspection is already useful for private testing and download triage
+- the current planner remains clearer and safer when staging exactly one package at a time
+- pushing straight into batch execution now would create review ambiguity
+
 ## Roadmap Status
 
 ### Completed or effectively closed
@@ -197,7 +210,7 @@ Notably still pending:
 - filterable recovery selector
 - safer/no-ID legacy handling
 
-### In progress
+### Recently completed
 
 #### 5. Sandbox Dev Loop Foundation
 
@@ -209,14 +222,23 @@ Already completed or effectively implemented:
 - promotion preview/review + archive-aware replace conflict handling
 - partial-failure safety handling for archive-aware promotion paths
 
+#### 6. Multi-Zip Intake Baseline
+
+Implemented for `0.3.0`:
+
+- multi-file zip selection in `Packages & Intake`
+- batch inspection with per-package result visibility
+- explicit single-package staging from the selected inspected package
+- no blind batch planning/install
+
 Current recommendation:
 
-- continue with the next smallest ergonomics increment (orientation and reduced friction)
-- preserve explicit confirmation and recovery trust semantics as non-negotiable
+- use private testing to validate whether batch inspection + single-package staging feels clear enough before expanding planner semantics
+- preserve explicit plan review as a non-negotiable constraint for any later multi-package work
 
 ### Next likely phase
 
-#### 6. Sandbox Dev Loop Ergonomics
+#### 7. Sandbox Dev Loop Ergonomics
 
 This phase should determine which one small improvement matters most:
 
@@ -226,11 +248,11 @@ This phase should determine which one small improvement matters most:
 
 ### Later planned phase
 
-#### 7. Information Architecture Follow-up
+#### 8. Information Architecture Follow-up
 
 The UI simplification track is now intentionally paused until sandbox-dev workflow trust work is no longer the main blocker.
 
-#### 8. Visual Feedback and Polish
+#### 9. Visual Feedback and Polish
 
 This phase should happen after the IA simplification decisions are made, not before.
 
@@ -270,6 +292,12 @@ Question:
 Question:
 
 > Given that the intended near-term audience includes mod developers, what sequence best balances trust and speed: preview + archive-aware replace first, open-folder conveniences second, and broader compare/launch conveniences later?
+
+### E. When should multi-package planning be allowed?
+
+Question:
+
+> What review surface and safety constraints would be required before moving from multi-zip batch inspection to a true multi-package staged plan?
 
 ## Explicit Constraints for the External Audit
 

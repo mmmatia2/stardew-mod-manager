@@ -93,6 +93,8 @@ from sdvmm.domain.models import (
     ModUpdateStatus,
     ModUpdateReport,
     ModsInventory,
+    PackageInspectionBatchEntry,
+    PackageInspectionBatchResult,
     SmapiUpdateStatus,
     SandboxInstallPlan,
 )
@@ -163,6 +165,8 @@ class MainWindow(QMainWindow):
         self._known_watched_zip_paths: tuple[Path, ...] = tuple()
         self._detected_intakes: tuple[DownloadsIntakeResult, ...] = tuple()
         self._intake_correlations: tuple[IntakeUpdateCorrelation, ...] = tuple()
+        self._selected_zip_package_paths: tuple[Path, ...] = tuple()
+        self._package_inspection_batch_result: PackageInspectionBatchResult | None = None
         self._archived_entries: tuple[ArchivedModEntry, ...] = tuple()
         self._install_operation_history: tuple[InstallOperationRecord, ...] = tuple()
         self._install_operation_display_indexes: tuple[int, ...] = tuple()
@@ -177,6 +181,8 @@ class MainWindow(QMainWindow):
         self._background_action_buttons: tuple[QPushButton, ...] = tuple()
         self._startup_checks_scheduled = False
         self._startup_checks_completed = False
+        self._preserve_package_selection_on_zip_path_change = False
+        self._preserve_package_inspection_on_zip_path_change = False
 
         self.setWindowTitle("Stardew Mod Manager (Sandbox-first)")
         self.setMinimumSize(980, 640)
@@ -351,6 +357,13 @@ class MainWindow(QMainWindow):
         self._scan_target_combo.addItem("Real Mods path (scan only)", SCAN_TARGET_CONFIGURED_REAL_MODS)
         self._scan_target_combo.addItem("Sandbox Mods path (scan only)", SCAN_TARGET_SANDBOX_MODS)
         self._intake_result_combo = QComboBox()
+        self._package_inspection_selector = QComboBox()
+        self._package_inspection_selector.setObjectName("packages_intake_inspection_selector")
+        _configure_combo_box_readability(
+            self._package_inspection_selector,
+            minimum_contents_length=24,
+            sample_text="ExamplePack.zip [1 mod, ready to stage]",
+        )
         self._plan_selected_intake_button = QPushButton("Stage for Plan & Install")
         self._install_archive_label = QLabel("Archive path for selected install destination")
         self._install_archive_label.setObjectName("plan_install_archive_label")
@@ -506,6 +519,26 @@ class MainWindow(QMainWindow):
         self._package_inspection_result_box.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        self._package_inspection_summary_label = QLabel("")
+        self._package_inspection_summary_label.setObjectName(
+            "packages_intake_inspection_summary_label"
+        )
+        self._package_inspection_summary_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._package_inspection_summary_label)
+        self._zip_selection_summary_label = QLabel("No zip packages selected.")
+        self._zip_selection_summary_label.setObjectName(
+            "packages_intake_zip_selection_summary_label"
+        )
+        self._zip_selection_summary_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._zip_selection_summary_label)
+        self._zip_staging_rule_label = QLabel(
+            "Inspection supports multiple packages. Staging remains one package at a time."
+        )
+        self._zip_staging_rule_label.setObjectName(
+            "packages_intake_staging_rule_label"
+        )
+        self._zip_staging_rule_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._zip_staging_rule_label)
 
         self._status_strip_group = GlobalStatusStrip()
         self._status_strip_label = self._status_strip_group.current_status_label
@@ -565,6 +598,9 @@ class MainWindow(QMainWindow):
         self._watched_downloads_path_input.textChanged.connect(self._on_watched_path_changed)
         self._nexus_api_key_input.textChanged.connect(self._on_nexus_key_changed)
         self._intake_result_combo.currentIndexChanged.connect(self._on_intake_selection_changed)
+        self._package_inspection_selector.currentIndexChanged.connect(
+            self._on_package_inspection_selection_changed
+        )
         self._discovery_query_input.returnPressed.connect(self._on_search_discovery)
         self._details_toggle.toggled.connect(self._on_toggle_details_panel)
         self._mods_filter_input.textChanged.connect(self._apply_mods_filter)
@@ -861,16 +897,18 @@ class MainWindow(QMainWindow):
         inspect_layout.setContentsMargins(8, 6, 8, 6)
         inspect_layout.setHorizontalSpacing(8)
         inspect_layout.setVerticalSpacing(4)
-        inspect_layout.addWidget(QLabel("Zip package"), 0, 0)
+        inspect_layout.addWidget(QLabel("Zip package(s)"), 0, 0)
         inspect_layout.addWidget(self._zip_path_input, 0, 1)
-        browse_zip_button = QPushButton("Browse zip")
+        browse_zip_button = QPushButton("Browse zips")
         browse_zip_button.clicked.connect(self._on_browse_zip)
         _set_secondary_button_style(browse_zip_button)
         inspect_layout.addWidget(browse_zip_button, 0, 2)
-        inspect_button = QPushButton("Inspect zip")
+        inspect_button = QPushButton("Inspect selected")
         inspect_button.clicked.connect(self._on_inspect_zip)
         _set_primary_button_style(inspect_button)
         inspect_layout.addWidget(inspect_button, 0, 3)
+        inspect_layout.addWidget(self._zip_selection_summary_label, 1, 1, 1, 3)
+        inspect_layout.addWidget(self._zip_staging_rule_label, 2, 1, 1, 3)
         intake_layout.addWidget(inspect_group)
 
         watcher_group = QGroupBox("Watcher")
@@ -899,14 +937,19 @@ class MainWindow(QMainWindow):
         watcher_layout.addLayout(watch_actions, 0, 3)
         intake_layout.addWidget(watcher_group)
 
-        inspection_result_group = QGroupBox("Inspection Result")
+        inspection_result_group = QGroupBox("Inspection Results")
         inspection_result_group.setFlat(True)
         inspection_result_group.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
-        inspection_result_layout = QVBoxLayout(inspection_result_group)
+        inspection_result_layout = QGridLayout(inspection_result_group)
         inspection_result_layout.setContentsMargins(8, 6, 8, 6)
-        inspection_result_layout.addWidget(self._package_inspection_result_box)
+        inspection_result_layout.setHorizontalSpacing(8)
+        inspection_result_layout.setVerticalSpacing(4)
+        inspection_result_layout.addWidget(self._package_inspection_summary_label, 0, 0, 1, 2)
+        inspection_result_layout.addWidget(QLabel("Inspected package"), 1, 0)
+        inspection_result_layout.addWidget(self._package_inspection_selector, 1, 1)
+        inspection_result_layout.addWidget(self._package_inspection_result_box, 2, 0, 1, 2)
         inspection_result_group.setVisible(False)
         self._package_inspection_result_group = inspection_result_group
         intake_layout.addWidget(inspection_result_group)
@@ -1281,18 +1324,23 @@ class MainWindow(QMainWindow):
             self._mods_path_input.setText(selected)
 
     def _on_browse_zip(self) -> None:
-        selected, _ = QFileDialog.getOpenFileName(
+        selected_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select zip package",
+            "Select zip package(s)",
             self._zip_path_input.text() or "",
             "Zip packages (*.zip)",
         )
-        if selected:
+        if selected_paths:
             self._invalidate_pending_plan()
-            self._zip_path_input.setText(selected)
+            self._set_selected_zip_package_paths(tuple(Path(path) for path in selected_paths))
 
     def _on_zip_path_changed(self, _: str) -> None:
-        self._set_package_inspection_result_text(None)
+        if not self._preserve_package_selection_on_zip_path_change:
+            path_text = self._zip_path_input.text().strip()
+            self._selected_zip_package_paths = (Path(path_text),) if path_text else tuple()
+        self._refresh_zip_selection_summary()
+        if not self._preserve_package_inspection_on_zip_path_change:
+            self._clear_package_inspection_results()
         self._refresh_staged_package_preview()
         self._refresh_stage_package_action_state()
 
@@ -1456,9 +1504,14 @@ class MainWindow(QMainWindow):
         self._set_status(f"Scan complete: {len(result.inventory.mods)} mods")
 
     def _on_inspect_zip(self) -> None:
+        selected_paths = self._selected_zip_package_paths
+        if not selected_paths:
+            path_text = self._zip_path_input.text().strip()
+            selected_paths = (Path(path_text),) if path_text else tuple()
+
         try:
-            inspection = self._shell_service.inspect_zip_with_inventory_context(
-                self._zip_path_input.text(),
+            batch_result = self._shell_service.inspect_zip_batch_with_inventory_context(
+                tuple(str(path) for path in selected_paths),
                 self._current_inventory,
                 nexus_api_key_text=self._nexus_api_key_input.text(),
                 existing_config=self._config,
@@ -1470,10 +1523,18 @@ class MainWindow(QMainWindow):
             return
 
         self._invalidate_pending_plan()
-        inspection_text = build_package_inspection_text(inspection)
-        self._set_package_inspection_result_text(inspection_text)
-        self._set_intake_output_text(inspection_text)
-        self._set_status(f"Zip inspection complete: {len(inspection.mods)} mod(s) detected")
+        self._show_package_inspection_results(batch_result)
+        if len(batch_result.entries) == 1:
+            entry = batch_result.entries[0]
+            if entry.inspection is not None:
+                self._set_intake_output_text(build_package_inspection_text(entry.inspection))
+                self._set_status(
+                    f"Zip inspection complete: {len(entry.inspection.mods)} mod(s) detected"
+                )
+                return
+
+        self._set_intake_output_text(_build_package_inspection_batch_text(batch_result))
+        self._set_status(_batch_inspection_status_text(batch_result))
 
     def _on_plan_install(self) -> None:
         try:
@@ -3000,6 +3061,92 @@ class MainWindow(QMainWindow):
         self._refresh_stage_package_action_state()
         self._refresh_responsive_panel_bounds()
 
+    def _clear_package_inspection_results(self) -> None:
+        self._package_inspection_batch_result = None
+        self._package_inspection_summary_label.clear()
+        self._package_inspection_selector.clear()
+        self._package_inspection_selector.setEnabled(False)
+        self._set_package_inspection_result_text(None)
+
+    def _show_package_inspection_results(
+        self,
+        batch_result: PackageInspectionBatchResult,
+    ) -> None:
+        self._package_inspection_batch_result = batch_result
+        self._package_inspection_summary_label.setText(
+            _package_inspection_batch_summary_label_text(batch_result)
+        )
+        self._package_inspection_summary_label.setToolTip(
+            _build_package_inspection_batch_text(batch_result)
+        )
+        self._package_inspection_selector.blockSignals(True)
+        self._package_inspection_selector.clear()
+        for index, entry in enumerate(batch_result.entries):
+            self._package_inspection_selector.addItem(
+                _package_inspection_entry_label(entry),
+                index,
+            )
+        self._package_inspection_selector.setEnabled(len(batch_result.entries) > 1)
+        self._package_inspection_selector.setCurrentIndex(0)
+        self._package_inspection_selector.blockSignals(False)
+        if batch_result.entries:
+            self._show_selected_package_inspection_result(0)
+        else:
+            self._clear_package_inspection_results()
+
+    def _show_selected_package_inspection_result(self, index: int) -> None:
+        entry = self._package_inspection_entry_at(index)
+        if entry is None:
+            self._set_package_inspection_result_text(None)
+            return
+        self._set_selected_zip_package_paths(
+            tuple(batch_entry.package_path for batch_entry in self._package_inspection_batch_result.entries)
+            if self._package_inspection_batch_result is not None
+            else (entry.package_path,),
+            current_path=entry.package_path,
+            preserve_inspection=True,
+        )
+        self._set_package_inspection_result_text(_package_inspection_entry_text(entry))
+
+    def _set_selected_zip_package_paths(
+        self,
+        package_paths: tuple[Path, ...],
+        *,
+        current_path: Path | None = None,
+        preserve_inspection: bool = False,
+    ) -> None:
+        self._selected_zip_package_paths = package_paths
+        self._refresh_zip_selection_summary()
+        if not preserve_inspection:
+            self._clear_package_inspection_results()
+        path_text = str(current_path or package_paths[0]) if package_paths else ""
+        self._preserve_package_selection_on_zip_path_change = True
+        self._preserve_package_inspection_on_zip_path_change = preserve_inspection
+        self._zip_path_input.setText(path_text)
+        self._preserve_package_selection_on_zip_path_change = False
+        self._preserve_package_inspection_on_zip_path_change = False
+
+    def _refresh_zip_selection_summary(self) -> None:
+        selected_count = len(self._selected_zip_package_paths)
+        if selected_count == 0:
+            self._zip_selection_summary_label.setText("No zip packages selected.")
+            self._zip_selection_summary_label.setToolTip("")
+            return
+
+        package_names = [path.name for path in self._selected_zip_package_paths]
+        package_list = "\n".join(package_names)
+        if selected_count == 1:
+            self._zip_selection_summary_label.setText(
+                f"1 zip package selected: {package_names[0]}"
+            )
+            self._zip_selection_summary_label.setToolTip(package_list)
+            return
+
+        self._zip_selection_summary_label.setText(
+            f"{selected_count} zip packages selected for inspection."
+        )
+        self._zip_selection_summary_label.setToolTip(package_list)
+
     def _set_scan_context(self, path: Path, label: str) -> None:
         path_text = str(path)
         self._scan_context_label.setText(f"{label} selected")
@@ -3093,10 +3240,14 @@ class MainWindow(QMainWindow):
             return
 
         if self._has_stageable_inspected_package():
-            package_path = self._zip_path_input.text().strip()
+            inspection_entry = self._selected_package_inspection_entry()
+            assert inspection_entry is not None
             self._stage_package_for_plan_install(
-                package_path,
-                status_message=f"Staged package for planning: {Path(package_path).name}",
+                str(inspection_entry.package_path),
+                status_message=(
+                    "Staged package for planning: "
+                    f"{inspection_entry.package_path.name}"
+                ),
             )
             return
 
@@ -3107,6 +3258,13 @@ class MainWindow(QMainWindow):
 
     def _on_intake_selection_changed(self, *_: object) -> None:
         self._refresh_stage_package_action_state()
+
+    def _on_package_inspection_selection_changed(self, *_: object) -> None:
+        selected_index = self._selected_package_inspection_index()
+        if selected_index < 0:
+            self._refresh_stage_package_action_state()
+            return
+        self._show_selected_package_inspection_result(selected_index)
 
     def _apply_mods_filter(self, *_: object) -> None:
         filter_text = self._mods_filter_input.text()
@@ -3902,11 +4060,25 @@ class MainWindow(QMainWindow):
             return None
         return self._intake_correlations[idx]
 
+    def _selected_package_inspection_index(self) -> int:
+        value = self._package_inspection_selector.currentData()
+        if isinstance(value, int):
+            return value
+        return -1
+
+    def _package_inspection_entry_at(self, index: int) -> PackageInspectionBatchEntry | None:
+        if self._package_inspection_batch_result is None:
+            return None
+        if index < 0 or index >= len(self._package_inspection_batch_result.entries):
+            return None
+        return self._package_inspection_batch_result.entries[index]
+
+    def _selected_package_inspection_entry(self) -> PackageInspectionBatchEntry | None:
+        return self._package_inspection_entry_at(self._selected_package_inspection_index())
+
     def _has_stageable_inspected_package(self) -> bool:
-        return bool(
-            self._zip_path_input.text().strip()
-            and self._package_inspection_result_group.isVisible()
-        )
+        entry = self._selected_package_inspection_entry()
+        return entry is not None and entry.inspection is not None
 
     def _refresh_stage_package_action_state(self) -> None:
         self._plan_selected_intake_button.setEnabled(
@@ -3923,7 +4095,7 @@ class MainWindow(QMainWindow):
         self._staged_package_label.setToolTip(package_path)
 
     def _stage_package_for_plan_install(self, package_path: str, *, status_message: str) -> None:
-        self._zip_path_input.setText(package_path)
+        self._set_selected_zip_package_paths((Path(package_path),), current_path=Path(package_path))
         self._refresh_staged_package_preview()
         self._refresh_stage_package_action_state()
         self._set_intake_output_text(status_message)
@@ -4810,6 +4982,86 @@ def _compact_path_text(path_text: str, *, max_length: int = 56) -> str:
     if len(path_text) <= max_length:
         return path_text
     return f"...{path_text[-(max_length - 3):]}"
+
+
+def _package_inspection_entry_label(entry: PackageInspectionBatchEntry) -> str:
+    if entry.inspection is None:
+        return f"{entry.package_path.name} [inspection failed]"
+
+    mods_label = "1 mod" if len(entry.inspection.mods) == 1 else f"{len(entry.inspection.mods)} mods"
+    readiness = "ready to stage" if entry.inspection.mods else "review only"
+    return f"{entry.package_path.name} [{mods_label}, {readiness}]"
+
+
+def _package_inspection_entry_text(entry: PackageInspectionBatchEntry) -> str:
+    if entry.inspection is not None:
+        return build_package_inspection_text(entry.inspection)
+
+    return (
+        "Package Inspection\n"
+        f"- Package: {entry.package_path.name}\n"
+        "- Status: inspection failed\n"
+        f"- Error: {entry.error_message or 'Unknown package inspection error.'}"
+    )
+
+
+def _package_inspection_batch_summary_label_text(
+    batch_result: PackageInspectionBatchResult,
+) -> str:
+    total_count = len(batch_result.entries)
+    success_count = sum(1 for entry in batch_result.entries if entry.inspection is not None)
+    failure_count = total_count - success_count
+    if total_count <= 1:
+        return "Inspect one package, then stage it explicitly in Plan & Install."
+    return (
+        f"{total_count} packages inspected: {success_count} ready to review, "
+        f"{failure_count} failed. Stage one selected package at a time."
+    )
+
+
+def _batch_inspection_status_text(batch_result: PackageInspectionBatchResult) -> str:
+    total_count = len(batch_result.entries)
+    success_count = sum(1 for entry in batch_result.entries if entry.inspection is not None)
+    failure_count = total_count - success_count
+    if failure_count == 0:
+        return f"Zip inspection complete: {total_count} package(s) inspected"
+    return (
+        f"Zip inspection complete: {total_count} package(s) inspected, "
+        f"{failure_count} failed"
+    )
+
+
+def _build_package_inspection_batch_text(batch_result: PackageInspectionBatchResult) -> str:
+    total_count = len(batch_result.entries)
+    success_count = sum(1 for entry in batch_result.entries if entry.inspection is not None)
+    failure_count = total_count - success_count
+
+    lines = [
+        "Package Inspection Batch",
+        f"- Packages selected: {total_count}",
+        f"- Successful inspections: {success_count}",
+        f"- Failed inspections: {failure_count}",
+    ]
+    if total_count > 1:
+        lines.append("- Staging: select one inspected package at a time for planning.")
+
+    lines.append("")
+    lines.append("Per-package results:")
+    for entry in batch_result.entries:
+        if entry.inspection is None:
+            lines.append(f"- {entry.package_path.name}: failed")
+            if entry.error_message:
+                lines.append(f"  Error: {entry.error_message}")
+            continue
+
+        lines.append(
+            f"- {entry.package_path.name}: "
+            f"{len(entry.inspection.mods)} mod(s), "
+            f"{len(entry.inspection.findings)} finding(s), "
+            f"{len(entry.inspection.warnings)} warning(s)"
+        )
+
+    return "\n".join(lines)
 
 
 def _error_detail_text(exc: object) -> str:
