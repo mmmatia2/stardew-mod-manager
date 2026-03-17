@@ -682,6 +682,7 @@ class AppShellService:
         sandbox_mods_path_text: str,
         sandbox_archive_path_text: str,
         watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
         real_archive_path_text: str = "",
         nexus_api_key_text: str = "",
         scan_target: ScanTargetKind,
@@ -714,6 +715,11 @@ class AppShellService:
             sandbox_archive_path = archive_path
 
         watched_downloads_path = self._parse_optional_directory(watched_downloads_path_text)
+        secondary_watched_downloads_path = self._parse_optional_directory(
+            secondary_watched_downloads_path_text
+        )
+        if secondary_watched_downloads_path == watched_downloads_path:
+            secondary_watched_downloads_path = None
         real_archive_path = self._parse_and_validate_archive_path(
             archive_path_text=real_archive_path_text,
             destination_mods_path=mods_path,
@@ -739,6 +745,7 @@ class AppShellService:
             sandbox_archive_path=sandbox_archive_path,
             real_archive_path=real_archive_path,
             watched_downloads_path=watched_downloads_path,
+            secondary_watched_downloads_path=secondary_watched_downloads_path,
             nexus_api_key=nexus_api_key,
             scan_target=scan_target,
             install_target=install_target,
@@ -1468,9 +1475,13 @@ class AppShellService:
         *,
         correlation: DiscoveryContextCorrelation,
         watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
         watcher_running: bool,
     ) -> str:
-        watched_path = watched_downloads_path_text.strip() or "<set watched downloads path first>"
+        watched_path = AppShellService._format_watched_download_paths_for_guidance(
+            watched_downloads_path_text=watched_downloads_path_text,
+            secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
+        )
         watch_step = (
             "Watcher is running; it will detect new zip files added now."
             if watcher_running
@@ -1485,7 +1496,7 @@ class AppShellService:
             f"Manual discovery flow for {correlation.entry.unique_id}:\n"
             f"Context: {correlation.context_summary}.{relation}\n"
             "1. Open source page and download the zip manually.\n"
-            f"2. Save the zip into watched downloads path: {watched_path}\n"
+            f"2. Save the zip into {watched_path}\n"
             f"3. {watch_step}\n"
             "4. In detected packages, select that zip and click 'Plan selected intake'.\n"
             "5. Review dependency + archive/overwrite warnings, then run install explicitly."
@@ -1523,49 +1534,86 @@ class AppShellService:
         status = check_nexus_connection(nexus_api_key=nexus_api_key)
         return replace(status, source=source)
 
-    def initialize_downloads_watch(self, watched_downloads_path_text: str) -> tuple[Path, ...]:
-        watched_path = self._parse_and_validate_watched_downloads_path(watched_downloads_path_text)
+    def initialize_downloads_watch(
+        self,
+        watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
+    ) -> tuple[Path, ...]:
+        watched_paths = self._parse_and_validate_watched_downloads_path(
+            watched_downloads_path_text=watched_downloads_path_text,
+            secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
+        )
 
         try:
-            return initialize_known_zip_paths(watched_path)
+            combined_known_zip_paths: list[Path] = []
+            seen_paths: set[Path] = set()
+            for watched_path in watched_paths:
+                for zip_path in initialize_known_zip_paths(watched_path):
+                    if zip_path in seen_paths:
+                        continue
+                    seen_paths.add(zip_path)
+                    combined_known_zip_paths.append(zip_path)
+            return tuple(combined_known_zip_paths)
         except OSError as exc:
-            raise AppShellError(f"Could not initialize watched downloads directory: {exc}") from exc
+            raise AppShellError(f"Could not initialize watched downloads directories: {exc}") from exc
 
     def poll_downloads_watch(
         self,
         *,
         watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
         known_zip_paths: tuple[Path, ...],
         inventory: ModsInventory,
         nexus_api_key_text: str = "",
         existing_config: AppConfig | None = None,
     ) -> DownloadsWatchPollResult:
-        watched_path = self._parse_and_validate_watched_downloads_path(watched_downloads_path_text)
+        watched_paths = self._parse_and_validate_watched_downloads_path(
+            watched_downloads_path_text=watched_downloads_path_text,
+            secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
+        )
         nexus_api_key = self._resolve_nexus_api_key(
             nexus_api_key_text=nexus_api_key_text,
             existing_config=existing_config,
         )
 
         try:
-            result = poll_watched_directory(
-                watched_path=watched_path,
-                known_zip_paths=known_zip_paths,
-                inventory=inventory,
-            )
-            enriched_intakes = tuple(
-                replace(
-                    intake,
-                    remote_requirements=evaluate_remote_requirements_for_package_mods(
-                        intake.mods,
-                        source="downloads_intake",
-                        nexus_api_key=nexus_api_key,
-                    ),
+            poll_results = tuple(
+                poll_watched_directory(
+                    watched_path=watched_path,
+                    known_zip_paths=known_zip_paths,
+                    inventory=inventory,
                 )
-                for intake in result.intakes
+                for watched_path in watched_paths
             )
-            return replace(result, intakes=enriched_intakes)
+
+            enriched_intakes = []
+            combined_known_zip_paths: list[Path] = []
+            seen_known_zip_paths: set[Path] = set()
+            for result in poll_results:
+                for zip_path in result.known_zip_paths:
+                    if zip_path in seen_known_zip_paths:
+                        continue
+                    seen_known_zip_paths.add(zip_path)
+                    combined_known_zip_paths.append(zip_path)
+                for intake in result.intakes:
+                    enriched_intakes.append(
+                        replace(
+                            intake,
+                            remote_requirements=evaluate_remote_requirements_for_package_mods(
+                                intake.mods,
+                                source="downloads_intake",
+                                nexus_api_key=nexus_api_key,
+                            ),
+                        )
+                    )
+
+            return DownloadsWatchPollResult(
+                watched_path=watched_paths[0],
+                known_zip_paths=tuple(combined_known_zip_paths),
+                intakes=tuple(enriched_intakes),
+            )
         except OSError as exc:
-            raise AppShellError(f"Could not poll watched downloads directory: {exc}") from exc
+            raise AppShellError(f"Could not poll watched downloads directories: {exc}") from exc
 
     @staticmethod
     def select_intake_result(
@@ -1704,9 +1752,13 @@ class AppShellService:
         *,
         unique_id: str,
         watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
         watcher_running: bool,
     ) -> str:
-        watched_path = watched_downloads_path_text.strip() or "<set watched downloads path first>"
+        watched_path = AppShellService._format_watched_download_paths_for_guidance(
+            watched_downloads_path_text=watched_downloads_path_text,
+            secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
+        )
         watch_step = (
             "Watcher is running; it will detect new zip files added now."
             if watcher_running
@@ -1715,7 +1767,7 @@ class AppShellService:
         return (
             f"Manual update flow for {unique_id}:\n"
             "1. Open remote page and download manually.\n"
-            f"2. Save the zip into watched downloads path: {watched_path}\n"
+            f"2. Save the zip into {watched_path}\n"
             f"3. {watch_step}\n"
             "4. In detected packages, select that zip and click 'Plan selected intake'.\n"
             "5. Review plan warnings/dependencies, then run install explicitly."
@@ -2367,6 +2419,7 @@ class AppShellService:
                 sandbox_archive_path=existing_config.sandbox_archive_path,
                 real_archive_path=existing_config.real_archive_path,
                 watched_downloads_path=existing_config.watched_downloads_path,
+                secondary_watched_downloads_path=existing_config.secondary_watched_downloads_path,
                 nexus_api_key=existing_config.nexus_api_key,
                 scan_target=existing_config.scan_target,
                 install_target=existing_config.install_target,
@@ -3212,20 +3265,59 @@ class AppShellService:
         return archive_path
 
     @staticmethod
-    def _parse_and_validate_watched_downloads_path(watched_downloads_path_text: str) -> Path:
-        raw_value = watched_downloads_path_text.strip()
-        if not raw_value:
-            raise AppShellError("Watched downloads directory is required")
+    def _parse_and_validate_watched_downloads_path(
+        *,
+        watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
+    ) -> tuple[Path, ...]:
+        watched_paths = []
+        for raw_text in (
+            watched_downloads_path_text.strip(),
+            secondary_watched_downloads_path_text.strip(),
+        ):
+            if not raw_text:
+                continue
 
-        watched_path = Path(raw_value).expanduser()
-        if not watched_path.exists():
-            raise AppShellError(f"Watched downloads directory does not exist: {watched_path}")
-        if not watched_path.is_dir():
-            raise AppShellError(
-                f"Watched downloads path is not a directory: {watched_path}"
-            )
+            watched_path = Path(raw_text).expanduser()
+            if not watched_path.exists():
+                raise AppShellError(f"Watched downloads directory does not exist: {watched_path}")
+            if not watched_path.is_dir():
+                raise AppShellError(
+                    f"Watched downloads path is not a directory: {watched_path}"
+                )
+            watched_paths.append(watched_path)
 
-        return watched_path
+        if not watched_paths:
+            raise AppShellError("At least one watched downloads directory is required")
+
+        distinct_paths: list[Path] = []
+        seen_paths: set[Path] = set()
+        for watched_path in watched_paths:
+            if watched_path in seen_paths:
+                continue
+            seen_paths.add(watched_path)
+            distinct_paths.append(watched_path)
+        return tuple(distinct_paths)
+
+    @staticmethod
+    def _format_watched_download_paths_for_guidance(
+        *,
+        watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
+    ) -> str:
+        watched_paths = []
+        for raw_text in (
+            watched_downloads_path_text.strip(),
+            secondary_watched_downloads_path_text.strip(),
+        ):
+            if raw_text and raw_text not in watched_paths:
+                watched_paths.append(raw_text)
+
+        if not watched_paths:
+            return "<set a watched downloads path first>"
+        if len(watched_paths) == 1:
+            return f"watched downloads path: {watched_paths[0]}"
+        return "one watched downloads path:\n   - " + "\n   - ".join(watched_paths)
 
     @staticmethod
     def _parse_optional_directory(path_text: str) -> Path | None:

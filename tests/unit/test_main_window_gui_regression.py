@@ -1998,6 +1998,8 @@ def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: Mai
         "setup_sandbox_mods_input",
         "setup_sandbox_archive_input",
         "setup_real_archive_input",
+        "setup_watched_downloads_input",
+        "setup_secondary_watched_downloads_input",
         "setup_nexus_api_key_input",
     )
     button_names = (
@@ -2012,6 +2014,55 @@ def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: Mai
     for name in button_names:
         button = main_window.findChild(QPushButton, name)
         assert button is not None
+
+
+def test_main_window_start_watch_uses_both_watched_paths_and_updates_status(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_window._watched_downloads_path_input.setText(r"C:\Downloads")
+    main_window._secondary_watched_downloads_path_input.setText(r"D:\BuildOutput")
+
+    captured: dict[str, object] = {}
+
+    def fake_initialize_downloads_watch(
+        watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
+    ) -> tuple[Path, ...]:
+        captured["initialize"] = (
+            watched_downloads_path_text,
+            secondary_watched_downloads_path_text,
+        )
+        return tuple()
+
+    def fake_poll_downloads_watch(**kwargs: object) -> object:
+        captured["poll"] = kwargs
+        return SimpleNamespace(known_zip_paths=tuple(), intakes=tuple())
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "initialize_downloads_watch",
+        fake_initialize_downloads_watch,
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "poll_downloads_watch",
+        fake_poll_downloads_watch,
+    )
+
+    main_window._on_start_watch()
+
+    assert captured["initialize"] == (r"C:\Downloads", r"D:\BuildOutput")
+    assert captured["poll"] == {
+        "watched_downloads_path_text": r"C:\Downloads",
+        "secondary_watched_downloads_path_text": r"D:\BuildOutput",
+        "known_zip_paths": tuple(),
+        "inventory": main_window._current_inventory_or_empty(),
+        "nexus_api_key_text": "",
+        "existing_config": main_window._config,
+    }
+    assert main_window._watch_status_label.text() == "Running | 2 paths | baseline=0 zip(s)"
+    assert main_window._watch_status_label.toolTip() == "C:\\Downloads\nD:\\BuildOutput"
 
 
 def test_main_window_plan_install_surface_has_expected_structure(
@@ -4303,6 +4354,21 @@ def test_main_window_watched_path_change_sets_expected_status_when_active_watche
 
     main_window._on_watched_path_changed()
 
+    assert main_window._status_strip_label.text() == "Watcher stopped because watched path changed."
+
+
+def test_main_window_secondary_watched_path_change_stops_active_watcher(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    main_window._watch_timer.start()
+    assert main_window._watch_timer.isActive() is True
+
+    main_window._secondary_watched_downloads_path_input.setText(r"D:\BuildOutput")
+    qapp.processEvents()
+
+    assert main_window._watch_timer.isActive() is False
+    assert main_window._watch_status_label.text() == "Stopped (path changed)"
     assert main_window._status_strip_label.text() == "Watcher stopped because watched path changed."
 
 

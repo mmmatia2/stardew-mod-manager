@@ -39,6 +39,7 @@ class AppConfig:
     sandbox_archive_path: Path | None = None
     real_archive_path: Path | None = None
     watched_downloads_path: Path | None = None
+    secondary_watched_downloads_path: Path | None = None
     nexus_api_key: str | None = None
     scan_target: str = "configured_real_mods"
     install_target: str = "sandbox_mods"

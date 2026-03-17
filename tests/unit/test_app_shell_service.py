@@ -3928,11 +3928,13 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     archive = tmp_path / "SandboxArchive"
     real_archive = tmp_path / "RealArchive"
     downloads = tmp_path / "Downloads"
+    builds = tmp_path / "BuiltZips"
     mods.mkdir()
     sandbox.mkdir()
     archive.mkdir()
     real_archive.mkdir()
     downloads.mkdir()
+    builds.mkdir()
 
     saved = service.save_operational_config(
         game_path_text=str(mods.parent),
@@ -3940,6 +3942,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
         sandbox_mods_path_text=str(sandbox),
         sandbox_archive_path_text=str(archive),
         watched_downloads_path_text=str(downloads),
+        secondary_watched_downloads_path_text=str(builds),
         real_archive_path_text=str(real_archive),
         nexus_api_key_text="persisted-key",
         scan_target="sandbox_mods",
@@ -3952,6 +3955,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     assert saved.sandbox_archive_path == archive
     assert saved.real_archive_path == real_archive
     assert saved.watched_downloads_path == downloads
+    assert saved.secondary_watched_downloads_path == builds
     assert saved.nexus_api_key == "persisted-key"
     assert saved.scan_target == "sandbox_mods"
     assert saved.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
@@ -3962,6 +3966,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     assert reloaded.config.sandbox_archive_path == archive
     assert reloaded.config.real_archive_path == real_archive
     assert reloaded.config.watched_downloads_path == downloads
+    assert reloaded.config.secondary_watched_downloads_path == builds
     assert reloaded.config.nexus_api_key == "persisted-key"
     assert reloaded.config.scan_target == "sandbox_mods"
     assert reloaded.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
@@ -4115,6 +4120,42 @@ def test_initialize_and_poll_downloads_watch_detects_new_zip(tmp_path: Path) -> 
     assert result.intakes[0].classification == "new_install_candidate"
     assert len(result.intakes[0].remote_requirements) == 1
     assert result.intakes[0].remote_requirements[0].state == "no_remote_link"
+
+
+def test_poll_downloads_watch_combines_two_watched_paths(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    downloads = tmp_path / "Downloads"
+    builds = tmp_path / "BuildOutput"
+    downloads.mkdir()
+    builds.mkdir()
+
+    known = service.initialize_downloads_watch(str(downloads), str(builds))
+    assert known == ()
+
+    first_package = downloads / "candidate-a.zip"
+    with ZipFile(first_package, "w") as archive:
+        archive.writestr(
+            "Alpha/manifest.json",
+            '{"Name":"Alpha","UniqueID":"Pkg.Alpha","Version":"1.0.0"}',
+        )
+
+    second_package = builds / "candidate-b.zip"
+    with ZipFile(second_package, "w") as archive:
+        archive.writestr(
+            "Beta/manifest.json",
+            '{"Name":"Beta","UniqueID":"Pkg.Beta","Version":"1.0.0"}',
+        )
+
+    result = service.poll_downloads_watch(
+        watched_downloads_path_text=str(downloads),
+        secondary_watched_downloads_path_text=str(builds),
+        known_zip_paths=known,
+        inventory=_empty_inventory(),
+    )
+
+    assert result.watched_path == downloads
+    assert set(result.known_zip_paths) == {first_package, second_package}
+    assert {intake.package_path for intake in result.intakes} == {first_package, second_package}
 
 
 def test_select_intake_result_returns_selected_entry(tmp_path: Path) -> None:

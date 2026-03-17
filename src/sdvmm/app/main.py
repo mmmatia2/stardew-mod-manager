@@ -14,8 +14,9 @@ from sdvmm.ui.main_window import MainWindow
 
 APP_PACKAGE_NAME = "stardew-mod-manager"
 APP_DISPLAY_NAME = "Stardew Mod Manager"
-APP_VERSION_FALLBACK = "0.2.1"
-APP_ICON_NAME = "stardew-mod-manager.ico"
+APP_VERSION_FALLBACK = "0.3.1"
+APP_RUNTIME_ICON_NAMES = ("app-icon.png", "stardew-mod-manager.ico")
+WINDOWS_APP_USER_MODEL_ID = "local.sdvmm.stardew-mod-manager"
 
 
 def _resolve_app_version() -> str:
@@ -33,14 +34,15 @@ def _resolve_runtime_root() -> Path:
 
 
 def _resolve_app_icon() -> QIcon | None:
-    icon_path = _resolve_runtime_root() / "assets" / APP_ICON_NAME
-    if not icon_path.exists():
-        return None
-
-    icon = QIcon(str(icon_path))
-    if icon.isNull():
-        return None
-    return icon
+    assets_root = _resolve_runtime_root() / "assets"
+    for icon_name in APP_RUNTIME_ICON_NAMES:
+        icon_path = assets_root / icon_name
+        if not icon_path.exists():
+            continue
+        icon = QIcon(str(icon_path))
+        if not icon.isNull():
+            return icon
+    return None
 
 
 def _configure_frozen_qt_plugin_paths() -> None:
@@ -58,7 +60,21 @@ def _configure_frozen_qt_plugin_paths() -> None:
         os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(platforms_dir)
 
 
+def _configure_windows_app_identity() -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(  # type: ignore[attr-defined]
+            WINDOWS_APP_USER_MODEL_ID
+        )
+    except Exception:
+        return
+
+
 def main() -> int:
+    _configure_windows_app_identity()
     _configure_frozen_qt_plugin_paths()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_DISPLAY_NAME)

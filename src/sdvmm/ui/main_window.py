@@ -77,6 +77,7 @@ from sdvmm.app.shell_service import (
 from sdvmm.domain.models import (
     AppConfig,
     DownloadsIntakeResult,
+    DownloadsWatchPollResult,
     GameEnvironmentStatus,
     InstallExecutionReview,
     InstallOperationRecord,
@@ -206,7 +207,13 @@ class MainWindow(QMainWindow):
         self._real_archive_path_input.setObjectName("setup_real_archive_input")
         self._real_archive_path_input.setPlaceholderText("/path/to/.sdvmm-real-archive")
         self._watched_downloads_path_input = QLineEdit()
+        self._watched_downloads_path_input.setObjectName("setup_watched_downloads_input")
         self._watched_downloads_path_input.setPlaceholderText("/path/to/Downloads")
+        self._secondary_watched_downloads_path_input = QLineEdit()
+        self._secondary_watched_downloads_path_input.setObjectName(
+            "setup_secondary_watched_downloads_input"
+        )
+        self._secondary_watched_downloads_path_input.setPlaceholderText("/path/to/BuiltZips")
         self._discovery_query_input = QLineEdit()
         self._discovery_query_input.setObjectName("discovery_query_input")
         self._discovery_query_input.setPlaceholderText(
@@ -420,6 +427,7 @@ class MainWindow(QMainWindow):
             self._sandbox_archive_path_input,
             self._real_archive_path_input,
             self._watched_downloads_path_input,
+            self._secondary_watched_downloads_path_input,
             self._discovery_query_input,
             self._mods_filter_input,
             self._discovery_filter_input,
@@ -596,6 +604,9 @@ class MainWindow(QMainWindow):
         )
         self._game_path_input.textChanged.connect(self._refresh_sandbox_dev_launch_state)
         self._watched_downloads_path_input.textChanged.connect(self._on_watched_path_changed)
+        self._secondary_watched_downloads_path_input.textChanged.connect(
+            self._on_watched_path_changed
+        )
         self._nexus_api_key_input.textChanged.connect(self._on_nexus_key_changed)
         self._intake_result_combo.currentIndexChanged.connect(self._on_intake_selection_changed)
         self._package_inspection_selector.currentIndexChanged.connect(
@@ -918,12 +929,26 @@ class MainWindow(QMainWindow):
         watcher_layout.setContentsMargins(8, 6, 8, 6)
         watcher_layout.setHorizontalSpacing(8)
         watcher_layout.setVerticalSpacing(4)
-        watcher_layout.addWidget(QLabel("Watched downloads path"), 0, 0)
+        watcher_layout.addWidget(QLabel("Watched downloads path 1"), 0, 0)
         watcher_layout.addWidget(self._watched_downloads_path_input, 0, 1)
         browse_downloads_button = QPushButton("Browse downloads")
         browse_downloads_button.clicked.connect(self._on_browse_watched_downloads)
         _set_secondary_button_style(browse_downloads_button)
         watcher_layout.addWidget(browse_downloads_button, 0, 2)
+        watcher_layout.addWidget(QLabel("Watched downloads path 2 (optional)"), 1, 0)
+        watcher_layout.addWidget(self._secondary_watched_downloads_path_input, 1, 1)
+        browse_secondary_downloads_button = QPushButton("Browse path 2")
+        browse_secondary_downloads_button.clicked.connect(
+            self._on_browse_secondary_watched_downloads
+        )
+        _set_secondary_button_style(browse_secondary_downloads_button)
+        watcher_layout.addWidget(browse_secondary_downloads_button, 1, 2)
+        watcher_scope_label = QLabel(
+            "Both watcher paths feed the same detected packages list."
+        )
+        watcher_scope_label.setWordWrap(True)
+        _set_auxiliary_label_style(watcher_scope_label)
+        watcher_layout.addWidget(watcher_scope_label, 2, 1, 1, 3)
         watch_actions = QHBoxLayout()
         start_watch_button = QPushButton("Start watch")
         start_watch_button.clicked.connect(self._on_start_watch)
@@ -934,7 +959,7 @@ class MainWindow(QMainWindow):
         _set_secondary_button_style(stop_watch_button)
         watch_actions.addWidget(stop_watch_button)
         watch_actions.addStretch(1)
-        watcher_layout.addLayout(watch_actions, 0, 3)
+        watcher_layout.addLayout(watch_actions, 0, 3, 2, 1)
         intake_layout.addWidget(watcher_group)
 
         inspection_result_group = QGroupBox("Inspection Results")
@@ -1170,6 +1195,10 @@ class MainWindow(QMainWindow):
                 self._real_archive_path_input.setText(str(state.config.real_archive_path))
             if state.config.watched_downloads_path is not None:
                 self._watched_downloads_path_input.setText(str(state.config.watched_downloads_path))
+            if state.config.secondary_watched_downloads_path is not None:
+                self._secondary_watched_downloads_path_input.setText(
+                    str(state.config.secondary_watched_downloads_path)
+                )
             if state.config.nexus_api_key is not None:
                 self._nexus_api_key_input.setText(state.config.nexus_api_key)
             self._set_current_scan_target(state.config.scan_target)
@@ -1387,6 +1416,15 @@ class MainWindow(QMainWindow):
         if selected:
             self._watched_downloads_path_input.setText(selected)
 
+    def _on_browse_secondary_watched_downloads(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Select second watched downloads directory",
+            self._secondary_watched_downloads_path_input.text() or "",
+        )
+        if selected:
+            self._secondary_watched_downloads_path_input.setText(selected)
+
     def _on_save_config(self) -> None:
         try:
             self._config = self._shell_service.save_operational_config(
@@ -1395,6 +1433,9 @@ class MainWindow(QMainWindow):
                 sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
                 sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
                 watched_downloads_path_text=self._watched_downloads_path_input.text(),
+                secondary_watched_downloads_path_text=(
+                    self._secondary_watched_downloads_path_input.text()
+                ),
                 real_archive_path_text=self._real_archive_path_input.text(),
                 nexus_api_key_text=self._nexus_api_key_input.text(),
                 scan_target=self._current_scan_target(),
@@ -2140,6 +2181,9 @@ class MainWindow(QMainWindow):
             hint = self._shell_service.build_manual_discovery_flow_hint(
                 correlation=correlation,
                 watched_downloads_path_text=self._watched_downloads_path_input.text(),
+                secondary_watched_downloads_path_text=(
+                    self._secondary_watched_downloads_path_input.text()
+                ),
                 watcher_running=self._watch_timer.isActive(),
             )
             self._set_details_text(hint)
@@ -2216,6 +2260,9 @@ class MainWindow(QMainWindow):
             hint = self._shell_service.build_manual_update_flow_hint(
                 unique_id=status.unique_id,
                 watched_downloads_path_text=self._watched_downloads_path_input.text(),
+                secondary_watched_downloads_path_text=(
+                    self._secondary_watched_downloads_path_input.text()
+                ),
                 watcher_running=self._watch_timer.isActive(),
             )
             self._set_details_text(hint)
@@ -2649,11 +2696,16 @@ class MainWindow(QMainWindow):
     def _on_start_watch(self) -> None:
         try:
             watched_downloads_path_text = self._watched_downloads_path_input.text()
+            secondary_watched_downloads_path_text = (
+                self._secondary_watched_downloads_path_input.text()
+            )
             self._known_watched_zip_paths = self._shell_service.initialize_downloads_watch(
-                watched_downloads_path_text
+                watched_downloads_path_text,
+                secondary_watched_downloads_path_text,
             )
             initial_result = self._shell_service.poll_downloads_watch(
                 watched_downloads_path_text=watched_downloads_path_text,
+                secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
                 known_zip_paths=tuple(),
                 inventory=self._current_inventory_or_empty(),
                 nexus_api_key_text=self._nexus_api_key_input.text(),
@@ -2667,10 +2719,7 @@ class MainWindow(QMainWindow):
         self._known_watched_zip_paths = initial_result.known_zip_paths
         self._watch_timer.start()
         baseline_count = len(self._known_watched_zip_paths)
-        watched_path = self._watched_downloads_path_input.text().strip()
-        self._watch_status_label.setText(
-            f"Running | {watched_path} | baseline={baseline_count} zip(s)"
-        )
+        self._update_watch_runtime_status_label(baseline_count)
         if not initial_result.intakes:
             self._set_status(
                 "Downloads watcher started. Watching for new zip files."
@@ -2688,16 +2737,9 @@ class MainWindow(QMainWindow):
         )
         self._recompute_intake_correlations()
         self._set_details_text(
-            "\n\n".join(
-                (
-                    build_downloads_intake_text(initial_result),
-                    build_intake_correlation_text(new_correlations),
-                )
-            )
+            "\n\n".join(self._watch_detail_sections(initial_result, new_correlations))
         )
-        self._set_status(
-            f"Downloads watcher started. Detected {len(initial_result.intakes)} package(s) in watched downloads."
-        )
+        self._set_status(self._watch_detection_status_text(len(initial_result.intakes), started=True))
         self._sync_guided_update_intake_handoff(
             allow_auto_select=False,
             update_output=False,
@@ -2707,12 +2749,16 @@ class MainWindow(QMainWindow):
     def _on_stop_watch(self) -> None:
         self._watch_timer.stop()
         self._watch_status_label.setText("Stopped")
+        self._watch_status_label.setToolTip(self._watch_sources_tooltip())
         self._set_status("Downloads watcher stopped.")
 
     def _on_watch_tick(self) -> None:
         try:
             result = self._shell_service.poll_downloads_watch(
                 watched_downloads_path_text=self._watched_downloads_path_input.text(),
+                secondary_watched_downloads_path_text=(
+                    self._secondary_watched_downloads_path_input.text()
+                ),
                 known_zip_paths=self._known_watched_zip_paths,
                 inventory=self._current_inventory_or_empty(),
                 nexus_api_key_text=self._nexus_api_key_input.text(),
@@ -2721,6 +2767,7 @@ class MainWindow(QMainWindow):
         except AppShellError as exc:
             self._watch_timer.stop()
             self._watch_status_label.setText("Stopped (error)")
+            self._watch_status_label.setToolTip(self._watch_sources_tooltip())
             self._set_status(str(exc))
             self._set_details_text(str(exc))
             return
@@ -2740,14 +2787,9 @@ class MainWindow(QMainWindow):
         )
         self._recompute_intake_correlations()
         self._set_details_text(
-            "\n\n".join(
-                (
-                    build_downloads_intake_text(result),
-                    build_intake_correlation_text(new_correlations),
-                )
-            )
+            "\n\n".join(self._watch_detail_sections(result, new_correlations))
         )
-        self._set_status(f"Detected {len(result.intakes)} new package(s) in watched downloads.")
+        self._set_status(self._watch_detection_status_text(len(result.intakes), started=False))
         self._sync_guided_update_intake_handoff(
             allow_auto_select=False,
             update_output=False,
@@ -3147,6 +3189,60 @@ class MainWindow(QMainWindow):
         )
         self._zip_selection_summary_label.setToolTip(package_list)
 
+    def _configured_watch_path_texts(self) -> tuple[str, ...]:
+        configured_paths: list[str] = []
+        for raw_text in (
+            self._watched_downloads_path_input.text().strip(),
+            self._secondary_watched_downloads_path_input.text().strip(),
+        ):
+            if raw_text and raw_text not in configured_paths:
+                configured_paths.append(raw_text)
+        return tuple(configured_paths)
+
+    def _watch_sources_summary(self) -> str:
+        configured_paths = self._configured_watch_path_texts()
+        if not configured_paths:
+            return "no watch paths"
+        if len(configured_paths) == 1:
+            return configured_paths[0]
+        return f"{len(configured_paths)} paths"
+
+    def _watch_sources_tooltip(self) -> str:
+        return "\n".join(self._configured_watch_path_texts())
+
+    def _update_watch_runtime_status_label(self, baseline_count: int) -> None:
+        self._watch_status_label.setText(
+            f"Running | {self._watch_sources_summary()} | baseline={baseline_count} zip(s)"
+        )
+        self._watch_status_label.setToolTip(self._watch_sources_tooltip())
+
+    def _watch_detail_sections(
+        self,
+        result: DownloadsWatchPollResult,
+        correlations: tuple[IntakeUpdateCorrelation, ...],
+    ) -> tuple[str, ...]:
+        sections: list[str] = []
+        configured_paths = self._configured_watch_path_texts()
+        if len(configured_paths) > 1:
+            sections.append("Watcher sources:\n- " + "\n- ".join(configured_paths))
+        sections.append(build_downloads_intake_text(result))
+        sections.append(build_intake_correlation_text(correlations))
+        return tuple(sections)
+
+    def _watch_detection_status_text(self, detected_count: int, *, started: bool) -> str:
+        configured_paths = self._configured_watch_path_texts()
+        if started and len(configured_paths) <= 1:
+            return (
+                f"Downloads watcher started. Detected {detected_count} package(s) in watched downloads."
+            )
+        if started:
+            return (
+                f"Downloads watcher started. Detected {detected_count} package(s) across watched downloads paths."
+            )
+        if len(configured_paths) <= 1:
+            return f"Detected {detected_count} new package(s) in watched downloads."
+        return f"Detected {detected_count} new package(s) across watched downloads paths."
+
     def _set_scan_context(self, path: Path, label: str) -> None:
         path_text = str(path)
         self._scan_context_label.setText(f"{label} selected")
@@ -3184,6 +3280,7 @@ class MainWindow(QMainWindow):
         if self._watch_timer.isActive():
             self._watch_timer.stop()
             self._watch_status_label.setText("Stopped (path changed)")
+            self._watch_status_label.setToolTip(self._watch_sources_tooltip())
             self._set_status("Watcher stopped because watched path changed.")
 
     def _on_game_path_changed(self, *_: object) -> None:
