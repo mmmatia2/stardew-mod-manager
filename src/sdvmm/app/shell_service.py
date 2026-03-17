@@ -155,6 +155,13 @@ class StartupConfigState:
     message: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class SessionConfigPersistenceResult:
+    persisted: bool
+    config: AppConfig | None
+    message: str | None = None
+
+
 ScanTargetKind = Literal["configured_real_mods", "sandbox_mods"]
 SCAN_TARGET_CONFIGURED_REAL_MODS: ScanTargetKind = "configured_real_mods"
 SCAN_TARGET_SANDBOX_MODS: ScanTargetKind = "sandbox_mods"
@@ -757,6 +764,64 @@ class AppShellService:
             raise AppShellError(f"Could not save configuration: {exc}") from exc
 
         return config
+
+    def persist_session_config_if_valid(
+        self,
+        *,
+        game_path_text: str,
+        mods_dir_text: str,
+        sandbox_mods_path_text: str,
+        sandbox_archive_path_text: str,
+        watched_downloads_path_text: str,
+        secondary_watched_downloads_path_text: str = "",
+        real_archive_path_text: str = "",
+        nexus_api_key_text: str = "",
+        scan_target: ScanTargetKind,
+        install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
+        existing_config: AppConfig | None,
+    ) -> SessionConfigPersistenceResult:
+        has_session_input = any(
+            field.strip()
+            for field in (
+                game_path_text,
+                mods_dir_text,
+                sandbox_mods_path_text,
+                sandbox_archive_path_text,
+                watched_downloads_path_text,
+                secondary_watched_downloads_path_text,
+                real_archive_path_text,
+                nexus_api_key_text,
+            )
+        )
+        if not has_session_input and existing_config is None:
+            return SessionConfigPersistenceResult(
+                persisted=False,
+                config=None,
+                message="No operational configuration is available to persist yet.",
+            )
+
+        try:
+            config = self.save_operational_config(
+                game_path_text=game_path_text,
+                mods_dir_text=mods_dir_text,
+                sandbox_mods_path_text=sandbox_mods_path_text,
+                sandbox_archive_path_text=sandbox_archive_path_text,
+                watched_downloads_path_text=watched_downloads_path_text,
+                secondary_watched_downloads_path_text=secondary_watched_downloads_path_text,
+                real_archive_path_text=real_archive_path_text,
+                nexus_api_key_text=nexus_api_key_text,
+                scan_target=scan_target,
+                install_target=install_target,
+                existing_config=existing_config,
+            )
+        except AppShellError as exc:
+            return SessionConfigPersistenceResult(
+                persisted=False,
+                config=existing_config,
+                message=str(exc),
+            )
+
+        return SessionConfigPersistenceResult(persisted=True, config=config)
 
     def detect_game_environment(self, game_path_text: str) -> GameEnvironmentStatus:
         game_path = self._parse_game_path_text(game_path_text)

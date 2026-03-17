@@ -197,6 +197,70 @@ def test_main_window_startup_auto_checks_run_in_sequence_when_game_path_is_ready
     qapp.processEvents()
 
 
+def test_main_window_close_persists_practical_setup_paths_across_restart(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    state_file = tmp_path / "app-state.json"
+    game_path = tmp_path / "Stardew Valley"
+    mods_path = game_path / "Mods"
+    sandbox_mods_path = tmp_path / "SandboxMods"
+    sandbox_archive_path = tmp_path / "SandboxArchive"
+    real_archive_path = tmp_path / "RealArchive"
+    watched_downloads_path = tmp_path / "Downloads"
+    secondary_watched_downloads_path = tmp_path / "BuiltZips"
+    game_path.mkdir()
+    mods_path.mkdir()
+    sandbox_mods_path.mkdir()
+    sandbox_archive_path.mkdir()
+    real_archive_path.mkdir()
+    watched_downloads_path.mkdir()
+    secondary_watched_downloads_path.mkdir()
+
+    first_window = MainWindow(shell_service=AppShellService(state_file=state_file))
+    first_window.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    first_window._game_path_input.setText(str(game_path))
+    first_window._mods_path_input.setText(str(mods_path))
+    first_window._sandbox_mods_path_input.setText(str(sandbox_mods_path))
+    first_window._sandbox_archive_path_input.setText(str(sandbox_archive_path))
+    first_window._real_archive_path_input.setText(str(real_archive_path))
+    first_window._watched_downloads_path_input.setText(str(watched_downloads_path))
+    first_window._secondary_watched_downloads_path_input.setText(
+        str(secondary_watched_downloads_path)
+    )
+    first_window._set_current_scan_target(SCAN_TARGET_SANDBOX_MODS)
+    first_window._set_current_install_target(INSTALL_TARGET_CONFIGURED_REAL_MODS)
+    qapp.processEvents()
+
+    first_window.close()
+    qapp.processEvents()
+
+    reopened_window = MainWindow(shell_service=AppShellService(state_file=state_file))
+    reopened_window.show()
+    qapp.processEvents()
+    qapp.processEvents()
+
+    assert reopened_window._game_path_input.text() == str(game_path)
+    assert reopened_window._mods_path_input.text() == str(mods_path)
+    assert reopened_window._sandbox_mods_path_input.text() == str(sandbox_mods_path)
+    assert reopened_window._sandbox_archive_path_input.text() == str(sandbox_archive_path)
+    assert reopened_window._real_archive_path_input.text() == str(real_archive_path)
+    assert reopened_window._watched_downloads_path_input.text() == str(watched_downloads_path)
+    assert reopened_window._secondary_watched_downloads_path_input.text() == str(
+        secondary_watched_downloads_path
+    )
+    assert reopened_window._scan_target_combo.currentData() == SCAN_TARGET_SANDBOX_MODS
+    assert (
+        reopened_window._install_target_combo.currentData()
+        == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    )
+
+    reopened_window.close()
+    qapp.processEvents()
+
+
 def test_main_window_has_separate_status_strip_and_bottom_details_region(
     main_window: MainWindow,
 ) -> None:

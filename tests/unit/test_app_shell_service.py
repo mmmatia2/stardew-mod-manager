@@ -3972,6 +3972,83 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     assert reloaded.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
 
 
+def test_persist_session_config_if_valid_saves_watcher_paths_and_targets(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Stardew Valley"
+    mods = game_path / "Mods"
+    sandbox = tmp_path / "SandboxMods"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    real_archive = tmp_path / "RealArchive"
+    downloads = tmp_path / "Downloads"
+    builds = tmp_path / "BuiltZips"
+    game_path.mkdir()
+    mods.mkdir()
+    sandbox.mkdir()
+    sandbox_archive.mkdir()
+    real_archive.mkdir()
+    downloads.mkdir()
+    builds.mkdir()
+
+    result = service.persist_session_config_if_valid(
+        game_path_text=str(game_path),
+        mods_dir_text=str(mods),
+        sandbox_mods_path_text=str(sandbox),
+        sandbox_archive_path_text=str(sandbox_archive),
+        watched_downloads_path_text=str(downloads),
+        secondary_watched_downloads_path_text=str(builds),
+        real_archive_path_text=str(real_archive),
+        nexus_api_key_text="session-key",
+        scan_target=SCAN_TARGET_SANDBOX_MODS,
+        install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        existing_config=None,
+    )
+
+    assert result.persisted is True
+    assert result.config is not None
+    assert result.config.watched_downloads_path == downloads
+    assert result.config.secondary_watched_downloads_path == builds
+    assert result.config.scan_target == SCAN_TARGET_SANDBOX_MODS
+    assert result.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
+
+    reloaded = service.load_startup_config()
+    assert reloaded.config is not None
+    assert reloaded.config.watched_downloads_path == downloads
+    assert reloaded.config.secondary_watched_downloads_path == builds
+    assert reloaded.config.sandbox_mods_path == sandbox
+    assert reloaded.config.real_archive_path == real_archive
+    assert reloaded.config.scan_target == SCAN_TARGET_SANDBOX_MODS
+    assert reloaded.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
+
+
+def test_persist_session_config_if_valid_skips_incomplete_first_run_state(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+
+    result = service.persist_session_config_if_valid(
+        game_path_text="",
+        mods_dir_text="",
+        sandbox_mods_path_text="",
+        sandbox_archive_path_text="",
+        watched_downloads_path_text=str(downloads),
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text="",
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=None,
+    )
+
+    assert result.persisted is False
+    assert result.config is None
+    assert result.message == "Game directory is required"
+    assert service.state_file.exists() is False
+
+
 def test_save_operational_config_can_derive_mods_path_from_game_path(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     game_path = tmp_path / "Stardew Valley"

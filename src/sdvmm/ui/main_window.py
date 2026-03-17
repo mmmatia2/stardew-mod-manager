@@ -1217,12 +1217,40 @@ class MainWindow(QMainWindow):
         self._refresh_inventory_sandbox_sync_action_state()
         self._refresh_responsive_panel_bounds()
 
+    def _current_operational_config_inputs(self) -> dict[str, object]:
+        return {
+            "game_path_text": self._game_path_input.text(),
+            "mods_dir_text": self._mods_path_input.text(),
+            "sandbox_mods_path_text": self._sandbox_mods_path_input.text(),
+            "sandbox_archive_path_text": self._sandbox_archive_path_input.text(),
+            "watched_downloads_path_text": self._watched_downloads_path_input.text(),
+            "secondary_watched_downloads_path_text": (
+                self._secondary_watched_downloads_path_input.text()
+            ),
+            "real_archive_path_text": self._real_archive_path_input.text(),
+            "nexus_api_key_text": self._nexus_api_key_input.text(),
+            "scan_target": self._current_scan_target(),
+            "install_target": self._current_install_target(),
+            "existing_config": self._config,
+        }
+
+    def _persist_session_config_on_close(self) -> None:
+        result = self._shell_service.persist_session_config_if_valid(
+            **self._current_operational_config_inputs()
+        )
+        if result.config is not None:
+            self._config = result.config
+
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         if self._startup_checks_scheduled:
             return
         self._startup_checks_scheduled = True
         QTimer.singleShot(0, self._run_startup_checks_if_meaningful)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self._persist_session_config_on_close()
+        super().closeEvent(event)
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -1428,19 +1456,7 @@ class MainWindow(QMainWindow):
     def _on_save_config(self) -> None:
         try:
             self._config = self._shell_service.save_operational_config(
-                game_path_text=self._game_path_input.text(),
-                mods_dir_text=self._mods_path_input.text(),
-                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
-                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
-                watched_downloads_path_text=self._watched_downloads_path_input.text(),
-                secondary_watched_downloads_path_text=(
-                    self._secondary_watched_downloads_path_input.text()
-                ),
-                real_archive_path_text=self._real_archive_path_input.text(),
-                nexus_api_key_text=self._nexus_api_key_input.text(),
-                scan_target=self._current_scan_target(),
-                install_target=self._current_install_target(),
-                existing_config=self._config,
+                **self._current_operational_config_inputs()
             )
         except AppShellError as exc:
             QMessageBox.critical(self, "Save failed", str(exc))
