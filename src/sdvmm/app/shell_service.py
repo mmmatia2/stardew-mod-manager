@@ -88,7 +88,11 @@ from sdvmm.services.app_state_store import (
 )
 from sdvmm.services.mod_scanner import scan_mods_directory
 from sdvmm.services.package_inspector import inspect_zip_package
-from sdvmm.services.downloads_intake import initialize_known_zip_paths, poll_watched_directory
+from sdvmm.services.downloads_intake import (
+    initialize_known_zip_paths,
+    inspect_downloads_intake_package,
+    poll_watched_directory,
+)
 from sdvmm.services.environment_detection import detect_game_environment as detect_game_environment_service
 from sdvmm.services.environment_detection import derive_mods_path
 from sdvmm.services.dependency_preflight import (
@@ -1694,6 +1698,29 @@ class AppShellService:
     def is_actionable_intake_result(intake: DownloadsIntakeResult) -> bool:
         return intake.classification in _ACTIONABLE_INTAKE_CLASSIFICATIONS
 
+    @staticmethod
+    def refresh_detected_intakes_against_inventory(
+        *,
+        intakes: tuple[DownloadsIntakeResult, ...],
+        inventory: ModsInventory | None,
+    ) -> tuple[DownloadsIntakeResult, ...]:
+        if inventory is None:
+            return intakes
+
+        refreshed: list[DownloadsIntakeResult] = []
+        for intake in intakes:
+            refreshed_intake = inspect_downloads_intake_package(
+                package_path=intake.package_path,
+                inventory=inventory,
+            )
+            refreshed.append(
+                replace(
+                    refreshed_intake,
+                    remote_requirements=intake.remote_requirements,
+                )
+            )
+        return tuple(refreshed)
+
     def build_sandbox_install_plan_from_intake(
         self,
         *,
@@ -1834,7 +1861,7 @@ class AppShellService:
             "1. Open remote page and download manually.\n"
             f"2. Save the zip into {watched_path}\n"
             f"3. {watch_step}\n"
-            "4. In detected packages, select that zip and click 'Plan selected intake'.\n"
+            "4. In detected packages, select that zip and click 'Stage update'.\n"
             "5. Review plan warnings/dependencies, then run install explicitly."
         )
 
@@ -3968,20 +3995,20 @@ def _build_intake_flow_messages(
         joined = ", ".join(matched_guided)
         return (
             f"Detected package likely matches guided update target(s): {joined}.",
-            "Select this package and click 'Plan selected intake', then review plan warnings.",
+            "Select this package and click 'Stage update', then review plan warnings.",
         )
 
     if matched_update_available:
         joined = ", ".join(matched_update_available)
         return (
             f"Detected package likely matches mod(s) with update available: {joined}.",
-            "Select this package and click 'Plan selected intake'.",
+            "Select this package and click 'Stage update'.",
         )
 
     if intake.classification == "update_replace_candidate":
         return (
             "Detected package matches an installed mod by UniqueID.",
-            "Select package and plan update after reviewing overwrite/archive actions.",
+            "Select this package and click 'Stage update' to carry archive-aware replace into planning.",
         )
 
     if intake.classification == "multi_mod_package":

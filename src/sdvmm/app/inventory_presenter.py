@@ -781,7 +781,7 @@ def _intake_next_action(classification: str) -> str:
     if classification == "multi_mod_package":
         return "Actionable. Plan install and review every entry before executing."
     if classification == "update_replace_candidate":
-        return "Actionable. Plan install and review overwrite/archive warnings carefully."
+        return "Actionable. Use Stage update to preselect archive-aware replace, then review the plan."
     return "Actionable. Plan install for the selected destination."
 
 

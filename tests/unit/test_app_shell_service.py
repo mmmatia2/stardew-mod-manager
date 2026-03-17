@@ -4336,6 +4336,38 @@ def test_build_sandbox_install_plan_from_intake_update_replace_candidate(tmp_pat
     assert plan.entries[0].can_install is True
 
 
+def test_refresh_detected_intakes_against_inventory_reclassifies_stale_update_candidate(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+
+    package = downloads / "update_mod.zip"
+    with ZipFile(package, "w") as archive:
+        archive.writestr(
+            "Existing/manifest.json",
+            '{"Name":"Existing","UniqueID":"Sample.Exists","Version":"2.0.0"}',
+        )
+
+    initial_poll = service.poll_downloads_watch(
+        watched_downloads_path_text=str(downloads),
+        known_zip_paths=tuple(),
+        inventory=_inventory_with_mod("Sample.Exists"),
+    )
+    assert initial_poll.intakes[0].classification == "update_replace_candidate"
+    assert initial_poll.intakes[0].matched_installed_unique_ids == ("Sample.Exists",)
+
+    refreshed = service.refresh_detected_intakes_against_inventory(
+        intakes=initial_poll.intakes,
+        inventory=_empty_inventory(),
+    )
+
+    assert refreshed[0].classification == "new_install_candidate"
+    assert refreshed[0].matched_installed_unique_ids == tuple()
+    assert "new mod" in refreshed[0].message.casefold()
+
+
 def test_build_sandbox_install_plan_from_intake_rejects_unusable_package(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     downloads = tmp_path / "Downloads"
@@ -4385,7 +4417,7 @@ def test_correlate_intake_with_updates_marks_update_available_match(tmp_path: Pa
     assert correlation.actionable is True
     assert correlation.matched_update_available_unique_ids == ("Sample.Exists",)
     assert "update available" in correlation.summary.casefold()
-    assert "plan selected intake" in correlation.next_step.casefold()
+    assert "stage update" in correlation.next_step.casefold()
 
 
 def test_correlate_intake_with_updates_prefers_guided_update_match(tmp_path: Path) -> None:
@@ -4408,6 +4440,7 @@ def test_correlate_intake_with_updates_prefers_guided_update_match(tmp_path: Pat
     assert correlation.matched_guided_update_unique_ids == ("Sample.Exists",)
     assert "guided update target" in correlation.summary.casefold()
     assert correlation.actionable is True
+    assert "stage update" in correlation.next_step.casefold()
 
 
 def test_correlate_intake_with_updates_keeps_unusable_non_actionable(tmp_path: Path) -> None:

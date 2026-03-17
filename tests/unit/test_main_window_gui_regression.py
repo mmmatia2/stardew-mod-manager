@@ -4421,6 +4421,316 @@ def test_main_window_watched_path_change_sets_expected_status_when_active_watche
     assert main_window._status_strip_label.text() == "Watcher stopped because watched path changed."
 
 
+def test_main_window_scan_completion_refreshes_detected_package_state(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+) -> None:
+    stale_intake = replace(
+        _intake_result(
+            "UpdatePack.zip",
+            "update_replace_candidate",
+            "Alpha Mod",
+            "Sample.Alpha",
+        ),
+        matched_installed_unique_ids=("Sample.Alpha",),
+    )
+    refreshed_intake = replace(
+        stale_intake,
+        classification="new_install_candidate",
+        matched_installed_unique_ids=tuple(),
+        message="Package appears to contain a new mod not present in current inventory.",
+    )
+    calls: dict[str, object] = {}
+
+    def fake_refresh_detected_intakes_against_inventory(
+        *,
+        intakes: tuple[DownloadsIntakeResult, ...],
+        inventory: ModsInventory | None,
+    ) -> tuple[DownloadsIntakeResult, ...]:
+        calls["intakes"] = intakes
+        calls["inventory"] = inventory
+        return (refreshed_intake,)
+
+    main_window._detected_intakes = (stale_intake,)
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "refresh_detected_intakes_against_inventory",
+        fake_refresh_detected_intakes_against_inventory,
+    )
+
+    main_window._on_scan_completed(
+        SimpleNamespace(
+            inventory=_mods_inventory(),
+            scan_path=Path(r"C:\Sandbox\Mods"),
+            target_kind=SCAN_TARGET_SANDBOX_MODS,
+        )
+    )
+    qapp.processEvents()
+
+    assert calls["intakes"] == (stale_intake,)
+    assert isinstance(calls["inventory"], ModsInventory)
+    assert main_window._detected_intakes == (refreshed_intake,)
+    assert main_window._intake_correlations[0].intake.classification == "new_install_candidate"
+    assert main_window._stage_update_intake_button.isHidden() is True
+
+
+def test_main_window_stage_update_button_only_appears_for_update_like_detected_package(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    non_update_intake = _intake_result(
+        "FreshPack.zip",
+        "new_install_candidate",
+        "Fresh Mod",
+        "Sample.Fresh",
+    )
+    update_intake = replace(
+        _intake_result(
+            "UpdatePack.zip",
+            "update_replace_candidate",
+            "Alpha Mod",
+            "Sample.Alpha",
+        ),
+        matched_installed_unique_ids=("Sample.Alpha",),
+    )
+
+    main_window._detected_intakes = (non_update_intake,)
+    main_window._intake_correlations = (
+        _intake_correlation(
+            non_update_intake,
+            next_step="Stage for Plan & Install.",
+        ),
+    )
+    main_window._refresh_intake_selector()
+    qapp.processEvents()
+
+    assert main_window._plan_selected_intake_button.isEnabled() is True
+    assert main_window._stage_update_intake_button.isHidden() is True
+
+    main_window._detected_intakes = (update_intake,)
+    main_window._intake_correlations = (
+        _intake_correlation(
+            update_intake,
+            next_step="Stage update.",
+            matched_update_available_unique_ids=("Sample.Alpha",),
+        ),
+    )
+    main_window._refresh_intake_selector()
+    qapp.processEvents()
+
+    assert main_window._plan_selected_intake_button.isEnabled() is True
+    assert main_window._stage_update_intake_button.isHidden() is False
+    assert main_window._stage_update_intake_button.isEnabled() is True
+
+
+def test_main_window_stage_update_carries_archive_replace_intent_into_plan(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+) -> None:
+    update_intake = replace(
+        _intake_result(
+            "UpdatePack.zip",
+            "update_replace_candidate",
+            "Alpha Mod",
+            "Sample.Alpha",
+        ),
+        matched_installed_unique_ids=("Sample.Alpha",),
+    )
+    main_window._detected_intakes = (update_intake,)
+    main_window._intake_correlations = (
+        _intake_correlation(
+            update_intake,
+            next_step="Stage update.",
+            matched_update_available_unique_ids=("Sample.Alpha",),
+        ),
+    )
+    main_window._refresh_intake_selector()
+    qapp.processEvents()
+
+    captured: dict[str, object] = {}
+
+    def fake_build_install_plan(
+        *,
+        package_path_text: str,
+        install_target: str,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        allow_overwrite: bool,
+        configured_real_mods_path: Path | None = None,
+        nexus_api_key_text: str = "",
+        existing_config: object | None = None,
+    ) -> SandboxInstallPlan:
+        captured["package_path_text"] = package_path_text
+        captured["allow_overwrite"] = allow_overwrite
+        return _sandbox_install_plan(
+            action=OVERWRITE_WITH_ARCHIVE,
+            target_exists=True,
+            archive_path=Path(r"C:\Sandbox\.sdvmm-sandbox-archive\SampleMod-old"),
+            warnings=("Archive existing target before overwrite.",),
+        )
+
+    monkeypatch.setattr(main_window._shell_service, "build_install_plan", fake_build_install_plan)
+
+    main_window._overwrite_checkbox.setChecked(False)
+    main_window._on_stage_selected_intake_update()
+    main_window._on_plan_install()
+
+    assert main_window._overwrite_checkbox.isChecked() is True
+    assert captured["package_path_text"] == str(update_intake.package_path)
+    assert captured["allow_overwrite"] is True
+    assert main_window._pending_install_plan is not None
+    assert main_window._pending_install_plan.entries[0].action == OVERWRITE_WITH_ARCHIVE
+
+
+def test_main_window_normal_staging_does_not_inherit_auto_overwrite_from_stage_update(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+) -> None:
+    update_intake = replace(
+        _intake_result(
+            "UpdatePack.zip",
+            "update_replace_candidate",
+            "Alpha Mod",
+            "Sample.Alpha",
+        ),
+        matched_installed_unique_ids=("Sample.Alpha",),
+    )
+    normal_intake = _intake_result(
+        "FreshPack.zip",
+        "new_install_candidate",
+        "Fresh Mod",
+        "Sample.Fresh",
+    )
+    main_window._detected_intakes = (update_intake,)
+    main_window._intake_correlations = (
+        _intake_correlation(
+            update_intake,
+            next_step="Stage update.",
+            matched_update_available_unique_ids=("Sample.Alpha",),
+        ),
+    )
+    main_window._refresh_intake_selector()
+    qapp.processEvents()
+
+    main_window._on_stage_selected_intake_update()
+    assert main_window._overwrite_checkbox.isChecked() is True
+
+    main_window._detected_intakes = (normal_intake,)
+    main_window._intake_correlations = (
+        _intake_correlation(
+            normal_intake,
+            next_step="Stage for Plan & Install.",
+        ),
+    )
+    main_window._refresh_intake_selector()
+    qapp.processEvents()
+
+    captured: dict[str, object] = {}
+
+    def fake_build_install_plan(
+        *,
+        package_path_text: str,
+        install_target: str,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        allow_overwrite: bool,
+        configured_real_mods_path: Path | None = None,
+        nexus_api_key_text: str = "",
+        existing_config: object | None = None,
+    ) -> SandboxInstallPlan:
+        captured["allow_overwrite"] = allow_overwrite
+        return _sandbox_install_plan()
+
+    monkeypatch.setattr(main_window._shell_service, "build_install_plan", fake_build_install_plan)
+
+    main_window._on_plan_selected_intake()
+    main_window._on_plan_install()
+
+    assert main_window._overwrite_checkbox.isChecked() is False
+    assert captured["allow_overwrite"] is False
+
+
+def test_main_window_manual_overwrite_choice_still_applies_after_stage_update(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+) -> None:
+    update_intake = replace(
+        _intake_result(
+            "UpdatePack.zip",
+            "update_replace_candidate",
+            "Alpha Mod",
+            "Sample.Alpha",
+        ),
+        matched_installed_unique_ids=("Sample.Alpha",),
+    )
+    normal_intake = _intake_result(
+        "FreshPack.zip",
+        "new_install_candidate",
+        "Fresh Mod",
+        "Sample.Fresh",
+    )
+    main_window._detected_intakes = (update_intake,)
+    main_window._intake_correlations = (
+        _intake_correlation(
+            update_intake,
+            next_step="Stage update.",
+            matched_update_available_unique_ids=("Sample.Alpha",),
+        ),
+    )
+    main_window._refresh_intake_selector()
+    qapp.processEvents()
+
+    main_window._on_stage_selected_intake_update()
+    assert main_window._overwrite_checkbox.isChecked() is True
+
+    main_window._overwrite_checkbox.setChecked(False)
+    main_window._overwrite_checkbox.setChecked(True)
+
+    main_window._detected_intakes = (normal_intake,)
+    main_window._intake_correlations = (
+        _intake_correlation(
+            normal_intake,
+            next_step="Stage for Plan & Install.",
+        ),
+    )
+    main_window._refresh_intake_selector()
+    qapp.processEvents()
+
+    captured: dict[str, object] = {}
+
+    def fake_build_install_plan(
+        *,
+        package_path_text: str,
+        install_target: str,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str,
+        sandbox_archive_path_text: str,
+        allow_overwrite: bool,
+        configured_real_mods_path: Path | None = None,
+        nexus_api_key_text: str = "",
+        existing_config: object | None = None,
+    ) -> SandboxInstallPlan:
+        captured["allow_overwrite"] = allow_overwrite
+        return _sandbox_install_plan(action=OVERWRITE_WITH_ARCHIVE)
+
+    monkeypatch.setattr(main_window._shell_service, "build_install_plan", fake_build_install_plan)
+
+    main_window._on_plan_selected_intake()
+    main_window._on_plan_install()
+
+    assert main_window._overwrite_checkbox.isChecked() is True
+    assert captured["allow_overwrite"] is True
+
+
 def test_main_window_secondary_watched_path_change_stops_active_watcher(
     main_window: MainWindow,
     qapp: QApplication,
@@ -4863,4 +5173,15 @@ def _installed_mod_for_update_ui(*, name: str, unique_id: str, folder_name: str)
         folder_path=folder_path,
         manifest_path=folder_path / "manifest.json",
         dependencies=tuple(),
+    )
+
+
+def _mods_inventory(*mods: InstalledMod) -> ModsInventory:
+    return ModsInventory(
+        mods=tuple(mods),
+        parse_warnings=tuple(),
+        duplicate_unique_ids=tuple(),
+        missing_required_dependencies=tuple(),
+        scan_entry_findings=tuple(),
+        ignored_entries=tuple(),
     )

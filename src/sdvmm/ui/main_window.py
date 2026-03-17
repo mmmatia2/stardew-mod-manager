@@ -184,6 +184,8 @@ class MainWindow(QMainWindow):
         self._startup_checks_completed = False
         self._preserve_package_selection_on_zip_path_change = False
         self._preserve_package_inspection_on_zip_path_change = False
+        self._auto_overwrite_package_path: str | None = None
+        self._syncing_auto_overwrite_checkbox = False
 
         self.setWindowTitle("Stardew Mod Manager (Sandbox-first)")
         self.setMinimumSize(980, 640)
@@ -372,6 +374,9 @@ class MainWindow(QMainWindow):
             sample_text="ExamplePack.zip [1 mod, ready to stage]",
         )
         self._plan_selected_intake_button = QPushButton("Stage for Plan & Install")
+        self._stage_update_intake_button = QPushButton("Stage update")
+        self._stage_update_intake_button.setObjectName("packages_intake_stage_update_button")
+        self._stage_update_intake_button.setVisible(False)
         self._install_archive_label = QLabel("Archive path for selected install destination")
         self._install_archive_label.setObjectName("plan_install_archive_label")
         self._staged_package_label = QLineEdit()
@@ -586,6 +591,7 @@ class MainWindow(QMainWindow):
             self._refresh_inventory_sandbox_sync_action_state
         )
         self._overwrite_checkbox.toggled.connect(self._invalidate_pending_plan)
+        self._overwrite_checkbox.toggled.connect(self._on_overwrite_checkbox_toggled)
         self._scan_target_combo.currentIndexChanged.connect(self._refresh_scan_context_preview)
         self._scan_target_combo.currentIndexChanged.connect(
             self._refresh_inventory_sandbox_sync_action_state
@@ -992,8 +998,17 @@ class MainWindow(QMainWindow):
         detected_layout.addWidget(QLabel("Detected packages"), 1, 0)
         detected_layout.addWidget(self._intake_result_combo, 1, 1, 1, 2)
         self._plan_selected_intake_button.clicked.connect(self._on_plan_selected_intake)
+        self._stage_update_intake_button.clicked.connect(self._on_stage_selected_intake_update)
         _set_primary_button_style(self._plan_selected_intake_button)
-        detected_layout.addWidget(self._plan_selected_intake_button, 1, 3)
+        _set_secondary_button_style(self._stage_update_intake_button)
+        detected_actions_widget = QWidget()
+        detected_actions_layout = QHBoxLayout(detected_actions_widget)
+        detected_actions_layout.setContentsMargins(0, 0, 0, 0)
+        detected_actions_layout.setSpacing(6)
+        detected_actions_layout.addStretch(1)
+        detected_actions_layout.addWidget(self._stage_update_intake_button)
+        detected_actions_layout.addWidget(self._plan_selected_intake_button)
+        detected_layout.addWidget(detected_actions_widget, 2, 1, 1, 3)
         intake_layout.addWidget(detected_group)
 
         intake_layout.addStretch(1)
@@ -1395,6 +1410,7 @@ class MainWindow(QMainWindow):
         if not self._preserve_package_selection_on_zip_path_change:
             path_text = self._zip_path_input.text().strip()
             self._selected_zip_package_paths = (Path(path_text),) if path_text else tuple()
+        self._sync_auto_overwrite_intent_with_staged_package(self._zip_path_input.text())
         self._refresh_zip_selection_summary()
         if not self._preserve_package_inspection_on_zip_path_change:
             self._clear_package_inspection_results()
@@ -2853,6 +2869,7 @@ class MainWindow(QMainWindow):
                 )
             )
         )
+        self._refresh_detected_intakes_for_current_inventory()
         self._refresh_discovery_correlations()
 
     def _apply_update_report(self, report: ModUpdateReport) -> None:
@@ -3368,6 +3385,34 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "No package to stage", message)
         self._set_intake_output_text(message)
         self._set_status(message)
+
+    def _on_stage_selected_intake_update(self) -> None:
+        selected_index = self._selected_intake_index()
+        if selected_index < 0 or not self._selected_intake_supports_update_action():
+            message = "Select a detected update package first."
+            self._set_intake_output_text(message)
+            self._set_status(message)
+            return
+
+        try:
+            intake = self._shell_service.select_intake_result(
+                intakes=self._detected_intakes,
+                selected_index=selected_index,
+            )
+        except AppShellError as exc:
+            QMessageBox.warning(self, "No package selected", str(exc))
+            self._set_intake_output_text(str(exc))
+            self._set_status(str(exc))
+            return
+
+        self._stage_package_for_plan_install(
+            str(intake.package_path),
+            apply_update_intent=True,
+            status_message=(
+                "Staged update package for planning with archive-aware replace enabled: "
+                f"{intake.package_path.name}"
+            ),
+        )
 
     def _on_intake_selection_changed(self, *_: object) -> None:
         self._refresh_stage_package_action_state()
@@ -4197,6 +4242,17 @@ class MainWindow(QMainWindow):
         self._plan_selected_intake_button.setEnabled(
             self._selected_intake_index() >= 0 or self._has_stageable_inspected_package()
         )
+        update_like_selection = self._selected_intake_supports_update_action()
+        self._stage_update_intake_button.setVisible(update_like_selection)
+        self._stage_update_intake_button.setEnabled(update_like_selection)
+        if update_like_selection:
+            self._stage_update_intake_button.setToolTip(
+                "Stage this detected package as an update and preselect archive-aware replace."
+            )
+            return
+        self._stage_update_intake_button.setToolTip(
+            "Select a detected package that clearly replaces an installed mod to stage it as an update."
+        )
 
     def _refresh_staged_package_preview(self) -> None:
         package_path = self._zip_path_input.text().strip()
@@ -4207,13 +4263,54 @@ class MainWindow(QMainWindow):
         self._staged_package_label.setText(package_path)
         self._staged_package_label.setToolTip(package_path)
 
-    def _stage_package_for_plan_install(self, package_path: str, *, status_message: str) -> None:
+    def _stage_package_for_plan_install(
+        self,
+        package_path: str,
+        *,
+        status_message: str,
+        apply_update_intent: bool = False,
+    ) -> None:
         self._set_selected_zip_package_paths((Path(package_path),), current_path=Path(package_path))
+        if apply_update_intent:
+            self._apply_auto_overwrite_intent_for_package(package_path)
+        else:
+            self._sync_auto_overwrite_intent_with_staged_package(package_path)
         self._refresh_staged_package_preview()
         self._refresh_stage_package_action_state()
         self._set_intake_output_text(status_message)
         self._context_tabs.setCurrentWidget(self._plan_install_tab)
         self._set_status(status_message)
+
+    def _on_overwrite_checkbox_toggled(self, _: bool) -> None:
+        if self._syncing_auto_overwrite_checkbox:
+            return
+        self._auto_overwrite_package_path = None
+
+    def _apply_auto_overwrite_intent_for_package(self, package_path: str) -> None:
+        self._auto_overwrite_package_path = self._normalized_package_path_text(package_path)
+        self._set_overwrite_checkbox_checked(True)
+
+    def _sync_auto_overwrite_intent_with_staged_package(self, package_path: str) -> None:
+        if self._auto_overwrite_package_path is None:
+            return
+        normalized_path = self._normalized_package_path_text(package_path)
+        if normalized_path and normalized_path == self._auto_overwrite_package_path:
+            return
+        self._auto_overwrite_package_path = None
+        self._set_overwrite_checkbox_checked(False)
+
+    def _set_overwrite_checkbox_checked(self, checked: bool) -> None:
+        if self._overwrite_checkbox.isChecked() == checked:
+            return
+        self._syncing_auto_overwrite_checkbox = True
+        try:
+            self._overwrite_checkbox.setChecked(checked)
+        finally:
+            self._syncing_auto_overwrite_checkbox = False
+
+    @staticmethod
+    def _normalized_package_path_text(package_path: str) -> str:
+        return str(Path(package_path).expanduser()) if package_path.strip() else ""
 
     def _selected_discovery_correlation(self) -> DiscoveryContextCorrelation | None:
         row = self._discovery_table.currentRow()
@@ -4302,6 +4399,28 @@ class MainWindow(QMainWindow):
             for index, correlation in enumerate(self._intake_correlations)
             if correlation.actionable and correlation.matched_guided_update_unique_ids
         ]
+
+    def _refresh_detected_intakes_for_current_inventory(self) -> None:
+        if not self._detected_intakes:
+            self._intake_correlations = tuple()
+            self._refresh_intake_selector()
+            return
+
+        self._detected_intakes = self._shell_service.refresh_detected_intakes_against_inventory(
+            intakes=self._detected_intakes,
+            inventory=self._current_inventory,
+        )
+        self._recompute_intake_correlations()
+
+    def _selected_intake_supports_update_action(self) -> bool:
+        correlation = self._selected_intake_correlation()
+        if correlation is None or not correlation.actionable:
+            return False
+        return bool(
+            correlation.matched_guided_update_unique_ids
+            or correlation.matched_update_available_unique_ids
+            or correlation.intake.classification == "update_replace_candidate"
+        )
 
     @staticmethod
     def _scan_target_label(target: str) -> str:

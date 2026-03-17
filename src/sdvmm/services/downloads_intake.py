@@ -29,7 +29,7 @@ def poll_watched_directory(
 
     intakes: list[DownloadsIntakeResult] = []
     for package_path in new_paths:
-        intakes.append(_inspect_new_package(package_path=package_path, inventory=inventory))
+        intakes.append(inspect_downloads_intake_package(package_path=package_path, inventory=inventory))
 
     return DownloadsWatchPollResult(
         watched_path=watched_path,
@@ -38,7 +38,9 @@ def poll_watched_directory(
     )
 
 
-def _inspect_new_package(package_path: Path, inventory: ModsInventory) -> DownloadsIntakeResult:
+def inspect_downloads_intake_package(
+    *, package_path: Path, inventory: ModsInventory
+) -> DownloadsIntakeResult:
     try:
         inspection = inspect_zip_package(package_path)
     except Exception as exc:
