@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -75,6 +76,7 @@ from sdvmm.app.shell_service import (
     SandboxModsPromotionResult,
     SandboxModsSyncResult,
     build_backup_bundle_export_text,
+    build_mods_compare_text,
 )
 from sdvmm.domain.models import (
     AppConfig,
@@ -86,6 +88,7 @@ from sdvmm.domain.models import (
     InstallRecoveryExecutionResult,
     InstallRecoveryInspectionResult,
     ModDiscoveryResult,
+    ModsCompareResult,
     ArchiveRestoreResult,
     ArchiveDeleteResult,
     ArchivedModEntry,
@@ -163,6 +166,7 @@ class MainWindow(QMainWindow):
         self._pending_install_plan: SandboxInstallPlan | None = None
         self._current_inventory: ModsInventory | None = None
         self._current_update_report: ModUpdateReport | None = None
+        self._current_mods_compare_result: ModsCompareResult | None = None
         self._current_discovery_result: ModDiscoveryResult | None = None
         self._discovery_correlations: tuple[DiscoveryContextCorrelation, ...] = tuple()
         self._known_watched_zip_paths: tuple[Path, ...] = tuple()
@@ -327,6 +331,38 @@ class MainWindow(QMainWindow):
         inventory_sandbox_sync_actions_layout.addWidget(self._promote_selected_to_real_button)
         inventory_sandbox_sync_actions_layout.addStretch(1)
         self._inventory_sandbox_sync_actions_widget.setVisible(False)
+        self._compare_real_vs_sandbox_button = QPushButton("Compare real vs sandbox")
+        self._compare_real_vs_sandbox_button.setObjectName("compare_run_button")
+        _set_primary_button_style(self._compare_real_vs_sandbox_button)
+        self._compare_summary_label = QLabel(
+            "Run compare to see drift between the configured real Mods path and sandbox Mods path."
+        )
+        self._compare_summary_label.setObjectName("compare_summary_label")
+        self._compare_summary_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._compare_summary_label)
+        self._compare_summary_label.setToolTip(
+            "Run compare after changing either Mods path or archive exclusion path."
+        )
+        self._compare_results_table = QTableWidget(0, 5)
+        self._compare_results_table.setObjectName("compare_results_table")
+        self._compare_results_table.setHorizontalHeaderLabels(
+            ["Mod", "Compare", "Real ver.", "Sandbox ver.", "Notes"]
+        )
+        self._compare_results_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._compare_results_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._compare_results_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._compare_results_table.verticalHeader().setDefaultSectionSize(20)
+        self._compare_results_table.verticalHeader().setVisible(False)
+        self._compare_results_table.setAlternatingRowColors(True)
+        self._compare_results_table.setSortingEnabled(True)
+        compare_header = self._compare_results_table.horizontalHeader()
+        compare_header.setMinimumSectionSize(64)
+        compare_header.setStretchLastSection(False)
+        compare_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        compare_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        compare_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        compare_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        compare_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self._open_remote_page_button = QPushButton("Open remote page")
         self._open_remote_page_button.setObjectName("inventory_open_remote_page_button")
         self._open_remote_page_button.setEnabled(False)
@@ -587,8 +623,10 @@ class MainWindow(QMainWindow):
         self._sandbox_mods_path_input.textChanged.connect(self._invalidate_pending_plan)
         self._sandbox_archive_path_input.textChanged.connect(self._invalidate_pending_plan)
         self._sandbox_archive_path_input.textChanged.connect(self._refresh_install_safety_panel)
+        self._sandbox_archive_path_input.textChanged.connect(self._clear_mods_compare_result)
         self._real_archive_path_input.textChanged.connect(self._invalidate_pending_plan)
         self._real_archive_path_input.textChanged.connect(self._refresh_install_safety_panel)
+        self._real_archive_path_input.textChanged.connect(self._clear_mods_compare_result)
         self._real_archive_path_input.textChanged.connect(
             self._refresh_inventory_sandbox_sync_action_state
         )
@@ -604,12 +642,14 @@ class MainWindow(QMainWindow):
         self._mods_path_input.textChanged.connect(self._refresh_install_destination_preview)
         self._mods_path_input.textChanged.connect(self._refresh_sandbox_dev_launch_state)
         self._mods_path_input.textChanged.connect(self._refresh_inventory_sandbox_sync_action_state)
+        self._mods_path_input.textChanged.connect(self._clear_mods_compare_result)
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_scan_context_preview)
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_install_destination_preview)
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_sandbox_dev_launch_state)
         self._sandbox_mods_path_input.textChanged.connect(
             self._refresh_inventory_sandbox_sync_action_state
         )
+        self._sandbox_mods_path_input.textChanged.connect(self._clear_mods_compare_result)
         self._game_path_input.textChanged.connect(self._refresh_sandbox_dev_launch_state)
         self._watched_downloads_path_input.textChanged.connect(self._on_watched_path_changed)
         self._secondary_watched_downloads_path_input.textChanged.connect(
@@ -909,6 +949,30 @@ class MainWindow(QMainWindow):
         )
         context_tabs.addTab(discovery_tab, "Discovery")
 
+        compare_tab = QWidget()
+        compare_tab.setObjectName("compare_tab")
+        compare_layout = QVBoxLayout(compare_tab)
+        compare_layout.setContentsMargins(6, 6, 6, 6)
+        compare_layout.setSpacing(6)
+        compare_intro_label = QLabel(
+            "Compare configured real Mods and sandbox Mods by UniqueID before sync or promotion."
+        )
+        compare_intro_label.setObjectName("compare_intro_label")
+        compare_intro_label.setWordWrap(True)
+        _set_auxiliary_label_style(compare_intro_label)
+        compare_layout.addWidget(compare_intro_label)
+        compare_actions_widget = QWidget()
+        compare_actions_layout = QHBoxLayout(compare_actions_widget)
+        compare_actions_layout.setContentsMargins(0, 0, 0, 0)
+        compare_actions_layout.setSpacing(6)
+        compare_actions_layout.addWidget(self._compare_real_vs_sandbox_button)
+        compare_actions_layout.addStretch(1)
+        compare_layout.addWidget(compare_actions_widget)
+        compare_layout.addWidget(self._compare_summary_label)
+        compare_layout.addWidget(self._compare_results_table, 1)
+        self._compare_real_vs_sandbox_button.clicked.connect(self._on_compare_real_and_sandbox)
+        context_tabs.addTab(compare_tab, "Compare")
+
         intake_tab = QWidget()
         intake_layout = QVBoxLayout(intake_tab)
         intake_layout.setContentsMargins(6, 6, 6, 6)
@@ -1189,6 +1253,7 @@ class MainWindow(QMainWindow):
             self._refresh_archives_button,
             self._restore_archived_button,
             self._delete_archived_button,
+            self._compare_real_vs_sandbox_button,
             self._launch_vanilla_button,
             self._launch_smapi_button,
             self._launch_sandbox_dev_button,
@@ -1610,6 +1675,30 @@ class MainWindow(QMainWindow):
         self._render_inventory(result.inventory)
         self._set_scan_context(result.scan_path, self._scan_target_label(result.target_kind))
         self._set_status(f"Scan complete: {len(result.inventory.mods)} mods")
+
+    def _on_compare_real_and_sandbox(self) -> None:
+        self._run_background_operation(
+            operation_name="Compare real vs sandbox",
+            running_label="Compare real vs sandbox",
+            started_status="Comparing configured real Mods against sandbox Mods...",
+            error_title="Compare failed",
+            task_fn=lambda: self._shell_service.compare_real_and_sandbox_mods(
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
+            ),
+            on_success=self._on_compare_real_and_sandbox_completed,
+        )
+
+    def _on_compare_real_and_sandbox_completed(self, result: ModsCompareResult) -> None:
+        self._current_mods_compare_result = result
+        self._render_mods_compare_result(result)
+        self._set_details_text(build_mods_compare_text(result))
+        self._set_status(
+            f"Compare complete: {len(result.entries)} row(s) across real and sandbox Mods."
+        )
 
     def _on_inspect_zip(self) -> None:
         selected_paths = self._selected_zip_package_paths
@@ -3008,6 +3097,31 @@ class MainWindow(QMainWindow):
         self._apply_archive_filter()
         self._on_archive_selection_changed()
 
+    def _render_mods_compare_result(self, result: ModsCompareResult) -> None:
+        was_sorting = self._compare_results_table.isSortingEnabled()
+        self._compare_results_table.setSortingEnabled(False)
+        self._compare_results_table.setRowCount(len(result.entries))
+
+        for row, entry in enumerate(result.entries):
+            real_version = entry.real_mod.version if entry.real_mod is not None else "-"
+            sandbox_version = entry.sandbox_mod.version if entry.sandbox_mod is not None else "-"
+            note_text = entry.note or "-"
+            self._compare_results_table.setItem(row, 0, QTableWidgetItem(entry.name))
+            self._compare_results_table.setItem(
+                row,
+                1,
+                QTableWidgetItem(_mods_compare_state_label(entry.state)),
+            )
+            self._compare_results_table.setItem(row, 2, QTableWidgetItem(real_version))
+            self._compare_results_table.setItem(row, 3, QTableWidgetItem(sandbox_version))
+            note_item = QTableWidgetItem(note_text)
+            note_item.setToolTip(note_text if entry.note else "")
+            self._compare_results_table.setItem(row, 4, note_item)
+
+        self._compare_results_table.setSortingEnabled(was_sorting)
+        self._compare_summary_label.setText(_mods_compare_summary_text(result))
+        self._compare_summary_label.setToolTip(build_mods_compare_text(result))
+
     def _set_status(self, text: str) -> None:
         self._status_strip_label.setText(text)
         self._status_strip_label.setToolTip(text)
@@ -3148,6 +3262,16 @@ class MainWindow(QMainWindow):
 
     def _set_intake_output_text(self, text: str) -> None:
         self._set_details_text(text)
+
+    def _clear_mods_compare_result(self, *_: object) -> None:
+        self._current_mods_compare_result = None
+        self._compare_results_table.setRowCount(0)
+        self._compare_summary_label.setText(
+            "Run compare to see drift between the configured real Mods path and sandbox Mods path."
+        )
+        self._compare_summary_label.setToolTip(
+            "Run compare after changing either Mods path or archive exclusion path."
+        )
 
     def _set_plan_install_output_text(self, text: str) -> None:
         self._set_details_text(text)
@@ -5206,6 +5330,35 @@ def _archive_source_summary_label(source_kind: str) -> str:
     if source_kind == ARCHIVE_SOURCE_SANDBOX:
         return "Sandbox archive"
     return source_kind.replace("_", " ").title()
+
+
+def _mods_compare_state_label(state: str) -> str:
+    labels = {
+        "only_in_real": "Only in real",
+        "only_in_sandbox": "Only in sandbox",
+        "same_version": "Same version",
+        "version_mismatch": "Version mismatch",
+        "ambiguous_match": "Ambiguous",
+    }
+    return labels.get(state, state.replace("_", " ").title())
+
+
+def _mods_compare_summary_text(result: ModsCompareResult) -> str:
+    counts = Counter(entry.state for entry in result.entries)
+    summary = (
+        "Last compare: "
+        f"{counts.get('only_in_real', 0)} only in real, "
+        f"{counts.get('only_in_sandbox', 0)} only in sandbox, "
+        f"{counts.get('same_version', 0)} same version, "
+        f"{counts.get('version_mismatch', 0)} version mismatch, "
+        f"{counts.get('ambiguous_match', 0)} ambiguous."
+    )
+    parse_warning_total = (
+        len(result.real_inventory.parse_warnings) + len(result.sandbox_inventory.parse_warnings)
+    )
+    if parse_warning_total:
+        summary += f" Additional scan warnings: {parse_warning_total}."
+    return summary
 
 
 def _summarize_details_text(text: str) -> tuple[str, str]:

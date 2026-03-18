@@ -172,6 +172,34 @@ class ModUpdateReport:
     statuses: tuple[ModUpdateStatus, ...]
 
 
+ModsCompareState = Literal[
+    "only_in_real",
+    "only_in_sandbox",
+    "same_version",
+    "version_mismatch",
+    "ambiguous_match",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ModsCompareEntry:
+    match_key: str
+    name: str
+    state: ModsCompareState
+    real_mod: InstalledMod | None
+    sandbox_mod: InstalledMod | None
+    note: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModsCompareResult:
+    real_mods_path: Path
+    sandbox_mods_path: Path
+    real_inventory: "ModsInventory"
+    sandbox_inventory: "ModsInventory"
+    entries: tuple[ModsCompareEntry, ...]
+
+
 UpdateSourceIntentState = Literal[
     "local_private_mod",
     "no_tracking",

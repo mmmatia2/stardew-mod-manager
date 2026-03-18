@@ -75,6 +75,10 @@ Live Mods safety expectations:
   - explicit selected-mod `sandbox -> real` promotion
   - promotion preview/review with explicit confirmation for live writes
   - archive-aware replace on live-target conflicts (no blind overwrite)
+- **Real vs sandbox compare view**
+  - dedicated compare tab for drift visibility before sync/promotion decisions
+  - clear first-pass categories: only in real, only in sandbox, same version, version mismatch, ambiguous match
+  - compare is visibility-first in this baseline (no compare-driven write actions)
 
 ## Manual source guidance
 
@@ -150,7 +154,7 @@ You can still run focused suites when iterating:
 .\.venv\Scripts\python.exe -m pytest tests\unit\test_main_window_gui_regression.py -q
 ```
 
-### 4) Build Windows portable folder (`0.3.1`)
+### 4) Build Windows portable folder (`0.4.0`)
 
 Packaging baseline in this repo uses **PyInstaller one-folder** output because it is the smallest practical Windows desktop packaging path here without introducing installer/signing work.
 
@@ -169,13 +173,13 @@ Build the portable folder:
 Output folder:
 
 ```text
-dist\stardew-mod-manager-0.3.1-windows-portable\
+dist\stardew-mod-manager-0.4.0-windows-portable\
 ```
 
 Launch the packaged app:
 
 ```powershell
-.\dist\stardew-mod-manager-0.3.1-windows-portable\Stardew Mod Manager.exe
+.\dist\stardew-mod-manager-0.4.0-windows-portable\Stardew Mod Manager.exe
 ```
 
 Current caveats:
@@ -194,7 +198,7 @@ Current caveats:
 - no packaging/installer/release hardening yet
 - no cross-platform polish emphasis yet (Windows workflow is the primary dev path)
 - restore/import workflow is still deferred; the current backup foundation is export-first
-- near-term usability priorities still pending: fuller backup restore/migration workflow, real-vs-sandbox compare view, and Steam prelaunch best-effort behavior
+- near-term usability priorities still pending: fuller backup restore/migration workflow, Steam prelaunch best-effort behavior, and richer compare follow-up (for example compare-driven convenience actions) beyond the current visibility-first baseline
 
 ## Data and persistence notes
 

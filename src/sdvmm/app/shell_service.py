@@ -22,6 +22,7 @@ from sdvmm.domain.models import (
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
     GameEnvironmentStatus,
+    InstalledMod,
     InstallExecutionActionCount,
     InstallExecutionReview,
     InstallExecutionSummary,
@@ -40,6 +41,8 @@ from sdvmm.domain.models import (
     RecoveryExecutionRecord,
     ModDiscoveryEntry,
     ModDiscoveryResult,
+    ModsCompareEntry,
+    ModsCompareResult,
     ModRemovalPlan,
     ModRemovalResult,
     ModRollbackPlan,
@@ -1567,6 +1570,50 @@ class AppShellService:
             raise AppShellError(f"Could not scan selected target: {exc}") from exc
 
         return ScanResult(target_kind=scan_target, scan_path=scan_path, inventory=inventory)
+
+    def compare_real_and_sandbox_mods(
+        self,
+        *,
+        configured_mods_path_text: str,
+        sandbox_mods_path_text: str,
+        real_archive_path_text: str = "",
+        sandbox_archive_path_text: str = "",
+        existing_config: AppConfig | None = None,
+    ) -> ModsCompareResult:
+        real_mods_path = self._parse_and_validate_mods_path(configured_mods_path_text)
+        sandbox_mods_path = self._parse_and_validate_sandbox_mods_path(sandbox_mods_path_text)
+        real_excluded_paths = self._resolve_scan_excluded_paths(
+            scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+            scan_path=real_mods_path,
+            configured_archive_text=real_archive_path_text,
+            configured_archive_fallback=(
+                existing_config.real_archive_path if existing_config is not None else None
+            ),
+        )
+        sandbox_excluded_paths = self._resolve_scan_excluded_paths(
+            scan_target=SCAN_TARGET_SANDBOX_MODS,
+            scan_path=sandbox_mods_path,
+            configured_archive_text=sandbox_archive_path_text,
+            configured_archive_fallback=(
+                existing_config.sandbox_archive_path if existing_config is not None else None
+            ),
+        )
+
+        try:
+            real_inventory = scan_mods_directory(real_mods_path, excluded_paths=real_excluded_paths)
+            sandbox_inventory = scan_mods_directory(
+                sandbox_mods_path,
+                excluded_paths=sandbox_excluded_paths,
+            )
+        except OSError as exc:
+            raise AppShellError(f"Could not compare real and sandbox Mods: {exc}") from exc
+
+        return _build_mods_compare_result(
+            real_mods_path=real_mods_path,
+            sandbox_mods_path=sandbox_mods_path,
+            real_inventory=real_inventory,
+            sandbox_inventory=sandbox_inventory,
+        )
 
     def inspect_zip(self, package_path_text: str) -> PackageInspectionResult:
         package_path = self._parse_and_validate_zip_path(package_path_text)
@@ -3982,6 +4029,107 @@ def _sorted_unique_ids(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(unique, key=str.casefold))
 
 
+def _build_mods_compare_result(
+    *,
+    real_mods_path: Path,
+    sandbox_mods_path: Path,
+    real_inventory: ModsInventory,
+    sandbox_inventory: ModsInventory,
+) -> ModsCompareResult:
+    real_groups = _group_installed_mods_for_compare(real_inventory.mods)
+    sandbox_groups = _group_installed_mods_for_compare(sandbox_inventory.mods)
+    all_keys = sorted(set(real_groups) | set(sandbox_groups), key=str.casefold)
+    entries: list[ModsCompareEntry] = []
+
+    for key in all_keys:
+        real_group = real_groups.get(key, tuple())
+        sandbox_group = sandbox_groups.get(key, tuple())
+        if len(real_group) > 1 or len(sandbox_group) > 1:
+            reference_mod = (real_group or sandbox_group)[0]
+            notes: list[str] = []
+            if len(real_group) > 1:
+                notes.append(f"real Mods has {len(real_group)} folders with this UniqueID")
+            if len(sandbox_group) > 1:
+                notes.append(f"sandbox Mods has {len(sandbox_group)} folders with this UniqueID")
+            entries.append(
+                ModsCompareEntry(
+                    match_key=key,
+                    name=reference_mod.name,
+                    state="ambiguous_match",
+                    real_mod=real_group[0] if real_group else None,
+                    sandbox_mod=sandbox_group[0] if sandbox_group else None,
+                    note=". ".join(notes) + ".",
+                )
+            )
+            continue
+
+        real_mod = real_group[0] if real_group else None
+        sandbox_mod = sandbox_group[0] if sandbox_group else None
+        reference_mod = real_mod or sandbox_mod
+        assert reference_mod is not None
+
+        if real_mod is None:
+            state = "only_in_sandbox"
+        elif sandbox_mod is None:
+            state = "only_in_real"
+        elif real_mod.version == sandbox_mod.version:
+            state = "same_version"
+        else:
+            state = "version_mismatch"
+
+        entries.append(
+            ModsCompareEntry(
+                match_key=key,
+                name=reference_mod.name,
+                state=state,
+                real_mod=real_mod,
+                sandbox_mod=sandbox_mod,
+            )
+        )
+
+    return ModsCompareResult(
+        real_mods_path=real_mods_path,
+        sandbox_mods_path=sandbox_mods_path,
+        real_inventory=real_inventory,
+        sandbox_inventory=sandbox_inventory,
+        entries=tuple(entries),
+    )
+
+
+def _group_installed_mods_for_compare(
+    mods: tuple[InstalledMod, ...],
+) -> dict[str, tuple[InstalledMod, ...]]:
+    grouped: dict[str, list[InstalledMod]] = {}
+    for mod in mods:
+        key = canonicalize_unique_id(mod.unique_id)
+        if not key:
+            continue
+        grouped.setdefault(key, []).append(mod)
+    return {
+        key: tuple(
+            sorted(
+                group,
+                key=lambda entry: (entry.name.casefold(), str(entry.folder_path).casefold()),
+            )
+        )
+        for key, group in grouped.items()
+    }
+
+
+def _mods_compare_state_label(state: str) -> str:
+    if state == "only_in_real":
+        return "only in real"
+    if state == "only_in_sandbox":
+        return "only in sandbox"
+    if state == "same_version":
+        return "same version"
+    if state == "version_mismatch":
+        return "version mismatch"
+    if state == "ambiguous_match":
+        return "ambiguous match"
+    return state
+
+
 def _require_canonical_unique_id(unique_id: str) -> str:
     normalized = canonicalize_unique_id(unique_id)
     if not normalized:
@@ -4210,6 +4358,42 @@ def _remove_path_for_promotion_rollback(path: Path) -> None:
         shutil.rmtree(path)
         return
     path.unlink()
+
+
+def build_mods_compare_text(result: ModsCompareResult) -> str:
+    counts = Counter(entry.state for entry in result.entries)
+    lines = [
+        "Real vs sandbox Mods compare",
+        f"Real Mods path: {result.real_mods_path}",
+        f"Sandbox Mods path: {result.sandbox_mods_path}",
+        f"Only in real: {counts.get('only_in_real', 0)}",
+        f"Only in sandbox: {counts.get('only_in_sandbox', 0)}",
+        f"Same version: {counts.get('same_version', 0)}",
+        f"Version mismatch: {counts.get('version_mismatch', 0)}",
+        f"Ambiguous match: {counts.get('ambiguous_match', 0)}",
+    ]
+    parse_warning_total = (
+        len(result.real_inventory.parse_warnings) + len(result.sandbox_inventory.parse_warnings)
+    )
+    if parse_warning_total:
+        lines.append(
+            f"Additional scan warnings outside direct compare rows: {parse_warning_total}"
+        )
+
+    lines.extend(("", "Compared rows:"))
+    if not result.entries:
+        lines.append("- No installed mods were found in either location.")
+        return "\n".join(lines)
+
+    for entry in result.entries:
+        real_version = entry.real_mod.version if entry.real_mod is not None else "-"
+        sandbox_version = entry.sandbox_mod.version if entry.sandbox_mod is not None else "-"
+        note = f" | {entry.note}" if entry.note else ""
+        lines.append(
+            f"- {entry.name} [{_mods_compare_state_label(entry.state)}] "
+            f"real={real_version} sandbox={sandbox_version}{note}"
+        )
+    return "\n".join(lines)
 
 
 def build_backup_bundle_export_text(result: BackupBundleExportResult) -> str:

@@ -18,8 +18,9 @@ The goal is not to restate the whole codebase. The goal is to give enough high-s
 - Entry point: `sdvmm-ui` -> [`src/sdvmm/app/main.py`](/Users/darth/Projects/stardew-mod-manager/src/sdvmm/app/main.py)
 - Current validation baseline:
   - `.\.venv\Scripts\python.exe -m pytest tests\unit -q`
-  - latest verified result in this thread: `439 passed, 1 skipped`
+  - latest verified result in this thread: `457 passed, 1 skipped`
   - UI startup smoke also passes offscreen
+- Shipped baseline in this brief: `0.4.0` (includes real-vs-sandbox compare visibility baseline)
 - Product posture:
   - local-first
   - safe-by-default
@@ -46,11 +47,12 @@ The app is no longer just a scanner. It now has a coherent local workflow:
 13. launch Stardew/SMAPI against sandbox Mods only
 14. sync selected real Mods into sandbox Mods
 15. promote selected sandbox Mods into real Mods through an explicit managed flow
+16. compare configured real Mods vs sandbox Mods in a dedicated drift view before sync/promotion decisions
 
 The product is not feature-complete for public release, but it is materially beyond prototype state.
 
 The near-term product direction now explicitly includes a mod-development workflow, not only general end-user mod management.
-The current private-testing build includes the first multi-zip intake step and second watcher-path intake convenience, but intentionally stops short of blind multi-package planning/install behavior.
+The current private-testing build includes the first multi-zip intake step, second watcher-path intake convenience, and a visibility-first real-vs-sandbox compare baseline, while intentionally stopping short of blind multi-package planning/install behavior and compare-driven write shortcuts.
 
 ## Current Architecture
 
@@ -254,33 +256,47 @@ Current recommendation:
 - use private testing to validate whether batch inspection + single-package staging feels clear enough before expanding planner semantics
 - preserve explicit plan review as a non-negotiable constraint for any later multi-package work
 
+#### 7. Real vs Sandbox Compare Baseline
+
+Implemented for `0.4.0`:
+
+- dedicated compare surface for configured real Mods vs sandbox Mods
+- baseline drift categories:
+  - only in real
+  - only in sandbox
+  - same version
+  - version mismatch
+  - ambiguous match
+- compare is intentionally visibility-first in this stage (no compare-driven write behavior)
+
 ### Next likely phases (real-world usability first)
 
-#### 7. Session Persistence Ergonomics
+#### 8. Session Persistence Ergonomics
 
 - reduce repeat setup/re-orientation cost across launches
 - preserve safe, explicit workflow semantics
 
-#### 8. Backup / Restore / Migration Foundation
+#### 9. Backup / Restore / Migration Foundation
 
 - user-facing backup/export and restore/import baseline
 - practical migration safety for private testing across machines
-
-#### 9. Real vs Sandbox Compare View
-
-- explicit compare surface to guide promotion decisions and reduce mistakes
 
 #### 10. Steam Prelaunch Best-Effort Behavior
 
 - pragmatic Steam-aware launch assistance without promising guaranteed automation
 
+#### 11. Compare Follow-up (deferred after baseline ship)
+
+- possible richer compare ergonomics after safety semantics are explicitly approved
+- keep baseline compare visibility trustworthy and avoid implicit write shortcuts
+
 ### Later planned phase
 
-#### 11. Information Architecture Follow-up
+#### 12. Information Architecture Follow-up
 
 The UI simplification track is now intentionally paused until sandbox-dev workflow trust work is no longer the main blocker.
 
-#### 12. Visual Feedback and Polish
+#### 13. Visual Feedback and Polish
 
 Icon/taskbar refinement remains a lower-priority polish item compared with session, backup/migration, compare, and Steam prelaunch usability.
 

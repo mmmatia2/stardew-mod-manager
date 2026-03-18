@@ -52,6 +52,8 @@ from sdvmm.domain.models import InstallOperationEntryRecord
 from sdvmm.domain.models import InstallOperationRecord
 from sdvmm.domain.models import ModDiscoveryEntry
 from sdvmm.domain.models import ModDiscoveryResult
+from sdvmm.domain.models import ModsCompareEntry
+from sdvmm.domain.models import ModsCompareResult
 from sdvmm.domain.models import ModUpdateReport
 from sdvmm.domain.models import ModUpdateStatus
 from sdvmm.domain.models import ModsInventory
@@ -4081,6 +4083,283 @@ def test_main_window_discovery_surface_key_controls_exist(
     assert main_window._discovery_filter_input is discovery_filter_input
     assert main_window._discovery_table is discovery_table
     assert main_window._search_mods_button is discovery_search_button
+
+
+def test_main_window_compare_surface_has_expected_structure(
+    main_window: MainWindow,
+) -> None:
+    context_tabs = main_window._context_tabs
+    compare_tab = main_window.findChild(QWidget, "compare_tab")
+    compare_button = main_window.findChild(QPushButton, "compare_run_button")
+    compare_table = main_window.findChild(QTableWidget, "compare_results_table")
+    compare_summary = main_window.findChild(QLabel, "compare_summary_label")
+
+    assert context_tabs is not None
+    assert isinstance(context_tabs, QTabWidget)
+    assert compare_tab is not None
+    assert compare_button is not None
+    assert compare_table is not None
+    assert compare_summary is not None
+
+    tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
+    assert "Compare" in tab_labels
+    assert context_tabs.indexOf(compare_tab) >= 0
+    assert main_window._compare_real_vs_sandbox_button is compare_button
+    assert main_window._compare_results_table is compare_table
+    assert main_window._compare_summary_label is compare_summary
+
+
+def test_main_window_compare_action_renders_real_vs_sandbox_drift(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    qapp: QApplication,
+) -> None:
+    compare_button = main_window.findChild(QPushButton, "compare_run_button")
+    compare_tab = main_window.findChild(QWidget, "compare_tab")
+    captured: dict[str, object] = {}
+    result = ModsCompareResult(
+        real_mods_path=Path(r"C:\Game\Mods"),
+        sandbox_mods_path=Path(r"C:\Sandbox\Mods"),
+        real_inventory=_mods_inventory(
+            InstalledMod(
+                unique_id="Sample.RealOnly",
+                name="Real Only",
+                version="1.0.0",
+                folder_path=Path(r"C:\Game\Mods\RealOnly"),
+                manifest_path=Path(r"C:\Game\Mods\RealOnly\manifest.json"),
+                dependencies=tuple(),
+            ),
+            InstalledMod(
+                unique_id="Sample.Same",
+                name="Same Mod",
+                version="1.1.0",
+                folder_path=Path(r"C:\Game\Mods\SameMod"),
+                manifest_path=Path(r"C:\Game\Mods\SameMod\manifest.json"),
+                dependencies=tuple(),
+            ),
+            InstalledMod(
+                unique_id="Sample.Mismatch",
+                name="Mismatch Mod",
+                version="1.0.0",
+                folder_path=Path(r"C:\Game\Mods\MismatchMod"),
+                manifest_path=Path(r"C:\Game\Mods\MismatchMod\manifest.json"),
+                dependencies=tuple(),
+            ),
+            InstalledMod(
+                unique_id="Sample.Ambiguous",
+                name="Ambiguous Mod",
+                version="1.0.0",
+                folder_path=Path(r"C:\Game\Mods\AmbiguousA"),
+                manifest_path=Path(r"C:\Game\Mods\AmbiguousA\manifest.json"),
+                dependencies=tuple(),
+            ),
+        ),
+        sandbox_inventory=_mods_inventory(
+            InstalledMod(
+                unique_id="Sample.SandboxOnly",
+                name="Sandbox Only",
+                version="2.0.0",
+                folder_path=Path(r"C:\Sandbox\Mods\SandboxOnly"),
+                manifest_path=Path(r"C:\Sandbox\Mods\SandboxOnly\manifest.json"),
+                dependencies=tuple(),
+            ),
+            InstalledMod(
+                unique_id="Sample.Same",
+                name="Same Mod",
+                version="1.1.0",
+                folder_path=Path(r"C:\Sandbox\Mods\SameMod"),
+                manifest_path=Path(r"C:\Sandbox\Mods\SameMod\manifest.json"),
+                dependencies=tuple(),
+            ),
+            InstalledMod(
+                unique_id="Sample.Mismatch",
+                name="Mismatch Mod",
+                version="2.0.0",
+                folder_path=Path(r"C:\Sandbox\Mods\MismatchMod"),
+                manifest_path=Path(r"C:\Sandbox\Mods\MismatchMod\manifest.json"),
+                dependencies=tuple(),
+            ),
+            InstalledMod(
+                unique_id="Sample.Ambiguous",
+                name="Ambiguous Mod",
+                version="1.1.0",
+                folder_path=Path(r"C:\Sandbox\Mods\AmbiguousB"),
+                manifest_path=Path(r"C:\Sandbox\Mods\AmbiguousB\manifest.json"),
+                dependencies=tuple(),
+            ),
+        ),
+        entries=(
+            ModsCompareEntry(
+                match_key="sample.realonly",
+                name="Real Only",
+                state="only_in_real",
+                real_mod=InstalledMod(
+                    unique_id="Sample.RealOnly",
+                    name="Real Only",
+                    version="1.0.0",
+                    folder_path=Path(r"C:\Game\Mods\RealOnly"),
+                    manifest_path=Path(r"C:\Game\Mods\RealOnly\manifest.json"),
+                    dependencies=tuple(),
+                ),
+                sandbox_mod=None,
+            ),
+            ModsCompareEntry(
+                match_key="sample.sandboxonly",
+                name="Sandbox Only",
+                state="only_in_sandbox",
+                real_mod=None,
+                sandbox_mod=InstalledMod(
+                    unique_id="Sample.SandboxOnly",
+                    name="Sandbox Only",
+                    version="2.0.0",
+                    folder_path=Path(r"C:\Sandbox\Mods\SandboxOnly"),
+                    manifest_path=Path(r"C:\Sandbox\Mods\SandboxOnly\manifest.json"),
+                    dependencies=tuple(),
+                ),
+            ),
+            ModsCompareEntry(
+                match_key="sample.same",
+                name="Same Mod",
+                state="same_version",
+                real_mod=InstalledMod(
+                    unique_id="Sample.Same",
+                    name="Same Mod",
+                    version="1.1.0",
+                    folder_path=Path(r"C:\Game\Mods\SameMod"),
+                    manifest_path=Path(r"C:\Game\Mods\SameMod\manifest.json"),
+                    dependencies=tuple(),
+                ),
+                sandbox_mod=InstalledMod(
+                    unique_id="Sample.Same",
+                    name="Same Mod",
+                    version="1.1.0",
+                    folder_path=Path(r"C:\Sandbox\Mods\SameMod"),
+                    manifest_path=Path(r"C:\Sandbox\Mods\SameMod\manifest.json"),
+                    dependencies=tuple(),
+                ),
+            ),
+            ModsCompareEntry(
+                match_key="sample.mismatch",
+                name="Mismatch Mod",
+                state="version_mismatch",
+                real_mod=InstalledMod(
+                    unique_id="Sample.Mismatch",
+                    name="Mismatch Mod",
+                    version="1.0.0",
+                    folder_path=Path(r"C:\Game\Mods\MismatchMod"),
+                    manifest_path=Path(r"C:\Game\Mods\MismatchMod\manifest.json"),
+                    dependencies=tuple(),
+                ),
+                sandbox_mod=InstalledMod(
+                    unique_id="Sample.Mismatch",
+                    name="Mismatch Mod",
+                    version="2.0.0",
+                    folder_path=Path(r"C:\Sandbox\Mods\MismatchMod"),
+                    manifest_path=Path(r"C:\Sandbox\Mods\MismatchMod\manifest.json"),
+                    dependencies=tuple(),
+                ),
+            ),
+            ModsCompareEntry(
+                match_key="sample.ambiguous",
+                name="Ambiguous Mod",
+                state="ambiguous_match",
+                real_mod=InstalledMod(
+                    unique_id="Sample.Ambiguous",
+                    name="Ambiguous Mod",
+                    version="1.0.0",
+                    folder_path=Path(r"C:\Game\Mods\AmbiguousA"),
+                    manifest_path=Path(r"C:\Game\Mods\AmbiguousA\manifest.json"),
+                    dependencies=tuple(),
+                ),
+                sandbox_mod=InstalledMod(
+                    unique_id="Sample.Ambiguous",
+                    name="Ambiguous Mod",
+                    version="1.1.0",
+                    folder_path=Path(r"C:\Sandbox\Mods\AmbiguousB"),
+                    manifest_path=Path(r"C:\Sandbox\Mods\AmbiguousB\manifest.json"),
+                    dependencies=tuple(),
+                ),
+                note="real Mods has 2 folders with this UniqueID.",
+            ),
+        ),
+    )
+
+    assert compare_button is not None
+    assert compare_tab is not None
+
+    main_window._mods_path_input.setText(str(result.real_mods_path))
+    main_window._sandbox_mods_path_input.setText(str(result.sandbox_mods_path))
+    main_window._context_tabs.setCurrentWidget(compare_tab)
+
+    def _fake_compare(**kwargs):
+        captured["kwargs"] = kwargs
+        return result
+
+    def _run_immediately(
+        *,
+        operation_name: str,
+        running_label: str,
+        started_status: str,
+        error_title: str,
+        task_fn,
+        on_success,
+    ) -> None:
+        captured["operation_name"] = operation_name
+        captured["running_label"] = running_label
+        captured["started_status"] = started_status
+        captured["error_title"] = error_title
+        on_success(task_fn())
+
+    monkeypatch.setattr(main_window._shell_service, "compare_real_and_sandbox_mods", _fake_compare)
+    monkeypatch.setattr(main_window, "_run_background_operation", _run_immediately)
+
+    compare_button.click()
+    qapp.processEvents()
+
+    assert captured["operation_name"] == "Compare real vs sandbox"
+    assert captured["running_label"] == "Compare real vs sandbox"
+    assert captured["error_title"] == "Compare failed"
+    assert "Comparing configured real Mods against sandbox Mods" in str(
+        captured["started_status"]
+    )
+    assert captured["kwargs"] == {
+        "configured_mods_path_text": str(result.real_mods_path),
+        "sandbox_mods_path_text": str(result.sandbox_mods_path),
+        "real_archive_path_text": main_window._real_archive_path_input.text(),
+        "sandbox_archive_path_text": main_window._sandbox_archive_path_input.text(),
+        "existing_config": None,
+    }
+    assert main_window._compare_results_table.rowCount() == 5
+    assert "1 only in real" in main_window._compare_summary_label.text()
+    assert "1 only in sandbox" in main_window._compare_summary_label.text()
+    assert "1 same version" in main_window._compare_summary_label.text()
+    assert "1 version mismatch" in main_window._compare_summary_label.text()
+    assert "1 ambiguous" in main_window._compare_summary_label.text()
+    assert main_window._compare_results_table.item(0, 0) is not None
+    assert "Real vs sandbox Mods compare" in main_window._findings_box.toPlainText()
+    rendered_rows = {
+        main_window._compare_results_table.item(row, 0).text(): (
+            main_window._compare_results_table.item(row, 1).text(),
+            main_window._compare_results_table.item(row, 2).text(),
+            main_window._compare_results_table.item(row, 3).text(),
+            main_window._compare_results_table.item(row, 4).text(),
+        )
+        for row in range(main_window._compare_results_table.rowCount())
+    }
+    assert rendered_rows["Real Only"] == ("Only in real", "1.0.0", "-", "-")
+    assert rendered_rows["Sandbox Only"] == ("Only in sandbox", "-", "2.0.0", "-")
+    assert rendered_rows["Same Mod"] == ("Same version", "1.1.0", "1.1.0", "-")
+    assert rendered_rows["Mismatch Mod"] == ("Version mismatch", "1.0.0", "2.0.0", "-")
+    assert rendered_rows["Ambiguous Mod"] == (
+        "Ambiguous",
+        "1.0.0",
+        "1.1.0",
+        "real Mods has 2 folders with this UniqueID.",
+    )
+    assert (
+        main_window._status_strip_label.text()
+        == "Compare complete: 5 row(s) across real and sandbox Mods."
+    )
 
 
 def test_main_window_discovery_render_updates_filter_stats_label(

@@ -529,6 +529,73 @@ def test_scan_with_target_uses_sandbox_mods_path(tmp_path: Path) -> None:
     assert result.inventory.mods[0].unique_id == "Sandbox.Mod"
 
 
+def test_compare_real_and_sandbox_mods_reports_presence_and_version_states(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+
+    _create_mod(real_mods, "OnlyReal", "Sample.OnlyReal", version="1.0.0")
+    _create_mod(sandbox_mods, "OnlySandbox", "Sample.OnlySandbox", version="1.0.0")
+    _create_mod(real_mods, "SameReal", "Sample.Same", version="1.2.0")
+    _create_mod(sandbox_mods, "SameSandbox", "Sample.Same", version="1.2.0")
+    _create_mod(real_mods, "MismatchReal", "Sample.Mismatch", version="1.0.0")
+    _create_mod(sandbox_mods, "MismatchSandbox", "Sample.Mismatch", version="2.0.0")
+
+    result = service.compare_real_and_sandbox_mods(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+    )
+
+    by_key = {entry.match_key: entry for entry in result.entries}
+
+    assert result.real_mods_path == real_mods
+    assert result.sandbox_mods_path == sandbox_mods
+    assert by_key["sample.onlyreal"].state == "only_in_real"
+    assert by_key["sample.onlyreal"].real_mod is not None
+    assert by_key["sample.onlyreal"].sandbox_mod is None
+    assert by_key["sample.onlysandbox"].state == "only_in_sandbox"
+    assert by_key["sample.onlysandbox"].real_mod is None
+    assert by_key["sample.onlysandbox"].sandbox_mod is not None
+    assert by_key["sample.same"].state == "same_version"
+    assert by_key["sample.same"].real_mod is not None
+    assert by_key["sample.same"].sandbox_mod is not None
+    assert by_key["sample.same"].real_mod.version == "1.2.0"
+    assert by_key["sample.same"].sandbox_mod.version == "1.2.0"
+    assert by_key["sample.mismatch"].state == "version_mismatch"
+    assert by_key["sample.mismatch"].real_mod is not None
+    assert by_key["sample.mismatch"].sandbox_mod is not None
+    assert by_key["sample.mismatch"].real_mod.version == "1.0.0"
+    assert by_key["sample.mismatch"].sandbox_mod.version == "2.0.0"
+
+
+def test_compare_real_and_sandbox_mods_marks_duplicate_unique_id_as_ambiguous(
+    tmp_path: Path,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+
+    _create_mod(real_mods, "DuplicateA", "Sample.Duplicate", version="1.0.0")
+    _create_mod(real_mods, "DuplicateB", "Sample.Duplicate", version="1.1.0")
+    _create_mod(sandbox_mods, "SandboxCopy", "Sample.Duplicate", version="1.1.0")
+
+    result = service.compare_real_and_sandbox_mods(
+        configured_mods_path_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+    )
+
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.match_key == "sample.duplicate"
+    assert entry.state == "ambiguous_match"
+    assert entry.real_mod is not None
+    assert entry.sandbox_mod is not None
+    assert entry.note is not None
+    assert "real Mods has 2 folders with this UniqueID" in entry.note
+
+
 def test_launch_game_vanilla_uses_saved_game_path_when_input_empty(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     game_path = tmp_path / "Game"
@@ -4846,7 +4913,13 @@ def _update_report(*statuses: ModUpdateStatus) -> ModUpdateReport:
     return ModUpdateReport(statuses=tuple(statuses))
 
 
-def _create_mod(mods_root: Path, folder_name: str, unique_id: str) -> Path:
+def _create_mod(
+    mods_root: Path,
+    folder_name: str,
+    unique_id: str,
+    *,
+    version: str = "1.0.0",
+) -> Path:
     mod_path = mods_root / folder_name
     mod_path.mkdir(parents=True, exist_ok=True)
     (mod_path / "manifest.json").write_text(
@@ -4854,7 +4927,7 @@ def _create_mod(mods_root: Path, folder_name: str, unique_id: str) -> Path:
             "{"
             f'"Name":"{folder_name}",'
             f'"UniqueID":"{unique_id}",'
-            '"Version":"1.0.0"'
+            f'"Version":"{version}"'
             "}"
         ),
         encoding="utf-8",

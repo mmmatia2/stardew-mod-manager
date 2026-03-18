@@ -1,6 +1,6 @@
 # Roadmap
 
-## Shipped through `0.3.1`
+## Shipped through `0.4.0`
 
 ### Core workflow and trust baseline
 
@@ -34,6 +34,19 @@ Shipped:
 - explicit single-package staging (no opaque batch install)
 - second watcher-path support feeding the same intake flow
 
+### Real vs sandbox compare baseline
+
+Shipped:
+
+- dedicated compare surface for configured `real Mods` vs `sandbox Mods`
+- clear baseline categories:
+  - only in real
+  - only in sandbox
+  - same version
+  - version mismatch
+  - ambiguous match for duplicate/unclear UniqueID grouping
+- compare remains visibility-first in this stage (no compare-driven writes)
+
 ### Information architecture simplification (paused)
 
 Implemented enough for now:
@@ -58,17 +71,17 @@ Still paused because product-facing usability/trust gaps now outweigh more decom
 - include pragmatic migration guardrails for personal-machine changes
 - keep trust/recovery semantics transparent and inspectable
 
-### 3. Real vs sandbox compare view
-
-- provide a focused compare surface to review what differs between real and sandbox Mods
-- support safer promotion decisions and faster dev-loop orientation
-- keep this compare-first, not auto-merge or blind sync
-
-### 4. Steam prelaunch best-effort behavior
+### 3. Steam prelaunch best-effort behavior
 
 - support best-effort launch behavior that works with Steam ownership constraints without implying guaranteed automation
 - keep launch intent explicit and sandbox-safe
 - surface when fallback/manual launch is required
+
+### 4. Compare follow-up (deferred after baseline ship)
+
+- keep the shipped compare view readable and trustworthy as a first-class drift/orientation surface
+- defer richer compare actions (for example direct compare-driven sync/promotion shortcuts) until safety semantics are explicitly designed
+- preserve compare-first visibility discipline; no blind merge/write behavior
 
 ## Near-term but lower priority
 
