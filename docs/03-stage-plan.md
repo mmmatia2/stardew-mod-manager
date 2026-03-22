@@ -1,6 +1,6 @@
 # Roadmap
 
-## Product direction after `0.9.0`
+## Product direction after `0.11.0`
 
 The app is now a local-first Stardew Valley mod workflow manager with a sandbox-first safety model.
 
@@ -8,7 +8,7 @@ Its strongest lane is:
 
 - safe local workflow
 - dev-loop trust around sandbox launch, sync, promotion, and compare
-- migration trust through local backup export, backup-bundle inspection, and restore/import planning
+- migration trust through local backup export, backup-bundle inspection, restore/import planning, and restore/import execution
 
 It is not trying to become, in the near term:
 
@@ -16,7 +16,7 @@ It is not trying to become, in the near term:
 - a broad profile or instance manager
 - a broad shell-polish project divorced from workflow value
 
-## Shipped through `0.9.0`
+## Shipped through `0.11.0`
 
 ### Core workflow and safety baseline
 
@@ -43,6 +43,8 @@ Shipped:
 
 - session persistence ergonomics for practical setup/session fields
 - sandbox-only launch (SMAPI with sandbox Mods path)
+- best-effort Steam prelaunch assistance for vanilla, SMAPI, and sandbox-dev launch
+- persisted user-controlled Setup toggle for Steam auto-start assistance
 - explicit selected-mod `real -> sandbox` sync
 - explicit selected-mod `sandbox -> real` promotion with preview/review
 - archive-aware replace on live conflicts (no blind overwrite)
@@ -66,6 +68,7 @@ Shipped:
 - explicit backup export baseline for local migration/recovery groundwork
 - config-aware backup export baseline for common per-mod config artifacts inside installed Mods trees
 - explicit read-only inspection of exported backup bundle folders
+- explicit zip backup bundle support alongside folder-bundle compatibility
 - manifest/version/item-status visibility before any restore behavior exists
 - structural usability reporting for future restore/import work
 - explicit read-only restore/import planning against the current local machine
@@ -77,6 +80,7 @@ Shipped:
   - existing config artifact with different content
 - reviewed conflicts use archive-aware mod-folder replacement
 - ambiguous and structurally blocked restore cases still do not execute
+- inspect/plan/execute compatibility across both folder bundles and zip bundles
 - explicit open-folder actions for the key configured workflow folders
 
 ### Information architecture simplification (paused)
@@ -91,31 +95,25 @@ Still paused because workflow completion and trust are higher-value than more de
 
 ## Near-term priorities
 
-### 1. Steam prelaunch best-effort behavior
-
-- support best-effort launch behavior that works with Steam ownership constraints without implying guaranteed automation
-- keep launch intent explicit and sandbox-safe
-- surface when fallback/manual launch is required
-
-### 2. Compare follow-up
+### 1. Compare follow-up
 
 - keep the shipped compare view readable and trustworthy as a first-class drift/orientation surface
 - revisit richer compare ergonomics only after the current restore/import and launch baselines settle
 - no compare-driven bulk sync/promotion shortcuts yet
 
-Why this is next:
-
-- restore/import now has a coherent trust chain from export through reviewed conflict-capable execution
-- Steam-aware launch behavior is the main remaining daily-use friction point outside the migration track
-- compare follow-up is the next visibility-focused convenience area once launch behavior is addressed
-
-## Later or deferred
-
-### Restore/import file-level merge follow-up
+### 2. Restore/import file-level merge follow-up
 
 - keep the shipped conflict-resolution baseline folder-oriented and trustworthy
 - do not introduce file-level merge semantics until review, safety, and recovery semantics are explicitly designed
 - no casual overwrite shortcuts
+
+Why this is next:
+
+- restore/import now has a coherent trust chain from export through reviewed conflict-capable execution across both folder and zip bundle artifacts
+- Steam-assisted launch ergonomics are now shipped with a persisted user-controlled toggle
+- compare follow-up is the next visibility-focused convenience area without reopening risky write semantics
+
+## Later or deferred
 
 ### Icon/taskbar refinement
 

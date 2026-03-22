@@ -18,9 +18,9 @@ The goal is not to restate the whole codebase. The goal is to give enough high-s
 - Entry point: `sdvmm-ui` -> [`src/sdvmm/app/main.py`](/Users/darth/Projects/stardew-mod-manager/src/sdvmm/app/main.py)
 - Current validation baseline:
   - `.\.venv\Scripts\python.exe -m pytest tests\unit -q`
-  - latest verified result in this thread: `489 passed, 1 skipped`
+  - latest verified result in this thread: `513 passed, 1 skipped`
   - UI startup smoke also passes offscreen
-- Shipped baseline in this brief: `0.9.0` (includes real-vs-sandbox compare visibility baseline, config-aware backup export, backup-bundle inspection baseline, restore/import planning baseline, restore/import execution baseline, first restore conflict-resolution baseline, and open-folder conveniences baseline)
+- Shipped baseline in this brief: `0.11.0` (includes real-vs-sandbox compare visibility baseline, config-aware backup export, folder/zip backup-bundle compatibility, backup-bundle inspection baseline, restore/import planning baseline, restore/import execution baseline, first restore conflict-resolution baseline, open-folder conveniences baseline, and Steam prelaunch best-effort behavior with a persisted user-controlled toggle)
 - Product posture:
   - local-first
   - safe-by-default
@@ -54,8 +54,7 @@ The app is no longer just a scanner. It now has a coherent local workflow:
 The product is not feature-complete for public release, but it is materially beyond prototype state.
 
 The near-term product direction now explicitly includes a mod-development workflow, not only general end-user mod management.
-The current private-testing build includes the first multi-zip intake step, second watcher-path intake convenience, a visibility-first real-vs-sandbox compare baseline, config-aware backup export, backup-bundle inspection, restore/import planning, restore/import execution for clearly missing content, reviewed restore conflict handling through archive-aware mod-folder replacement, and explicit open-folder conveniences for the key configured workflow folders, while intentionally stopping short of blind multi-package planning/install behavior, compare-driven write shortcuts, and file-level merge restore behavior.
-It now also includes practical session persistence ergonomics and explicit local backup export with mod-config snapshot coverage, which makes Steam-aware launch behavior the next honest daily-use workflow step.
+The current private-testing build includes the first multi-zip intake step, second watcher-path intake convenience, a visibility-first real-vs-sandbox compare baseline, config-aware backup export, folder/zip backup-bundle support, backup-bundle inspection, restore/import planning, restore/import execution for clearly missing content, reviewed restore conflict handling through archive-aware mod-folder replacement, explicit open-folder conveniences for the key configured workflow folders, and best-effort Steam prelaunch assistance with a persisted user-controlled toggle, while intentionally stopping short of blind multi-package planning/install behavior, compare-driven write shortcuts, file-level merge restore behavior, and background Steam management.
 
 ## Current Architecture
 
@@ -128,9 +127,9 @@ The UI is still dense, but further generic decomposition is no longer the highes
 
 ## Current Weak Spots
 
-### 1. Backup / restore / migration foundation is now coherent but still intentionally folder-oriented
+### 1. Backup / restore / migration foundation is now coherent but still intentionally review-first
 
-State is durable and atomic, and the app now has explicit config-aware backup export, bundle inspection, restore/import planning, restore/import execution for clearly missing content, and reviewed conflict handling through archive-aware mod-folder replacement, but file-level merge restore ergonomics are not yet established.
+State is durable and atomic, and the app now has explicit config-aware backup export, folder/zip bundle compatibility, bundle inspection, restore/import planning, restore/import execution for clearly missing content, and reviewed conflict handling through archive-aware mod-folder replacement, but file-level merge restore ergonomics are not yet established.
 
 The next question is:
 
@@ -157,13 +156,13 @@ The next unresolved product question remains:
 
 > How should the app improve promotion speed and clarity now that preview + archive-aware replace already exists, without making live promotion feel casual or opaque?
 
-### 3. Steam-aware launch behavior is now the main daily-use gap
+### 3. Compare follow-up is now the next daily-use visibility gap
 
-The app now has explicit open-folder conveniences for the main configured workflow paths, and the export/inspection/planning/execution chain now includes bundled mod-config coverage plus reviewed conflict handling, but Steam-aware launch ergonomics still stop short of a best-effort flow for users who launch through Steam constraints.
+The app now has explicit open-folder conveniences for the main configured workflow paths, a coherent export/inspection/planning/execution chain with bundled mod-config coverage and reviewed conflict handling, and best-effort Steam launch assistance with a persisted user-controlled toggle. The next remaining daily-use ergonomics question is how much further to take compare visibility without turning it into implicit write behavior.
 
 The next question is:
 
-> What is the smallest Steam-aware launch assistance baseline that improves real use without implying fragile automation guarantees?
+> What is the smallest compare follow-up that improves real drift orientation and decision speed without creating compare-driven write shortcuts?
 
 ### 4. `MainWindow` is still the densest integration point
 
@@ -274,10 +273,11 @@ Implemented for `0.4.0`:
 
 #### 8. Backup Bundle Inspection + Restore/Import Planning + Execution + Open-Folder Baseline
 
-Implemented through `0.9.0`:
+Implemented through `0.11.0`:
 
 - explicit local backup export baseline for migration/recovery groundwork
 - explicit read-only inspection of exported backup bundle folders
+- explicit zip backup bundle support alongside folder-bundle compatibility
 - manifest/version/item-status visibility before any restore behavior exists
 - structural usability reporting for future restore/import work
 - explicit read-only restore/import planning against the current local machine
@@ -286,21 +286,21 @@ Implemented through `0.9.0`:
 - explicit reviewed conflict handling for different-version mod folders and different-content config artifacts
 - archive-aware mod-folder replacement for restore conflicts (no file merge behavior)
 - rollback of already-restored paths from the current run if execution fails mid-way
+- inspect/plan/execute compatibility across both folder bundles and zip bundles
 - explicit open-folder actions for real Mods, sandbox Mods, both archive roots, and both watched-download paths
+- best-effort Steam prelaunch assistance for vanilla, SMAPI, and sandbox-dev launch
+- persisted user-controlled Setup toggle for Steam auto-start assistance
+- no background Steam management or retry loops in this baseline
 - no file-level merge restore behavior in this baseline
 
 ### Next likely phases (real-world usability first)
 
-#### 9. Steam Prelaunch Best-Effort Behavior
-
-- pragmatic Steam-aware launch assistance without promising guaranteed automation
-
-#### 10. Compare Follow-up
+#### 9. Compare Follow-up
 
 - revisit richer compare ergonomics after the restore/import baseline and launch behavior settle
 - keep compare visibility trustworthy and avoid implicit write shortcuts
 
-#### 11. Restore/Import File-Level Merge Follow-up
+#### 10. Restore/Import File-Level Merge Follow-up
 
 - keep the shipped conflict-resolution baseline folder-oriented and trustworthy
 - do not introduce file-level merge semantics until review, safety, and recovery semantics are explicitly designed
@@ -326,13 +326,13 @@ An external model should specifically challenge these points:
 
 The current recommendation is to prioritize real-world usability and trust ergonomics first:
 
-- Steam-aware launch reliability
-- compare follow-up only after current restore/import behavior settles
+- compare follow-up now that restore/import and Steam-assisted launch are both shipped baselines
+- restore/import file-level merge follow-up only if safety semantics are designed clearly
 - then broader polish/refactor work
 
 Question:
 
-> Is it correct to keep launch reliability and migration-trust follow-up ahead of more UI consolidation and polish?
+> Is it correct to keep compare follow-up and migration-trust follow-up ahead of more UI consolidation and polish?
 
 ### B. Should live promotion stay conservative longer?
 
@@ -357,7 +357,7 @@ Question:
 
 Question:
 
-> Given that the intended near-term audience includes mod developers and careful local users, what sequence best balances trust and speed: Steam-aware launch help first, then broader compare conveniences later?
+> Given that the intended near-term audience includes mod developers and careful local users, what sequence best balances trust and speed now: compare follow-up first, then any deeper restore/import merge semantics later?
 
 ### E. When should multi-package planning be allowed?
 

@@ -45,6 +45,7 @@ from sdvmm.domain.smapi_codes import SMAPI_UP_TO_DATE
 from sdvmm.domain.smapi_log_codes import SMAPI_LOG_NOT_FOUND, SMAPI_LOG_SOURCE_AUTO_DETECTED
 from sdvmm.domain.update_codes import MISSING_UPDATE_KEY, UNSUPPORTED_UPDATE_KEY_FORMAT
 from sdvmm.domain.models import ArchivedModEntry
+from sdvmm.domain.models import AppConfig
 from sdvmm.domain.models import BackupBundleInspectionItem
 from sdvmm.domain.models import BackupBundleInspectionResult
 from sdvmm.domain.models import DownloadsIntakeResult
@@ -78,6 +79,7 @@ from sdvmm.domain.models import SmapiUpdateStatus
 from sdvmm.ui.main_window import MainWindow
 from sdvmm.ui.main_window import _ROLE_DISCOVERY_INDEX
 from sdvmm.ui.main_window import _ROLE_MOD_UPDATE_STATUS
+from sdvmm.services.app_state_store import save_app_config
 from sdvmm.ui.main_window import _ROLE_UPDATE_BLOCK_REASON
 
 
@@ -669,6 +671,7 @@ def test_main_window_sandbox_dev_launch_delegates_and_updates_status(
             pid=5150,
             executable_path=smapi_path,
             mods_path_override=sandbox_mods,
+            steam_prelaunch_message="Steam was not running; start was attempted and game launch continued anyway.",
         )
 
     monkeypatch.setattr(main_window._shell_service, "launch_game_sandbox_dev", _fake_launch_game_sandbox_dev)
@@ -681,12 +684,108 @@ def test_main_window_sandbox_dev_launch_delegates_and_updates_status(
         "game_path_text": str(game_path),
         "sandbox_mods_path_text": str(sandbox_mods),
         "configured_mods_path_text": str(real_mods),
+        "steam_auto_start_enabled": True,
         "existing_config": None,
     }
     assert "Sandbox dev launch started" in main_window._status_strip_label.text()
     assert str(sandbox_mods) in main_window._status_strip_label.text()
+    assert "Steam was not running; start was attempted" in main_window._status_strip_label.text()
     assert runtime_label is not None
     assert runtime_label.text() == "Started"
+
+
+def test_main_window_vanilla_launch_updates_status_with_steam_context(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    game_path = tmp_path / "Game"
+    executable_path = game_path / "Stardew Valley.exe"
+    game_path.mkdir()
+    executable_path.write_text("", encoding="utf-8")
+    main_window._game_path_input.setText(str(game_path))
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "launch_game_vanilla",
+        lambda **_: SimpleNamespace(
+            pid=1111,
+            executable_path=executable_path,
+            steam_prelaunch_message="Steam was already running.",
+        ),
+    )
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.critical", lambda *args: None)
+
+    main_window._on_launch_vanilla()
+
+    assert "Vanilla launch started" in main_window._status_strip_label.text()
+    assert "Steam was already running." in main_window._status_strip_label.text()
+
+
+def test_main_window_vanilla_launch_uses_disabled_steam_toggle(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    game_path = tmp_path / "Game"
+    executable_path = game_path / "Stardew Valley.exe"
+    game_path.mkdir()
+    executable_path.write_text("", encoding="utf-8")
+    main_window._game_path_input.setText(str(game_path))
+    main_window._steam_auto_start_checkbox.setChecked(False)
+
+    def _fake_launch_game_vanilla(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            pid=3333,
+            executable_path=executable_path,
+            steam_prelaunch_message=(
+                "Steam auto-start assistance is off; game launch continued without Steam prelaunch."
+            ),
+        )
+
+    monkeypatch.setattr(main_window._shell_service, "launch_game_vanilla", _fake_launch_game_vanilla)
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.critical", lambda *args: None)
+
+    main_window._on_launch_vanilla()
+
+    assert captured == {
+        "game_path_text": str(game_path),
+        "steam_auto_start_enabled": False,
+        "existing_config": None,
+    }
+    assert "Steam auto-start assistance is off" in main_window._status_strip_label.text()
+
+
+def test_main_window_smapi_launch_updates_status_when_steam_prelaunch_is_unavailable(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    game_path = tmp_path / "Game"
+    executable_path = game_path / "StardewModdingAPI.exe"
+    game_path.mkdir()
+    executable_path.write_text("", encoding="utf-8")
+    main_window._game_path_input.setText(str(game_path))
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "launch_game_smapi",
+        lambda **_: SimpleNamespace(
+            pid=2222,
+            executable_path=executable_path,
+            steam_prelaunch_message=(
+                "Steam running status could not be confirmed; game launch continued anyway."
+            ),
+        ),
+    )
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.critical", lambda *args: None)
+
+    main_window._on_launch_smapi()
+
+    assert "SMAPI launch started" in main_window._status_strip_label.text()
+    assert "Steam running status could not be confirmed" in main_window._status_strip_label.text()
 
 
 def test_main_window_sandbox_sync_action_is_hidden_and_inert_without_selection(
@@ -2120,6 +2219,35 @@ def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: Mai
     assert active_bundle_label is not None
 
     assert main_window.findChild(QPlainTextEdit, "setup_output_box") is not None
+    steam_checkbox = main_window.findChild(QCheckBox, "setup_steam_auto_start_checkbox")
+    assert steam_checkbox is not None
+    assert steam_checkbox.isChecked() is True
+
+
+def test_main_window_loads_saved_steam_auto_start_preference(
+    tmp_path: Path,
+    qapp: QApplication,
+) -> None:
+    state_file = tmp_path / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    config = AppConfig(
+        game_path=tmp_path / "Game",
+        mods_path=tmp_path / "Mods",
+        app_data_path=tmp_path / "AppData",
+        steam_auto_start_enabled=False,
+    )
+    config.game_path.mkdir()
+    config.mods_path.mkdir()
+    save_app_config(state_file, config)
+
+    window = MainWindow(shell_service=service)
+    window.show()
+    qapp.processEvents()
+    try:
+        assert window._steam_auto_start_checkbox.isChecked() is False
+    finally:
+        window.close()
+        qapp.processEvents()
 
 
 def test_main_window_detect_environment_updates_setup_local_output_and_shared_details(
@@ -2179,8 +2307,9 @@ def test_main_window_export_backup_bundle_runs_service_and_updates_output(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: str(export_root),
+        main_window,
+        "_prompt_for_backup_export_target",
+        lambda: (str(export_root), "directory"),
     )
 
     def fake_export_backup_bundle(**kwargs: object) -> BackupBundleExportResult:
@@ -2200,6 +2329,7 @@ def test_main_window_export_backup_bundle_runs_service_and_updates_output(
     assert captured["operation_name"] == "Backup export"
     assert captured["service_kwargs"] == {
         "destination_root_text": str(export_root),
+        "bundle_storage_kind": "directory",
         **main_window._current_operational_config_inputs(),
     }
     assert main_window._status_strip_label.text() == (
@@ -2217,8 +2347,9 @@ def test_main_window_export_backup_bundle_cancel_sets_status_without_running(
 ) -> None:
     captured: list[str] = []
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: "",
+        main_window,
+        "_prompt_for_backup_export_target",
+        lambda: None,
     )
     monkeypatch.setattr(
         main_window,
@@ -2277,8 +2408,9 @@ def test_main_window_inspect_backup_bundle_runs_service_and_updates_output(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: str(bundle_path),
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: bundle_path,
     )
 
     def fake_inspect_backup_bundle(**kwargs: object) -> BackupBundleInspectionResult:
@@ -2327,8 +2459,9 @@ def test_main_window_inspect_backup_bundle_cancel_sets_status_without_running(
 ) -> None:
     captured: list[str] = []
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: "",
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: None,
     )
     monkeypatch.setattr(
         main_window,
@@ -2340,6 +2473,75 @@ def test_main_window_inspect_backup_bundle_cancel_sets_status_without_running(
 
     assert captured == []
     assert main_window._status_strip_label.text() == "Backup bundle inspection cancelled."
+
+
+def test_main_window_prompt_for_backup_bundle_path_can_select_zip_bundle(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    zip_path = tmp_path / "Exports" / "sdvmm-backup-20260321-141500Z.zip"
+
+    monkeypatch.setattr(
+        main_window,
+        "_prompt_for_backup_bundle_storage_kind",
+        lambda **kwargs: "zip",
+    )
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.QFileDialog.getOpenFileName",
+        lambda *args, **kwargs: (str(zip_path), "Backup bundle zips (*.zip)"),
+    )
+
+    assert main_window._prompt_for_backup_bundle_path() == zip_path
+
+
+def test_main_window_export_backup_bundle_can_request_zip_creation(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    zip_path = tmp_path / "Exports" / "sdvmm-backup-20260321-160000Z.zip"
+    result = BackupBundleExportResult(
+        bundle_path=zip_path,
+        manifest_path=zip_path,
+        summary_path=zip_path,
+        created_at_utc="2026-03-21T16:00:00Z",
+        items=tuple(),
+        bundle_storage_kind="zip",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        main_window,
+        "_prompt_for_backup_export_target",
+        lambda: (str(zip_path), "zip"),
+    )
+
+    def fake_export_backup_bundle(**kwargs: object) -> BackupBundleExportResult:
+        captured["service_kwargs"] = kwargs
+        return result
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "export_backup_bundle",
+        fake_export_backup_bundle,
+    )
+
+    def fake_run_background_operation(**kwargs: object) -> None:
+        captured["operation_name"] = kwargs["operation_name"]
+        task_result = kwargs["task_fn"]()
+        kwargs["on_success"](task_result)
+
+    monkeypatch.setattr(main_window, "_run_background_operation", fake_run_background_operation)
+
+    main_window._on_export_backup_bundle()
+
+    assert captured["operation_name"] == "Backup export"
+    assert captured["service_kwargs"] == {
+        "destination_root_text": str(zip_path),
+        "bundle_storage_kind": "zip",
+        **main_window._current_operational_config_inputs(),
+    }
 
 
 def test_main_window_plan_restore_import_reuses_bundle_selected_for_inspection_before_completion(
@@ -2382,8 +2584,9 @@ def test_main_window_plan_restore_import_reuses_bundle_selected_for_inspection_b
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: str(bundle_path),
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: bundle_path,
     )
 
     def fake_run_background_operation_for_inspect(**kwargs: object) -> None:
@@ -2406,11 +2609,6 @@ def test_main_window_plan_restore_import_reuses_bundle_selected_for_inspection_b
     assert captured["inspect_operation_name"] == "Backup bundle inspection"
     assert str(bundle_path) in main_window._active_backup_bundle_label.toolTip()
     assert "selected" in main_window._active_backup_bundle_label.text().casefold()
-
-    monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: pytest.fail("picker should not reopen when bundle was already selected for inspection"),
-    )
 
     def fake_plan_restore_import_from_backup_bundle(
         **kwargs: object,
@@ -2535,8 +2733,9 @@ def test_main_window_plan_restore_import_runs_service_and_updates_output(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: str(bundle_path),
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: bundle_path,
     )
 
     def fake_plan_restore_import_from_backup_bundle(
@@ -2587,8 +2786,9 @@ def test_main_window_plan_restore_import_cancel_sets_status_without_running(
 ) -> None:
     captured: list[str] = []
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: "",
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: None,
     )
     monkeypatch.setattr(
         main_window,
@@ -2644,8 +2844,9 @@ def test_main_window_plan_restore_import_uses_active_inspected_bundle_without_pi
     main_window._on_backup_bundle_inspection_completed(inspection)
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: pytest.fail("picker should not reopen when an active bundle exists"),
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: pytest.fail("picker should not reopen when an active bundle exists"),
     )
 
     def fake_plan_restore_import_from_backup_bundle(
@@ -2730,8 +2931,9 @@ def test_main_window_execute_restore_import_uses_active_bundle_without_picker(
     main_window._on_backup_bundle_inspection_completed(inspection)
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: pytest.fail("picker should not reopen when an active bundle exists"),
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: pytest.fail("picker should not reopen when an active bundle exists"),
     )
     def fake_plan_restore_import_from_backup_bundle(
         **kwargs: object,
@@ -2861,8 +3063,9 @@ def test_main_window_execute_restore_import_picker_fallback_runs_when_no_active_
         kwargs["on_success"](kwargs["task_fn"]())
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        fake_get_existing_directory,
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: Path(fake_get_existing_directory()),
     )
     monkeypatch.setattr(
         main_window._shell_service,
@@ -3020,8 +3223,9 @@ def test_main_window_plan_restore_import_enables_execute_button_when_review_allo
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        "sdvmm.ui.main_window.QFileDialog.getExistingDirectory",
-        lambda *args, **kwargs: str(bundle_path),
+        main_window,
+        "_prompt_for_backup_bundle_path",
+        lambda: bundle_path,
     )
 
     def fake_plan_restore_import_from_backup_bundle(**kwargs: object) -> RestoreImportPlanningResult:

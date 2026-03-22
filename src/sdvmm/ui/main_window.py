@@ -400,6 +400,14 @@ class MainWindow(QMainWindow):
         self._nexus_api_key_input.setObjectName("setup_nexus_api_key_input")
         self._nexus_api_key_input.setPlaceholderText("Nexus API key")
         self._nexus_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._steam_auto_start_checkbox = QCheckBox(
+            "Try to start Steam before game launch when Steam is not already running"
+        )
+        self._steam_auto_start_checkbox.setObjectName("setup_steam_auto_start_checkbox")
+        self._steam_auto_start_checkbox.setChecked(True)
+        self._steam_auto_start_checkbox.setToolTip(
+            "Best-effort Steam launch assistance for Vanilla, SMAPI, and Sandbox dev launch."
+        )
         self._overwrite_checkbox = QCheckBox("Enable archive-aware replace")
         self._overwrite_checkbox.setObjectName("plan_install_overwrite_checkbox")
         self._overwrite_checkbox.setToolTip(
@@ -851,6 +859,7 @@ class MainWindow(QMainWindow):
             sandbox_archive_path_input=self._sandbox_archive_path_input,
             real_archive_path_input=self._real_archive_path_input,
             nexus_api_key_input=self._nexus_api_key_input,
+            steam_auto_start_checkbox=self._steam_auto_start_checkbox,
             browse_game_button=browse_game_button,
             browse_mods_button=browse_mods_button,
             open_mods_button=open_mods_button,
@@ -1397,6 +1406,7 @@ class MainWindow(QMainWindow):
                 self._nexus_api_key_input.setText(state.config.nexus_api_key)
             self._set_current_scan_target(state.config.scan_target)
             self._set_current_install_target(state.config.install_target)
+            self._steam_auto_start_checkbox.setChecked(state.config.steam_auto_start_enabled)
             self._set_status(f"Loaded saved config from {self._shell_service.state_file}")
 
         if state.message:
@@ -1425,6 +1435,7 @@ class MainWindow(QMainWindow):
             "nexus_api_key_text": self._nexus_api_key_input.text(),
             "scan_target": self._current_scan_target(),
             "install_target": self._current_install_target(),
+            "steam_auto_start_enabled": self._steam_auto_start_checkbox.isChecked(),
             "existing_config": self._config,
         }
 
@@ -1738,14 +1749,11 @@ class MainWindow(QMainWindow):
         self._set_status("Environment detection complete.")
 
     def _on_export_backup_bundle(self) -> None:
-        destination_root = QFileDialog.getExistingDirectory(
-            self,
-            "Select backup export destination",
-            self._mods_path_input.text() or str(self._shell_service.state_file.parent),
-        )
-        if not destination_root:
+        export_target = self._prompt_for_backup_export_target()
+        if export_target is None:
             self._set_status("Backup export cancelled.")
             return
+        destination_root, bundle_storage_kind = export_target
 
         self._clear_restore_import_plan_state(reset_summary=False)
         self._run_background_operation(
@@ -1755,6 +1763,7 @@ class MainWindow(QMainWindow):
             error_title="Backup export failed",
             task_fn=lambda: self._shell_service.export_backup_bundle(
                 destination_root_text=destination_root,
+                bundle_storage_kind=bundle_storage_kind,
                 **self._current_operational_config_inputs(),
             ),
             on_success=self._on_backup_bundle_export_completed,
@@ -1946,6 +1955,7 @@ class MainWindow(QMainWindow):
             result = self._shell_service.launch_game_vanilla(
                 game_path_text=self._game_path_input.text(),
                 existing_config=self._config,
+                steam_auto_start_enabled=self._steam_auto_start_checkbox.isChecked(),
             )
         except AppShellError as exc:
             QMessageBox.critical(self, "Vanilla launch failed", str(exc))
@@ -1953,7 +1963,10 @@ class MainWindow(QMainWindow):
             return
 
         self._set_status(
-            f"Vanilla launch started (PID {result.pid}): {result.executable_path}"
+            self._format_launch_status_message(
+                f"Vanilla launch started (PID {result.pid}): {result.executable_path}",
+                result,
+            )
         )
 
     def _on_launch_smapi(self) -> None:
@@ -1961,6 +1974,7 @@ class MainWindow(QMainWindow):
             result = self._shell_service.launch_game_smapi(
                 game_path_text=self._game_path_input.text(),
                 existing_config=self._config,
+                steam_auto_start_enabled=self._steam_auto_start_checkbox.isChecked(),
             )
         except AppShellError as exc:
             QMessageBox.critical(self, "SMAPI launch failed", str(exc))
@@ -1968,7 +1982,10 @@ class MainWindow(QMainWindow):
             return
 
         self._set_status(
-            f"SMAPI launch started (PID {result.pid}): {result.executable_path}"
+            self._format_launch_status_message(
+                f"SMAPI launch started (PID {result.pid}): {result.executable_path}",
+                result,
+            )
         )
 
     def _on_launch_sandbox_dev(self) -> None:
@@ -1978,6 +1995,7 @@ class MainWindow(QMainWindow):
                 sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
                 configured_mods_path_text=self._mods_path_input.text(),
                 existing_config=self._config,
+                steam_auto_start_enabled=self._steam_auto_start_checkbox.isChecked(),
             )
         except AppShellError as exc:
             message = str(exc)
@@ -1994,9 +2012,16 @@ class MainWindow(QMainWindow):
             f"(PID {result.pid}) via {result.executable_path} using sandbox Mods path "
             f"{result.mods_path_override}."
         )
+        launch_message = self._format_launch_status_message(launch_message, result)
         self._sandbox_launch_status_label.setText("Started")
         self._sandbox_launch_status_label.setToolTip(launch_message)
         self._set_status(launch_message)
+
+    def _format_launch_status_message(self, base_message: str, result: object) -> str:
+        steam_message = getattr(result, "steam_prelaunch_message", "")
+        if not steam_message:
+            return base_message
+        return f"{base_message} {steam_message}"
 
     def _on_scan(self) -> None:
         self._run_background_operation(
@@ -3607,6 +3632,10 @@ class MainWindow(QMainWindow):
         for label, path_text in configured_paths:
             if path_text:
                 lines.append(f"{label}: {path_text}")
+        lines.append(
+            "Steam auto-start before launch: "
+            + ("Enabled" if self._steam_auto_start_checkbox.isChecked() else "Disabled")
+        )
         return "\n".join(lines)
 
     def _refresh_sandbox_dev_launch_state(self, *_: object) -> None:
@@ -3644,19 +3673,87 @@ class MainWindow(QMainWindow):
             )
 
     def _prompt_for_backup_bundle_path(self) -> Path | None:
-        selected = QFileDialog.getExistingDirectory(
-            self,
-            "Select backup bundle folder",
-            self._backup_bundle_dialog_start_dir(),
+        bundle_storage_kind = self._prompt_for_backup_bundle_storage_kind(
+            title="Select backup bundle",
+            message="Choose whether to open a backup bundle folder or a backup bundle zip.",
         )
-        if not selected:
+        if bundle_storage_kind is None:
             return None
-        return Path(selected)
+        if bundle_storage_kind == "directory":
+            selected = QFileDialog.getExistingDirectory(
+                self,
+                "Select backup bundle folder",
+                self._backup_bundle_dialog_start_dir(),
+            )
+            return Path(selected) if selected else None
+
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select backup bundle zip",
+            self._default_backup_bundle_zip_path(),
+            "Backup bundle zips (*.zip);;All files (*)",
+        )
+        return Path(selected) if selected else None
 
     def _backup_bundle_dialog_start_dir(self) -> str:
         if self._active_backup_bundle_path is not None:
+            if self._active_backup_bundle_path.suffix.casefold() == ".zip":
+                return str(self._active_backup_bundle_path.parent)
             return str(self._active_backup_bundle_path)
         return self._mods_path_input.text() or str(self._shell_service.state_file.parent)
+
+    def _default_backup_bundle_zip_path(self) -> str:
+        return str(Path(self._backup_bundle_dialog_start_dir()) / "sdvmm-backup.zip")
+
+    def _prompt_for_backup_export_target(self) -> tuple[str, str] | None:
+        bundle_storage_kind = self._prompt_for_backup_bundle_storage_kind(
+            title="Backup export format",
+            message="Choose whether to export a backup bundle folder or a backup bundle zip.",
+        )
+        if bundle_storage_kind is None:
+            return None
+        if bundle_storage_kind == "directory":
+            selected = QFileDialog.getExistingDirectory(
+                self,
+                "Select backup export destination",
+                self._backup_bundle_dialog_start_dir(),
+            )
+            if not selected:
+                return None
+            return selected, bundle_storage_kind
+
+        selected, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save backup bundle zip",
+            self._default_backup_bundle_zip_path(),
+            "Backup bundle zips (*.zip)",
+        )
+        if not selected:
+            return None
+        return selected, bundle_storage_kind
+
+    def _prompt_for_backup_bundle_storage_kind(
+        self,
+        *,
+        title: str,
+        message: str,
+    ) -> str | None:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(title)
+        dialog.setText(message)
+        folder_button = dialog.addButton("Folder bundle", QMessageBox.ButtonRole.ActionRole)
+        zip_button = dialog.addButton("Zip bundle", QMessageBox.ButtonRole.ActionRole)
+        cancel_button = dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.setDefaultButton(zip_button)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked == folder_button:
+            return "directory"
+        if clicked == zip_button:
+            return "zip"
+        if clicked == cancel_button:
+            return None
+        return None
 
     def _resolve_active_or_prompted_backup_bundle_path(
         self,
@@ -3692,8 +3789,13 @@ class MainWindow(QMainWindow):
 
         path_text = str(self._active_backup_bundle_path)
         context_label = self._active_backup_bundle_context_label_text
+        bundle_kind = (
+            "zip"
+            if self._active_backup_bundle_path.suffix.casefold() == ".zip"
+            else "folder"
+        )
         self._active_backup_bundle_label.setText(
-            f"Active backup bundle ({context_label}): {_compact_path_text(path_text, max_length=84)}"
+            f"Active backup bundle {bundle_kind} ({context_label}): {_compact_path_text(path_text, max_length=84)}"
         )
         self._active_backup_bundle_label.setToolTip(path_text)
 

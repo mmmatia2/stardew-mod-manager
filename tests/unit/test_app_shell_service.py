@@ -361,6 +361,62 @@ def test_export_backup_bundle_copies_available_state_and_managed_directories(tmp
     assert "Generated from the current export configuration snapshot." in summary_text
 
 
+def test_export_backup_bundle_can_create_zip_artifact(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    game_path = tmp_path / "Game"
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+    zip_path = exports_root / "migration-backup.zip"
+
+    _create_launchable_game_install(game_path)
+    _create_mod(real_mods, "RealAlpha", "Sample.RealAlpha")
+    _create_mod(sandbox_mods, "SandboxAlpha", "Sample.SandboxAlpha")
+    real_archive.mkdir()
+    sandbox_archive.mkdir()
+
+    config = AppConfig(
+        game_path=game_path,
+        mods_path=real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=sandbox_mods,
+        sandbox_archive_path=sandbox_archive,
+        real_archive_path=real_archive,
+    )
+
+    result = service.export_backup_bundle(
+        destination_root_text=str(zip_path),
+        bundle_storage_kind="zip",
+        game_path_text=str(game_path),
+        mods_dir_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text=str(sandbox_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=config,
+    )
+
+    assert result.bundle_path == zip_path
+    assert result.bundle_storage_kind == "zip"
+    assert result.bundle_path.exists() is True
+    with ZipFile(result.bundle_path) as bundle_zip:
+        names = set(bundle_zip.namelist())
+
+    assert "manifest.json" in names
+    assert "README.txt" in names
+    assert "manager-state/app-state.json" in names
+    assert "mods/real-mods/RealAlpha/manifest.json" in names
+    assert "mods/sandbox-mods/SandboxAlpha/manifest.json" in names
+
+
 def test_export_backup_bundle_uses_current_validated_config_snapshot_without_mutating_saved_state(
     tmp_path: Path,
 ) -> None:
@@ -564,6 +620,86 @@ def test_inspect_backup_bundle_reports_valid_export_bundle(tmp_path: Path) -> No
         "A restore/import workflow. This bundle is export-only in this stage." in item
         for item in inspection.intentionally_not_included
     )
+
+
+def test_inspect_backup_bundle_reports_valid_zip_export_bundle(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+    zip_path = exports_root / "sdvmm-backup-test.zip"
+    game_path = tmp_path / "Game"
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    real_archive = tmp_path / "RealArchive"
+    sandbox_archive = tmp_path / "SandboxArchive"
+    _create_launchable_game_install(game_path)
+    _create_mod(real_mods, "RealAlpha", "Sample.RealAlpha")
+    _create_mod(sandbox_mods, "SandboxAlpha", "Sample.SandboxAlpha")
+    real_archive.mkdir()
+    sandbox_archive.mkdir()
+
+    config = AppConfig(
+        game_path=game_path,
+        mods_path=real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=sandbox_mods,
+        sandbox_archive_path=sandbox_archive,
+        real_archive_path=real_archive,
+    )
+
+    exported = service.export_backup_bundle(
+        destination_root_text=str(zip_path),
+        bundle_storage_kind="zip",
+        game_path_text=str(game_path),
+        mods_dir_text=str(real_mods),
+        sandbox_mods_path_text=str(sandbox_mods),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(real_archive),
+        sandbox_archive_path_text=str(sandbox_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=config,
+    )
+
+    inspection = service.inspect_backup_bundle(bundle_path_text=str(exported.bundle_path))
+
+    assert inspection.bundle_path == exported.bundle_path
+    assert inspection.bundle_storage_kind == "zip"
+    assert inspection.content_root_path is not None
+    assert inspection.structurally_usable is True
+    assert any(item.key == "app_state" for item in inspection.items)
+
+
+def test_inspect_backup_bundle_reports_invalid_zip_bundle(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    bundle_path = tmp_path / "Exports" / "broken-backup.zip"
+    bundle_path.parent.mkdir(parents=True)
+    bundle_path.write_text("not a real zip", encoding="utf-8")
+
+    inspection = service.inspect_backup_bundle(bundle_path_text=str(bundle_path))
+
+    assert inspection.bundle_storage_kind == "zip"
+    assert inspection.structurally_usable is False
+    assert "invalid or unreadable" in inspection.message.casefold()
+    assert any("zip bundle could not be opened safely" in warning.casefold() for warning in inspection.warnings)
+
+
+def test_inspect_backup_bundle_rejects_zip_bundle_with_unsafe_member_paths(tmp_path: Path) -> None:
+    service = AppShellService(state_file=tmp_path / "state" / "app-state.json")
+    bundle_path = tmp_path / "Exports" / "unsafe-backup.zip"
+    bundle_path.parent.mkdir(parents=True)
+    with ZipFile(bundle_path, "w") as archive:
+        archive.writestr("../manifest.json", "{}")
+
+    inspection = service.inspect_backup_bundle(bundle_path_text=str(bundle_path))
+
+    assert inspection.bundle_storage_kind == "zip"
+    assert inspection.structurally_usable is False
+    assert "invalid or unreadable" in inspection.message.casefold()
+    assert any("unsafe path entry" in warning.casefold() for warning in inspection.warnings)
 
 
 @pytest.mark.parametrize(
@@ -833,6 +969,87 @@ def test_plan_restore_import_from_backup_bundle_reports_version_conflicts(
     assert result.review_config_count >= 1
 
 
+def test_plan_restore_import_from_zip_backup_bundle_reports_missing_local_mods(
+    tmp_path: Path,
+) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+    zip_path = exports_root / "sdvmm-backup-zip-plan.zip"
+
+    bundle_game = tmp_path / "BundleGame"
+    bundle_real_mods = tmp_path / "BundleRealMods"
+    bundle_sandbox_mods = tmp_path / "BundleSandboxMods"
+    bundle_real_archive = tmp_path / "BundleRealArchive"
+    bundle_sandbox_archive = tmp_path / "BundleSandboxArchive"
+    _create_launchable_game_install(bundle_game)
+    bundle_real_alpha = _create_mod(bundle_real_mods, "RealAlpha", "Sample.RealAlpha", version="1.0.0")
+    (bundle_real_alpha / "config.json").write_text('{"enabled":true}', encoding="utf-8")
+    bundle_sandbox_mods.mkdir()
+    bundle_real_archive.mkdir()
+    bundle_sandbox_archive.mkdir()
+
+    bundle_config = AppConfig(
+        game_path=bundle_game,
+        mods_path=bundle_real_mods,
+        app_data_path=tmp_path / "BundleAppData",
+        sandbox_mods_path=bundle_sandbox_mods,
+        sandbox_archive_path=bundle_sandbox_archive,
+        real_archive_path=bundle_real_archive,
+    )
+
+    exported = service.export_backup_bundle(
+        destination_root_text=str(zip_path),
+        bundle_storage_kind="zip",
+        game_path_text=str(bundle_game),
+        mods_dir_text=str(bundle_real_mods),
+        sandbox_mods_path_text=str(bundle_sandbox_mods),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(bundle_real_archive),
+        sandbox_archive_path_text=str(bundle_sandbox_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=bundle_config,
+    )
+
+    local_game = tmp_path / "LocalGame"
+    local_real_mods = tmp_path / "LocalRealMods"
+    local_sandbox_mods = tmp_path / "LocalSandboxMods"
+    local_real_archive = tmp_path / "LocalRealArchive"
+    local_sandbox_archive = tmp_path / "LocalSandboxArchive"
+    _create_launchable_game_install(local_game)
+    local_real_mods.mkdir()
+    local_sandbox_mods.mkdir()
+    local_real_archive.mkdir()
+    local_sandbox_archive.mkdir()
+
+    result = service.plan_restore_import_from_backup_bundle(
+        bundle_path_text=str(exported.bundle_path),
+        game_path_text=str(local_game),
+        mods_dir_text=str(local_real_mods),
+        sandbox_mods_path_text=str(local_sandbox_mods),
+        sandbox_archive_path_text=str(local_sandbox_archive),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(local_real_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=None,
+    )
+
+    planned_mod = next(entry for entry in result.mod_entries if entry.unique_id == "Sample.RealAlpha")
+
+    assert result.bundle_path == exported.bundle_path
+    assert result.inspection.bundle_storage_kind == "zip"
+    assert result.inspection.content_root_path is not None
+    assert planned_mod.state == "missing_locally"
+    assert result.safe_mod_count >= 1
+
+
 def test_plan_restore_import_from_backup_bundle_reports_structurally_incomplete_content(
     tmp_path: Path,
 ) -> None:
@@ -1079,6 +1296,85 @@ def test_execute_restore_import_requires_explicit_confirmation_before_writes(
         service.execute_restore_import(plan)
 
     assert (local_real_mods / "RealAlpha").exists() is False
+
+
+def test_execute_restore_import_supports_zip_bundle_execution(tmp_path: Path) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+    zip_path = exports_root / "sdvmm-backup-zip-execute.zip"
+
+    bundle_game = tmp_path / "BundleGame"
+    bundle_real_mods = tmp_path / "BundleRealMods"
+    bundle_sandbox_mods = tmp_path / "BundleSandboxMods"
+    bundle_real_archive = tmp_path / "BundleRealArchive"
+    bundle_sandbox_archive = tmp_path / "BundleSandboxArchive"
+    _create_launchable_game_install(bundle_game)
+    bundle_real_alpha = _create_mod(bundle_real_mods, "RealAlpha", "Sample.RealAlpha", version="1.0.0")
+    (bundle_real_alpha / "config.json").write_text('{"enabled":true}', encoding="utf-8")
+    bundle_sandbox_mods.mkdir()
+    bundle_real_archive.mkdir()
+    bundle_sandbox_archive.mkdir()
+
+    bundle_config = AppConfig(
+        game_path=bundle_game,
+        mods_path=bundle_real_mods,
+        app_data_path=tmp_path / "BundleAppData",
+        sandbox_mods_path=bundle_sandbox_mods,
+        sandbox_archive_path=bundle_sandbox_archive,
+        real_archive_path=bundle_real_archive,
+    )
+    exported = service.export_backup_bundle(
+        destination_root_text=str(zip_path),
+        bundle_storage_kind="zip",
+        game_path_text=str(bundle_game),
+        mods_dir_text=str(bundle_real_mods),
+        sandbox_mods_path_text=str(bundle_sandbox_mods),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(bundle_real_archive),
+        sandbox_archive_path_text=str(bundle_sandbox_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=bundle_config,
+    )
+
+    local_game = tmp_path / "LocalGame"
+    local_real_mods = tmp_path / "LocalRealMods"
+    local_sandbox_mods = tmp_path / "LocalSandboxMods"
+    local_real_archive = tmp_path / "LocalRealArchive"
+    local_sandbox_archive = tmp_path / "LocalSandboxArchive"
+    _create_launchable_game_install(local_game)
+    local_real_mods.mkdir()
+    local_sandbox_mods.mkdir()
+    local_real_archive.mkdir()
+    local_sandbox_archive.mkdir()
+
+    plan = service.plan_restore_import_from_backup_bundle(
+        bundle_path_text=str(exported.bundle_path),
+        game_path_text=str(local_game),
+        mods_dir_text=str(local_real_mods),
+        sandbox_mods_path_text=str(local_sandbox_mods),
+        sandbox_archive_path_text=str(local_sandbox_archive),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(local_real_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=None,
+    )
+
+    result = service.execute_restore_import(plan, confirm_execution=True)
+
+    restored_alpha = local_real_mods / "RealAlpha"
+    assert plan.inspection.bundle_storage_kind == "zip"
+    assert result.bundle_path == exported.bundle_path
+    assert result.restored_mod_count == 1
+    assert restored_alpha.exists() is True
+    assert (restored_alpha / "config.json").read_text(encoding="utf-8") == '{"enabled":true}'
 
 
 def test_execute_restore_import_rolls_back_partial_writes_on_failure(
@@ -1546,7 +1842,10 @@ def test_compare_real_and_sandbox_mods_marks_duplicate_unique_id_as_ambiguous(
     assert "real Mods has 2 folders with this UniqueID" in entry.note
 
 
-def test_launch_game_vanilla_uses_saved_game_path_when_input_empty(tmp_path: Path) -> None:
+def test_launch_game_vanilla_uses_saved_game_path_when_input_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     game_path = tmp_path / "Game"
     game_path.mkdir()
@@ -1563,12 +1862,16 @@ def test_launch_game_vanilla_uses_saved_game_path_when_input_empty(tmp_path: Pat
         captured["command"] = command
         return 31337
 
-    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(shell_service_module, "launch_game_process", _fake_launch)
-    try:
-        result = service.launch_game_vanilla(game_path_text="", existing_config=config)
-    finally:
-        monkeypatch.undo()
+    monkeypatch.setattr(
+        service,
+        "_prepare_steam_prelaunch_for_game_launch",
+        lambda **_: shell_service_module.SteamPrelaunchResult(
+            state="already_running",
+            message="Steam was already running.",
+        ),
+    )
+    result = service.launch_game_vanilla(game_path_text="", existing_config=config)
 
     command = captured.get("command")
     assert command is not None
@@ -1576,6 +1879,182 @@ def test_launch_game_vanilla_uses_saved_game_path_when_input_empty(tmp_path: Pat
     assert result.game_path == game_path
     assert result.executable_path == executable
     assert result.pid == 31337
+    assert result.steam_prelaunch_state == "already_running"
+    assert result.steam_prelaunch_message == "Steam was already running."
+
+
+def test_launch_game_vanilla_reports_steam_already_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    game_path.mkdir()
+    (game_path / "Stardew Valley").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(shell_service_module, "launch_game_process", lambda command: 10101)
+    monkeypatch.setattr(
+        service,
+        "_prepare_steam_prelaunch_for_game_launch",
+        lambda **_: shell_service_module.SteamPrelaunchResult(
+            state="already_running",
+            message="Steam was already running.",
+        ),
+    )
+
+    result = service.launch_game_vanilla(game_path_text=str(game_path), existing_config=None)
+
+    assert result.steam_prelaunch_state == "already_running"
+    assert result.steam_prelaunch_message == "Steam was already running."
+
+
+def test_prepare_steam_prelaunch_reports_already_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    attempted: list[str] = []
+    monkeypatch.setattr(service, "_detect_steam_running_best_effort", lambda: True)
+    monkeypatch.setattr(
+        service,
+        "_attempt_steam_start_best_effort",
+        lambda: attempted.append("start"),
+    )
+
+    result = service._prepare_steam_prelaunch_for_game_launch(enabled=True)
+
+    assert result.state == "already_running"
+    assert result.message == "Steam was already running."
+    assert attempted == []
+
+
+def test_prepare_steam_prelaunch_attempts_start_when_not_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    attempted: list[str] = []
+    monkeypatch.setattr(service, "_detect_steam_running_best_effort", lambda: False)
+    monkeypatch.setattr(
+        service,
+        "_attempt_steam_start_best_effort",
+        lambda: attempted.append("start"),
+    )
+
+    result = service._prepare_steam_prelaunch_for_game_launch(enabled=True)
+
+    assert result.state == "start_attempted"
+    assert attempted == ["start"]
+    assert result.message == "Steam was not running; start was attempted and game launch continued anyway."
+
+
+def test_prepare_steam_prelaunch_reports_unknown_when_detection_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    monkeypatch.setattr(service, "_detect_steam_running_best_effort", lambda: None)
+
+    result = service._prepare_steam_prelaunch_for_game_launch(enabled=True)
+
+    assert result.state == "state_unknown"
+    assert result.message == "Steam running status could not be confirmed; game launch continued anyway."
+
+
+def test_prepare_steam_prelaunch_skips_detection_and_start_when_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    monkeypatch.setattr(
+        service,
+        "_detect_steam_running_best_effort",
+        lambda: (_ for _ in ()).throw(AssertionError("detection should be skipped")),
+    )
+    monkeypatch.setattr(
+        service,
+        "_attempt_steam_start_best_effort",
+        lambda: (_ for _ in ()).throw(AssertionError("start should be skipped")),
+    )
+
+    result = service._prepare_steam_prelaunch_for_game_launch(enabled=False)
+
+    assert result.state == "disabled"
+    assert (
+        result.message
+        == "Steam auto-start assistance is off; game launch continued without Steam prelaunch."
+    )
+
+
+def test_launch_game_smapi_attempts_steam_start_when_not_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    smapi_executable = _create_launchable_game_install(game_path)
+    captured: dict[str, object] = {}
+
+    def _fake_launch(command):
+        captured["command"] = command
+        return 20202
+
+    monkeypatch.setattr(shell_service_module, "launch_game_process", _fake_launch)
+    monkeypatch.setattr(
+        service,
+        "_prepare_steam_prelaunch_for_game_launch",
+        lambda **_: shell_service_module.SteamPrelaunchResult(
+            state="start_attempted",
+            message="Steam was not running; start was attempted and game launch continued anyway.",
+        ),
+    )
+
+    result = service.launch_game_smapi(game_path_text=str(game_path), existing_config=None)
+
+    assert captured.get("command") is not None
+    assert result.executable_path == smapi_executable
+    assert result.pid == 20202
+    assert result.steam_prelaunch_state == "start_attempted"
+    assert (
+        result.steam_prelaunch_message
+        == "Steam was not running; start was attempted and game launch continued anyway."
+    )
+
+
+def test_launch_game_sandbox_dev_reports_unavailable_steam_prelaunch_honestly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    _create_launchable_game_install(game_path)
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+
+    monkeypatch.setattr(shell_service_module, "launch_game_process", lambda command: 30303)
+    monkeypatch.setattr(
+        service,
+        "_prepare_steam_prelaunch_for_game_launch",
+        lambda **_: shell_service_module.SteamPrelaunchResult(
+            state="state_unknown",
+            message="Steam running status could not be confirmed; game launch continued anyway.",
+        ),
+    )
+
+    result = service.launch_game_sandbox_dev(
+        game_path_text=str(game_path),
+        sandbox_mods_path_text=str(sandbox_mods),
+        configured_mods_path_text=str(real_mods),
+        existing_config=None,
+    )
+
+    assert result.steam_prelaunch_state == "state_unknown"
+    assert (
+        result.steam_prelaunch_message
+        == "Steam running status could not be confirmed; game launch continued anyway."
+    )
 
 
 def test_launch_game_smapi_is_blocked_when_not_detected(tmp_path: Path) -> None:
@@ -1638,7 +2117,10 @@ def test_get_sandbox_dev_launch_readiness_blocks_matching_real_mods_path(tmp_pat
     assert "matches the configured real Mods path" in readiness.message
 
 
-def test_launch_game_sandbox_dev_uses_smapi_with_sandbox_mods_override(tmp_path: Path) -> None:
+def test_launch_game_sandbox_dev_uses_smapi_with_sandbox_mods_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
     game_path = tmp_path / "Game"
     real_mods = tmp_path / "RealMods"
@@ -1652,17 +2134,21 @@ def test_launch_game_sandbox_dev_uses_smapi_with_sandbox_mods_override(tmp_path:
         captured["command"] = command
         return 42424
 
-    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(shell_service_module, "launch_game_process", _fake_launch)
-    try:
-        result = service.launch_game_sandbox_dev(
-            game_path_text=str(game_path),
-            sandbox_mods_path_text=str(sandbox_mods),
-            configured_mods_path_text=str(real_mods),
-            existing_config=None,
-        )
-    finally:
-        monkeypatch.undo()
+    monkeypatch.setattr(
+        service,
+        "_prepare_steam_prelaunch_for_game_launch",
+        lambda **_: shell_service_module.SteamPrelaunchResult(
+            state="already_running",
+            message="Steam was already running.",
+        ),
+    )
+    result = service.launch_game_sandbox_dev(
+        game_path_text=str(game_path),
+        sandbox_mods_path_text=str(sandbox_mods),
+        configured_mods_path_text=str(real_mods),
+        existing_config=None,
+    )
 
     command = captured.get("command")
     assert command is not None
@@ -1676,6 +2162,44 @@ def test_launch_game_sandbox_dev_uses_smapi_with_sandbox_mods_override(tmp_path:
     assert result.pid == 42424
     assert result.executable_path == smapi_executable
     assert result.mods_path_override == sandbox_mods
+    assert result.steam_prelaunch_state == "already_running"
+
+
+def test_launch_game_vanilla_skips_steam_prelaunch_when_toggle_is_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    game_path.mkdir()
+    executable = game_path / "Stardew Valley"
+    executable.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(
+        service,
+        "_detect_steam_running_best_effort",
+        lambda: (_ for _ in ()).throw(AssertionError("detection should be skipped")),
+    )
+    monkeypatch.setattr(
+        service,
+        "_attempt_steam_start_best_effort",
+        lambda: (_ for _ in ()).throw(AssertionError("start should be skipped")),
+    )
+    monkeypatch.setattr(shell_service_module, "launch_game_process", lambda command: 40404)
+
+    result = service.launch_game_vanilla(
+        game_path_text=str(game_path),
+        existing_config=None,
+        steam_auto_start_enabled=False,
+    )
+
+    assert result.executable_path == executable
+    assert result.pid == 40404
+    assert result.steam_prelaunch_state == "disabled"
+    assert (
+        result.steam_prelaunch_message
+        == "Steam auto-start assistance is off; game launch continued without Steam prelaunch."
+    )
 
 
 def test_get_sandbox_mods_sync_readiness_requires_selection(tmp_path: Path) -> None:
@@ -5241,6 +5765,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
         nexus_api_key_text="persisted-key",
         scan_target="sandbox_mods",
         install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        steam_auto_start_enabled=False,
         existing_config=None,
     )
 
@@ -5253,6 +5778,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     assert saved.nexus_api_key == "persisted-key"
     assert saved.scan_target == "sandbox_mods"
     assert saved.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert saved.steam_auto_start_enabled is False
 
     reloaded = AppShellService(state_file=tmp_path / "app-state.json").load_startup_config()
     assert reloaded.config is not None
@@ -5264,6 +5790,7 @@ def test_save_operational_config_persists_paths_and_scan_target(tmp_path: Path) 
     assert reloaded.config.nexus_api_key == "persisted-key"
     assert reloaded.config.scan_target == "sandbox_mods"
     assert reloaded.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert reloaded.config.steam_auto_start_enabled is False
 
 
 def test_persist_session_config_if_valid_saves_watcher_paths_and_targets(
@@ -5296,6 +5823,7 @@ def test_persist_session_config_if_valid_saves_watcher_paths_and_targets(
         nexus_api_key_text="session-key",
         scan_target=SCAN_TARGET_SANDBOX_MODS,
         install_target=INSTALL_TARGET_CONFIGURED_REAL_MODS,
+        steam_auto_start_enabled=False,
         existing_config=None,
     )
 
@@ -5305,6 +5833,7 @@ def test_persist_session_config_if_valid_saves_watcher_paths_and_targets(
     assert result.config.secondary_watched_downloads_path == builds
     assert result.config.scan_target == SCAN_TARGET_SANDBOX_MODS
     assert result.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert result.config.steam_auto_start_enabled is False
 
     reloaded = service.load_startup_config()
     assert reloaded.config is not None
@@ -5314,6 +5843,7 @@ def test_persist_session_config_if_valid_saves_watcher_paths_and_targets(
     assert reloaded.config.real_archive_path == real_archive
     assert reloaded.config.scan_target == SCAN_TARGET_SANDBOX_MODS
     assert reloaded.config.install_target == INSTALL_TARGET_CONFIGURED_REAL_MODS
+    assert reloaded.config.steam_auto_start_enabled is False
 
 
 def test_persist_session_config_if_valid_skips_incomplete_first_run_state(

@@ -5,10 +5,11 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from collections.abc import Iterable
 from collections import Counter
 import shutil
+import subprocess
 import tempfile
 from typing import Literal
 from uuid import uuid4
@@ -205,12 +206,32 @@ class ScanResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SteamPrelaunchResult:
+    state: Literal[
+        "disabled",
+        "already_running",
+        "start_attempted",
+        "start_failed",
+        "state_unknown",
+    ]
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
 class LaunchStartResult:
     mode: str
     game_path: Path
     executable_path: Path
     pid: int
     mods_path_override: Path | None = None
+    steam_prelaunch_state: Literal[
+        "disabled",
+        "already_running",
+        "start_attempted",
+        "start_failed",
+        "state_unknown",
+    ] = "state_unknown"
+    steam_prelaunch_message: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +341,7 @@ class BackupBundleExportResult:
     summary_path: Path
     created_at_utc: str
     items: tuple[BackupBundleExportItem, ...]
+    bundle_storage_kind: Literal["directory", "zip"] = "directory"
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,6 +355,14 @@ class _BackupBundleSourceResolution:
 class _PreparedModConfigSnapshot:
     item: BackupBundleExportItem
     temp_root: Path | None = None
+
+
+@dataclass(slots=True)
+class _PreparedBackupBundleZipContent:
+    artifact_path: Path
+    content_root_path: Path
+    temp_dir: tempfile.TemporaryDirectory[str]
+    signature: tuple[int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -392,6 +422,7 @@ _ACTIONABLE_INTAKE_CLASSIFICATIONS = {
 class AppShellService:
     def __init__(self, state_file: Path) -> None:
         self._state_file = state_file
+        self._prepared_backup_bundle_zip_content: dict[Path, _PreparedBackupBundleZipContent] = {}
 
     @property
     def state_file(self) -> Path:
@@ -496,6 +527,7 @@ class AppShellService:
         self,
         *,
         destination_root_text: str,
+        bundle_storage_kind: Literal["directory", "zip"] = "directory",
         game_path_text: str,
         mods_dir_text: str,
         sandbox_mods_path_text: str,
@@ -508,11 +540,40 @@ class AppShellService:
         install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
         existing_config: AppConfig | None,
     ) -> BackupBundleExportResult:
-        destination_root = Path(destination_root_text.strip()).expanduser()
-        if not destination_root_text.strip():
+        destination_text = destination_root_text.strip()
+        if bundle_storage_kind not in {"directory", "zip"}:
+            raise AppShellError("Backup export format is not supported.")
+        if not destination_text:
+            if bundle_storage_kind == "zip":
+                raise AppShellError("Select a destination .zip path for the backup export first.")
             raise AppShellError("Select a destination folder for the backup export first.")
-        if not destination_root.exists() or not destination_root.is_dir():
-            raise AppShellError(f"Backup export destination is not accessible: {destination_root}")
+
+        destination_path = Path(destination_text).expanduser()
+        if bundle_storage_kind == "directory":
+            if not destination_path.exists() or not destination_path.is_dir():
+                raise AppShellError(
+                    f"Backup export destination is not accessible: {destination_path}"
+                )
+            final_bundle_path = self._allocate_backup_bundle_path(destination_path)
+            export_work_root = final_bundle_path
+            export_work_root_parent: Path | None = None
+        else:
+            if destination_path.suffix.casefold() != ".zip":
+                destination_path = destination_path.with_suffix(".zip")
+            destination_parent = destination_path.parent
+            if not destination_parent.exists() or not destination_parent.is_dir():
+                raise AppShellError(
+                    f"Backup zip export destination is not accessible: {destination_parent}"
+                )
+            if destination_path.exists():
+                raise AppShellError(
+                    f"Backup zip export destination already exists: {destination_path}"
+                )
+            export_work_root_parent = Path(
+                tempfile.mkdtemp(prefix="sdvmm-backup-export-", dir=str(destination_parent))
+            )
+            export_work_root = self._allocate_backup_bundle_path(export_work_root_parent)
+            final_bundle_path = destination_path
 
         export_config = self._build_validated_operational_config(
             game_path_text=game_path_text,
@@ -564,9 +625,16 @@ class AppShellService:
             if snapshot.temp_root is not None
         )
 
-        bundle_path = self._allocate_backup_bundle_path(destination_root)
-        manifest_path = bundle_path / "manifest.json"
-        summary_path = bundle_path / "README.txt"
+        manifest_path = (
+            export_work_root / "manifest.json"
+            if bundle_storage_kind == "directory"
+            else _bundle_zip_member_pseudo_path(final_bundle_path, "manifest.json")
+        )
+        summary_path = (
+            export_work_root / "README.txt"
+            if bundle_storage_kind == "directory"
+            else _bundle_zip_member_pseudo_path(final_bundle_path, "README.txt")
+        )
         created_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         plan = (
             BackupBundleExportItem(
@@ -649,41 +717,55 @@ class AppShellService:
             )
 
         try:
-            bundle_path.mkdir(parents=True, exist_ok=False)
-            save_app_config(bundle_path / "manager-state" / self._state_file.name, export_config)
+            export_work_root.mkdir(parents=True, exist_ok=False)
+            save_app_config(export_work_root / "manager-state" / self._state_file.name, export_config)
             for item in plan:
-                self._copy_backup_bundle_item(bundle_path=bundle_path, item=item)
+                self._copy_backup_bundle_item(bundle_path=export_work_root, item=item)
             summary_text = build_backup_bundle_export_text(
                 BackupBundleExportResult(
-                    bundle_path=bundle_path,
+                    bundle_path=final_bundle_path,
                     manifest_path=manifest_path,
                     summary_path=summary_path,
                     created_at_utc=created_at_utc,
                     items=plan,
+                    bundle_storage_kind=bundle_storage_kind,
                 )
             )
             write_json_file_atomic(
-                manifest_path,
+                export_work_root / "manifest.json",
                 self._serialize_backup_bundle_manifest(
-                    bundle_path=bundle_path,
+                    bundle_path=export_work_root,
                     created_at_utc=created_at_utc,
                     items=plan,
                 ),
             )
-            write_text_file_atomic(summary_path, summary_text)
+            write_text_file_atomic(export_work_root / "README.txt", summary_text)
+            if bundle_storage_kind == "zip":
+                self._create_backup_bundle_zip(
+                    source_bundle_path=export_work_root,
+                    destination_zip_path=final_bundle_path,
+                )
         except (AppStateStoreError, OSError) as exc:
-            shutil.rmtree(bundle_path, ignore_errors=True)
+            if bundle_storage_kind == "directory":
+                shutil.rmtree(export_work_root, ignore_errors=True)
+            else:
+                shutil.rmtree(export_work_root_parent, ignore_errors=True)
+                if final_bundle_path.exists():
+                    final_bundle_path.unlink(missing_ok=True)
             raise AppShellError(f"Could not create backup bundle: {exc}") from exc
         finally:
             for temp_root in temp_snapshot_roots:
                 shutil.rmtree(temp_root, ignore_errors=True)
+            if bundle_storage_kind == "zip" and export_work_root_parent is not None:
+                shutil.rmtree(export_work_root_parent, ignore_errors=True)
 
         return BackupBundleExportResult(
-            bundle_path=bundle_path,
+            bundle_path=final_bundle_path,
             manifest_path=manifest_path,
             summary_path=summary_path,
             created_at_utc=created_at_utc,
             items=plan,
+            bundle_storage_kind=bundle_storage_kind,
         )
 
     def inspect_backup_bundle(
@@ -692,13 +774,36 @@ class AppShellService:
         bundle_path_text: str,
     ) -> BackupBundleInspectionResult:
         if not bundle_path_text.strip():
-            raise AppShellError("Select a backup bundle folder first.")
+            raise AppShellError("Select a backup bundle first.")
         bundle_path = Path(bundle_path_text.strip()).expanduser()
-        if not bundle_path.exists() or not bundle_path.is_dir():
-            raise AppShellError(f"Backup bundle folder is not accessible: {bundle_path}")
+        if not bundle_path.exists():
+            raise AppShellError(f"Backup bundle is not accessible: {bundle_path}")
+        if bundle_path.is_dir():
+            bundle_storage_kind: Literal["directory", "zip"] = "directory"
+            content_root_path = bundle_path
+            manifest_path = content_root_path / "manifest.json"
+            summary_path = content_root_path / "README.txt"
+        elif bundle_path.is_file() and bundle_path.suffix.casefold() == ".zip":
+            bundle_storage_kind = "zip"
+            manifest_path = _bundle_zip_member_pseudo_path(bundle_path, "manifest.json")
+            summary_path = _bundle_zip_member_pseudo_path(bundle_path, "README.txt")
+            try:
+                prepared_zip = self._prepare_zip_backup_bundle_content(bundle_path)
+            except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile) as exc:
+                return _invalid_backup_bundle_inspection_result(
+                    bundle_path=bundle_path,
+                    manifest_path=manifest_path,
+                    summary_path=summary_path,
+                    message="Backup bundle zip is invalid or unreadable.",
+                    warnings=(f"Zip bundle could not be opened safely: {exc}",),
+                    bundle_storage_kind="zip",
+                )
+            content_root_path = prepared_zip.content_root_path
+            manifest_path = content_root_path / "manifest.json"
+            summary_path = content_root_path / "README.txt"
+        else:
+            raise AppShellError(f"Backup bundle is not accessible: {bundle_path}")
 
-        manifest_path = bundle_path / "manifest.json"
-        summary_path = bundle_path / "README.txt"
         if not manifest_path.exists() or not manifest_path.is_file():
             return _invalid_backup_bundle_inspection_result(
                 bundle_path=bundle_path,
@@ -706,6 +811,7 @@ class AppShellService:
                 summary_path=summary_path,
                 message="Backup bundle is structurally invalid: manifest.json is missing.",
                 warnings=("Required manifest file is missing.",),
+                bundle_storage_kind=bundle_storage_kind,
             )
 
         try:
@@ -717,6 +823,7 @@ class AppShellService:
                 summary_path=summary_path,
                 message="Backup bundle is structurally invalid: manifest.json is not valid JSON.",
                 warnings=(f"Manifest JSON could not be parsed: {exc}",),
+                bundle_storage_kind=bundle_storage_kind,
             )
         except OSError as exc:
             raise AppShellError(f"Could not inspect backup bundle: {exc}") from exc
@@ -726,6 +833,8 @@ class AppShellService:
             manifest_path=manifest_path,
             summary_path=summary_path,
             raw_manifest=raw_manifest,
+            bundle_storage_kind=bundle_storage_kind,
+            content_root_path=content_root_path,
         )
 
     def plan_restore_import_from_backup_bundle(
@@ -1169,6 +1278,7 @@ class AppShellService:
         nexus_api_key_text: str = "",
         scan_target: ScanTargetKind,
         install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
+        steam_auto_start_enabled: bool = True,
         existing_config: AppConfig | None,
     ) -> AppConfig:
         config = self._build_validated_operational_config(
@@ -1182,6 +1292,7 @@ class AppShellService:
             nexus_api_key_text=nexus_api_key_text,
             scan_target=scan_target,
             install_target=install_target,
+            steam_auto_start_enabled=steam_auto_start_enabled,
             existing_config=existing_config,
         )
 
@@ -1222,6 +1333,7 @@ class AppShellService:
         nexus_api_key_text: str = "",
         scan_target: ScanTargetKind,
         install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
+        steam_auto_start_enabled: bool = True,
         existing_config: AppConfig | None,
     ) -> AppConfig:
         if scan_target not in {SCAN_TARGET_CONFIGURED_REAL_MODS, SCAN_TARGET_SANDBOX_MODS}:
@@ -1284,6 +1396,7 @@ class AppShellService:
             nexus_api_key=nexus_api_key,
             scan_target=scan_target,
             install_target=install_target,
+            steam_auto_start_enabled=steam_auto_start_enabled,
         )
         return config
 
@@ -1300,6 +1413,7 @@ class AppShellService:
         nexus_api_key_text: str = "",
         scan_target: ScanTargetKind,
         install_target: InstallTargetKind = INSTALL_TARGET_SANDBOX_MODS,
+        steam_auto_start_enabled: bool = True,
         existing_config: AppConfig | None,
     ) -> SessionConfigPersistenceResult:
         has_session_input = any(
@@ -1334,6 +1448,7 @@ class AppShellService:
                 nexus_api_key_text=nexus_api_key_text,
                 scan_target=scan_target,
                 install_target=install_target,
+                steam_auto_start_enabled=steam_auto_start_enabled,
                 existing_config=existing_config,
             )
         except AppShellError as exc:
@@ -1354,8 +1469,15 @@ class AppShellService:
         *,
         game_path_text: str,
         existing_config: AppConfig | None = None,
+        steam_auto_start_enabled: bool | None = None,
     ) -> LaunchStartResult:
         game_path = self._resolve_game_path(game_path_text, existing_config)
+        steam_prelaunch = self._prepare_steam_prelaunch_for_game_launch(
+            enabled=self._resolve_steam_auto_start_enabled(
+                requested_value=steam_auto_start_enabled,
+                existing_config=existing_config,
+            )
+        )
         try:
             command = resolve_launch_command(game_path=game_path, mode="vanilla")
             pid = launch_game_process(command)
@@ -1366,6 +1488,8 @@ class AppShellService:
             game_path=game_path,
             executable_path=command.executable_path,
             pid=pid,
+            steam_prelaunch_state=steam_prelaunch.state,
+            steam_prelaunch_message=steam_prelaunch.message,
         )
 
     def launch_game_smapi(
@@ -1373,8 +1497,15 @@ class AppShellService:
         *,
         game_path_text: str,
         existing_config: AppConfig | None = None,
+        steam_auto_start_enabled: bool | None = None,
     ) -> LaunchStartResult:
         game_path = self._resolve_game_path(game_path_text, existing_config)
+        steam_prelaunch = self._prepare_steam_prelaunch_for_game_launch(
+            enabled=self._resolve_steam_auto_start_enabled(
+                requested_value=steam_auto_start_enabled,
+                existing_config=existing_config,
+            )
+        )
         try:
             command = resolve_launch_command(game_path=game_path, mode="smapi")
             pid = launch_game_process(command)
@@ -1385,6 +1516,8 @@ class AppShellService:
             game_path=game_path,
             executable_path=command.executable_path,
             pid=pid,
+            steam_prelaunch_state=steam_prelaunch.state,
+            steam_prelaunch_message=steam_prelaunch.message,
         )
 
     def get_sandbox_dev_launch_readiness(
@@ -1422,12 +1555,19 @@ class AppShellService:
         sandbox_mods_path_text: str,
         configured_mods_path_text: str,
         existing_config: AppConfig | None = None,
+        steam_auto_start_enabled: bool | None = None,
     ) -> LaunchStartResult:
         game_path, sandbox_mods_path, command = self._resolve_sandbox_dev_launch_context(
             game_path_text=game_path_text,
             sandbox_mods_path_text=sandbox_mods_path_text,
             configured_mods_path_text=configured_mods_path_text,
             existing_config=existing_config,
+        )
+        steam_prelaunch = self._prepare_steam_prelaunch_for_game_launch(
+            enabled=self._resolve_steam_auto_start_enabled(
+                requested_value=steam_auto_start_enabled,
+                existing_config=existing_config,
+            )
         )
         try:
             pid = launch_game_process(command)
@@ -1439,7 +1579,91 @@ class AppShellService:
             executable_path=command.executable_path,
             pid=pid,
             mods_path_override=sandbox_mods_path,
+            steam_prelaunch_state=steam_prelaunch.state,
+            steam_prelaunch_message=steam_prelaunch.message,
         )
+
+    def _resolve_steam_auto_start_enabled(
+        self,
+        *,
+        requested_value: bool | None,
+        existing_config: AppConfig | None,
+    ) -> bool:
+        if requested_value is not None:
+            return requested_value
+        if existing_config is not None:
+            return existing_config.steam_auto_start_enabled
+        return True
+
+    def _prepare_steam_prelaunch_for_game_launch(self, *, enabled: bool) -> SteamPrelaunchResult:
+        if not enabled:
+            return SteamPrelaunchResult(
+                state="disabled",
+                message=(
+                    "Steam auto-start assistance is off; game launch continued without Steam "
+                    "prelaunch."
+                ),
+            )
+        steam_running = self._detect_steam_running_best_effort()
+        if steam_running is True:
+            return SteamPrelaunchResult(
+                state="already_running",
+                message="Steam was already running.",
+            )
+        if steam_running is None:
+            return SteamPrelaunchResult(
+                state="state_unknown",
+                message="Steam running status could not be confirmed; game launch continued anyway.",
+            )
+        try:
+            self._attempt_steam_start_best_effort()
+        except OSError as exc:
+            return SteamPrelaunchResult(
+                state="start_failed",
+                message=(
+                    "Steam was not running; start was attempted but could not be completed "
+                    f"({exc}). Game launch continued anyway."
+                ),
+            )
+        return SteamPrelaunchResult(
+            state="start_attempted",
+            message="Steam was not running; start was attempted and game launch continued anyway.",
+        )
+
+    def _detect_steam_running_best_effort(self) -> bool | None:
+        if os.name != "nt":
+            return None
+        try:
+            completed = subprocess.run(
+                [
+                    "tasklist",
+                    "/FI",
+                    "IMAGENAME eq steam.exe",
+                    "/FO",
+                    "CSV",
+                    "/NH",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if completed.returncode != 0:
+            return None
+        stdout = completed.stdout.casefold()
+        if "steam.exe" in stdout:
+            return True
+        return False
+
+    def _attempt_steam_start_best_effort(self) -> None:
+        if os.name != "nt" or not hasattr(os, "startfile"):
+            raise OSError("automatic Steam start is unavailable on this platform")
+        os.startfile("steam://open/main")
 
     def get_sandbox_mods_sync_readiness(
         self,
@@ -3077,6 +3301,7 @@ class AppShellService:
                 nexus_api_key=existing_config.nexus_api_key,
                 scan_target=existing_config.scan_target,
                 install_target=existing_config.install_target,
+                steam_auto_start_enabled=existing_config.steam_auto_start_enabled,
             )
 
         return AppConfig(
@@ -4127,11 +4352,48 @@ class AppShellService:
         if app_state_item is None or app_state_item.structure_state != "present":
             return None, None
 
-        config_path = inspection.bundle_path / app_state_item.relative_path
+        config_path = _backup_bundle_content_root(inspection) / app_state_item.relative_path
         try:
             return load_app_config(config_path), None
         except AppStateStoreError as exc:
             return None, f"Bundle app-state snapshot could not be parsed: {exc}"
+
+    def _prepare_zip_backup_bundle_content(
+        self,
+        bundle_path: Path,
+    ) -> _PreparedBackupBundleZipContent:
+        resolved_bundle_path = bundle_path.resolve()
+        bundle_stat = resolved_bundle_path.stat()
+        signature = (bundle_stat.st_mtime_ns, bundle_stat.st_size)
+        cached = self._prepared_backup_bundle_zip_content.get(resolved_bundle_path)
+        if (
+            cached is not None
+            and cached.signature == signature
+            and cached.content_root_path.exists()
+        ):
+            return cached
+
+        if cached is not None:
+            cached.temp_dir.cleanup()
+            self._prepared_backup_bundle_zip_content.pop(resolved_bundle_path, None)
+
+        temp_dir = tempfile.TemporaryDirectory(prefix="sdvmm-backup-zip-")
+        extracted_root = Path(temp_dir.name)
+        try:
+            with zipfile.ZipFile(resolved_bundle_path) as bundle_zip:
+                _extract_backup_bundle_zip_safely(bundle_zip, extracted_root)
+        except Exception:
+            temp_dir.cleanup()
+            raise
+
+        prepared = _PreparedBackupBundleZipContent(
+            artifact_path=resolved_bundle_path,
+            content_root_path=_resolve_extracted_backup_bundle_content_root(extracted_root),
+            temp_dir=temp_dir,
+            signature=signature,
+        )
+        self._prepared_backup_bundle_zip_content[resolved_bundle_path] = prepared
+        return prepared
 
     @staticmethod
     def _resolve_existing_export_source(
@@ -4316,6 +4578,20 @@ class AppShellService:
 
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(item.source_path, destination_path)
+
+    @staticmethod
+    def _create_backup_bundle_zip(
+        *,
+        source_bundle_path: Path,
+        destination_zip_path: Path,
+    ) -> None:
+        with zipfile.ZipFile(destination_zip_path, mode="x", compression=zipfile.ZIP_DEFLATED) as bundle_zip:
+            for source_path in sorted(source_bundle_path.rglob("*")):
+                archive_name = source_path.relative_to(source_bundle_path).as_posix()
+                if source_path.is_dir():
+                    bundle_zip.writestr(f"{archive_name}/", b"")
+                    continue
+                bundle_zip.write(source_path, arcname=archive_name)
 
     @staticmethod
     def _serialize_backup_bundle_manifest(
@@ -4524,6 +4800,62 @@ def _iter_mod_config_artifacts(mod_folder: Path) -> tuple[Path, ...]:
     return tuple(artifacts)
 
 
+def _bundle_zip_member_pseudo_path(bundle_path: Path, relative_path: str) -> Path:
+    return Path(f"{bundle_path}!/{relative_path}")
+
+
+def _extract_backup_bundle_zip_safely(bundle_zip: zipfile.ZipFile, extracted_root: Path) -> None:
+    extracted_root_resolved = extracted_root.resolve()
+    for member in bundle_zip.infolist():
+        relative_parts = _safe_backup_bundle_zip_member_parts(member.filename)
+        destination_path = (extracted_root / Path(*relative_parts)).resolve()
+        try:
+            destination_path.relative_to(extracted_root_resolved)
+        except ValueError as exc:
+            raise OSError(
+                f"Zip bundle contains unsafe path entry outside the extraction root: {member.filename}"
+            ) from exc
+        if member.is_dir():
+            destination_path.mkdir(parents=True, exist_ok=True)
+            continue
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        with bundle_zip.open(member, "r") as source, destination_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+
+
+def _safe_backup_bundle_zip_member_parts(member_name: str) -> tuple[str, ...]:
+    normalized_name = member_name.replace("\\", "/").strip()
+    if not normalized_name:
+        raise OSError("Zip bundle contains an unsafe path entry: empty path.")
+    member_path = PurePosixPath(normalized_name)
+    if member_path.is_absolute():
+        raise OSError(f"Zip bundle contains an unsafe path entry: {member_name}")
+    parts = tuple(part for part in member_path.parts if part not in ("",))
+    if not parts or any(part in (".", "..") for part in parts):
+        raise OSError(f"Zip bundle contains an unsafe path entry: {member_name}")
+    return parts
+
+
+def _resolve_extracted_backup_bundle_content_root(extracted_root: Path) -> Path:
+    manifest_path = extracted_root / "manifest.json"
+    if manifest_path.exists():
+        return extracted_root
+
+    try:
+        child_directories = [path for path in extracted_root.iterdir() if path.is_dir()]
+    except OSError:
+        return extracted_root
+    if len(child_directories) != 1:
+        return extracted_root
+
+    nested_root = child_directories[0]
+    return nested_root if (nested_root / "manifest.json").exists() else extracted_root
+
+
+def _backup_bundle_content_root(inspection: BackupBundleInspectionResult) -> Path:
+    return inspection.content_root_path or inspection.bundle_path
+
+
 def _invalid_backup_bundle_inspection_result(
     *,
     bundle_path: Path,
@@ -4531,6 +4863,7 @@ def _invalid_backup_bundle_inspection_result(
     summary_path: Path,
     message: str,
     warnings: tuple[str, ...],
+    bundle_storage_kind: Literal["directory", "zip"] = "directory",
 ) -> BackupBundleInspectionResult:
     if not summary_path.exists():
         warnings = (*warnings, "Bundle summary README.txt is missing.")
@@ -4545,6 +4878,7 @@ def _invalid_backup_bundle_inspection_result(
         structurally_usable=False,
         message=message,
         warnings=warnings,
+        bundle_storage_kind=bundle_storage_kind,
     )
 
 
@@ -4554,7 +4888,10 @@ def _build_backup_bundle_inspection_result(
     manifest_path: Path,
     summary_path: Path,
     raw_manifest: object,
+    bundle_storage_kind: Literal["directory", "zip"] = "directory",
+    content_root_path: Path | None = None,
 ) -> BackupBundleInspectionResult:
+    bundle_content_root = content_root_path or bundle_path
     if not isinstance(raw_manifest, dict):
         return _invalid_backup_bundle_inspection_result(
             bundle_path=bundle_path,
@@ -4562,6 +4899,7 @@ def _build_backup_bundle_inspection_result(
             summary_path=summary_path,
             message="Backup bundle is structurally invalid: manifest root must be a JSON object.",
             warnings=("Manifest root is not a JSON object.",),
+            bundle_storage_kind=bundle_storage_kind,
         )
 
     warnings: list[str] = []
@@ -4609,13 +4947,15 @@ def _build_backup_bundle_inspection_result(
                 summary_path=summary_path,
             ),
             intentionally_not_included=_parse_backup_bundle_not_included(raw_manifest),
+            bundle_storage_kind=bundle_storage_kind,
+            content_root_path=bundle_content_root,
         )
 
     items: list[BackupBundleInspectionItem] = []
     structurally_usable = bundle_format == "sdvmm-local-backup" and format_version == 1
     for index, raw_item in enumerate(raw_items):
         parsed_item, item_warning, item_valid_for_restore = _parse_backup_bundle_inspection_item(
-            bundle_path=bundle_path,
+            bundle_content_root=bundle_content_root,
             raw_item=raw_item,
             item_index=index,
         )
@@ -4650,12 +4990,14 @@ def _build_backup_bundle_inspection_result(
         message=message,
         warnings=warnings,
         intentionally_not_included=_parse_backup_bundle_not_included(raw_manifest),
+        bundle_storage_kind=bundle_storage_kind,
+        content_root_path=bundle_content_root,
     )
 
 
 def _parse_backup_bundle_inspection_item(
     *,
-    bundle_path: Path,
+    bundle_content_root: Path,
     raw_item: object,
     item_index: int,
 ) -> tuple[BackupBundleInspectionItem | None, str | None, bool]:
@@ -4691,7 +5033,7 @@ def _parse_backup_bundle_inspection_item(
         note = str(note)
 
     relative_path = Path(relative_path_text)
-    bundle_item_path = bundle_path / relative_path
+    bundle_item_path = bundle_content_root / relative_path
     expected_type_matches = (
         bundle_item_path.is_file() if kind == "file" else bundle_item_path.is_dir()
     )
@@ -5015,7 +5357,7 @@ def _build_restore_import_archive_directory_plan(
     tuple[RestoreImportPlanningConfigEntry, ...],
     tuple[str, ...],
 ]:
-    bundle_directory = inspection.bundle_path / item.relative_path
+    bundle_directory = _backup_bundle_content_root(inspection) / item.relative_path
     archive_entry_count = _count_directory_children(bundle_directory)
     state: RestoreImportPlanningItemState
     if local_target_path is None:
@@ -5072,7 +5414,7 @@ def _build_restore_import_mod_directory_plan(
     tuple[RestoreImportPlanningConfigEntry, ...],
     tuple[str, ...],
 ]:
-    bundle_directory = inspection.bundle_path / item.relative_path
+    bundle_directory = _backup_bundle_content_root(inspection) / item.relative_path
     warnings: list[str] = []
     bundle_inventory, bundle_error = _scan_inventory_for_restore_planning(bundle_directory)
     if bundle_inventory is None:
@@ -5186,7 +5528,7 @@ def _build_restore_import_mod_config_directory_plan(
     tuple[RestoreImportPlanningConfigEntry, ...],
     tuple[str, ...],
 ]:
-    bundle_directory = inspection.bundle_path / item.relative_path
+    bundle_directory = _backup_bundle_content_root(inspection) / item.relative_path
     warnings: list[str] = []
     config_relative_paths, bundle_error = _scan_mod_config_snapshot_relative_paths(bundle_directory)
     if bundle_error is not None:
@@ -5807,7 +6149,11 @@ def _analyze_restore_import_execution(
             )
             continue
 
-        source_path = planning_result.bundle_path / planning_item.bundle_relative_path / entry.relative_path
+        source_path = (
+            _backup_bundle_content_root(planning_result.inspection)
+            / planning_item.bundle_relative_path
+            / entry.relative_path
+        )
         try:
             source_exists = source_path.exists()
             source_is_file = source_path.is_file()
@@ -5955,7 +6301,10 @@ def _build_restore_import_mod_folder_source_index(
         planning_item = planning_items_by_key.get(item_key)
         if planning_item is None:
             continue
-        bundle_directory = planning_result.bundle_path / planning_item.bundle_relative_path
+        bundle_directory = (
+            _backup_bundle_content_root(planning_result.inspection)
+            / planning_item.bundle_relative_path
+        )
         bundle_inventory, bundle_error = _scan_inventory_for_restore_planning(bundle_directory)
         if bundle_inventory is None:
             if bundle_error:
@@ -6016,7 +6365,10 @@ def _restore_import_unique_key_for_bundle_mod_path(
     planning_item = planning_items_by_key.get(item_key)
     if planning_item is None:
         return None
-    bundle_directory = planning_result.bundle_path / planning_item.bundle_relative_path
+    bundle_directory = (
+        _backup_bundle_content_root(planning_result.inspection)
+        / planning_item.bundle_relative_path
+    )
     bundle_inventory, bundle_error = _scan_inventory_for_restore_planning(bundle_directory)
     if bundle_inventory is None:
         if bundle_error:
@@ -6632,7 +6984,7 @@ def build_restore_import_planning_text(result: RestoreImportPlanningResult) -> s
 
     lines = [
         "Stardew Mod Manager restore/import planning",
-        f"Bundle folder: {result.bundle_path}",
+        f"Bundle artifact: {result.bundle_path}",
         f"Inspection summary: {result.inspection.message}",
         f"Planning summary: {result.message}",
         (
@@ -6694,7 +7046,7 @@ def build_restore_import_execution_result_text(
     missing_config_count = result.restored_config_count
     lines = [
         "Stardew Mod Manager restore/import execution",
-        f"Bundle folder: {result.bundle_path}",
+        f"Bundle artifact: {result.bundle_path}",
         f"Summary: {result.message}",
         "Execution rule: missing content may be restored directly, while reviewed conflicts use archive-aware mod-folder replacement.",
         "No file merge behavior was used in this stage.",
@@ -6740,9 +7092,18 @@ def build_backup_bundle_inspection_text(result: BackupBundleInspectionResult) ->
     structure_counts = Counter(item.structure_state for item in result.items)
     lines = [
         "Stardew Mod Manager backup bundle inspection",
-        f"Bundle folder: {result.bundle_path}",
-        f"Manifest: {result.manifest_path}",
-        f"Summary: {result.summary_path}",
+        f"Bundle artifact: {result.bundle_path}",
+        f"Bundle storage: {result.bundle_storage_kind}",
+        (
+            "Manifest entry: manifest.json inside the zip bundle"
+            if result.bundle_storage_kind == "zip"
+            else f"Manifest: {result.manifest_path}"
+        ),
+        (
+            "Summary entry: README.txt inside the zip bundle"
+            if result.bundle_storage_kind == "zip"
+            else f"Summary: {result.summary_path}"
+        ),
         (
             f"Bundle format: {result.bundle_format} (v{result.format_version})"
             if result.bundle_format is not None and result.format_version is not None
@@ -6755,6 +7116,10 @@ def build_backup_bundle_inspection_text(result: BackupBundleInspectionResult) ->
         f"Missing expected copied items: {structure_counts.get('missing_expected', 0)}",
         f"Unexpected present items: {structure_counts.get('unexpected_present', 0)}",
     ]
+    if result.bundle_storage_kind == "zip":
+        lines.append(
+            "Read mode: zip bundle is inspected from a temporary extracted working copy."
+        )
     if result.warnings:
         lines.extend(("", "Warnings:"))
         lines.extend(f"- {warning}" for warning in result.warnings)
@@ -6780,9 +7145,18 @@ def build_backup_bundle_export_text(result: BackupBundleExportResult) -> str:
     lines = [
         "Stardew Mod Manager backup export",
         f"Created at (UTC): {result.created_at_utc}",
-        f"Bundle folder: {result.bundle_path}",
-        f"Manifest: {result.manifest_path}",
-        f"Summary: {result.summary_path}",
+        f"Bundle artifact: {result.bundle_path}",
+        f"Bundle storage: {result.bundle_storage_kind}",
+        (
+            "Manifest entry: manifest.json inside the zip bundle"
+            if result.bundle_storage_kind == "zip"
+            else f"Manifest: {result.manifest_path}"
+        ),
+        (
+            "Summary entry: README.txt inside the zip bundle"
+            if result.bundle_storage_kind == "zip"
+            else f"Summary: {result.summary_path}"
+        ),
         "",
         "Copied into this bundle:",
     ]

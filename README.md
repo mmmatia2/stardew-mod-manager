@@ -81,6 +81,8 @@ Live Mods safety expectations:
   - manual association now participates in update resolution
 - **Sandbox dev loop**
   - sandbox-only SMAPI launch using the configured sandbox Mods path
+  - best-effort Steam prelaunch assistance for vanilla, SMAPI, and sandbox-dev launch
+  - persisted Setup toggle to turn Steam auto-start assistance on or off
   - explicit selected-mod `real -> sandbox` sync
   - explicit selected-mod `sandbox -> real` promotion
   - promotion preview/review with explicit confirmation for live writes
@@ -91,16 +93,18 @@ Live Mods safety expectations:
   - compare is visibility-first in this baseline (no compare-driven write actions)
 - **Backup bundle inspection baseline**
   - explicit export-first backup bundle creation for migration/recovery groundwork
+  - backup bundles now support both folder artifacts and `.zip` artifacts
   - inspect exported backup bundles without modifying local data
   - surface manifest format/version, included items, missing expected content, and structural usability
 - **Restore/import planning baseline**
-  - compare a selected backup bundle against the current local setup without changing local files
+  - compare a selected folder or zip backup bundle against the current local setup without changing local files
   - classify what looks safe to restore later, what needs review, and what is blocked or not usable from the current bundle
   - include config-aware visibility for common per-mod config artifacts carried in the backup bundle
   - keep destination mapping and conflicts understandable before broader restore behavior
 - **Restore/import execution baseline**
   - explicit `Execute restore/import` action built on the existing planning result
   - restores only clearly missing mod folders and supported missing config artifacts into the currently configured local destinations
+  - works from either the current folder bundle or zip bundle artifact
   - rolls back already-restored paths from the current run if a mid-run restore failure occurs
 - **Restore/import conflict-resolution baseline**
   - reviewed restore can now resolve:
@@ -110,12 +114,16 @@ Live Mods safety expectations:
   - conflicting local content is handled through archive-aware mod-folder replacement, not file merge
   - ambiguous or structurally blocked restore cases still do not execute
 - **Backup flow continuity fix**
-  - inspect, plan, and execute now reuse the current active backup bundle context instead of repeatedly asking for the same folder
+  - inspect, plan, and execute now reuse the current active backup bundle context instead of repeatedly asking for the same bundle artifact
   - the active bundle is shown in Setup so restore/import actions stay explicit about which bundle they will use
 - **Config-aware backup baseline**
   - backup export now carries common per-mod config artifacts found inside installed real/sandbox Mods trees
   - bundle inspection reports config snapshot coverage explicitly
   - restore/import planning surfaces config entries as missing locally, same content, different content, or blocked
+ - **Zip backup bundle support baseline**
+  - backup export can now create `.zip` bundle artifacts as a first-class option
+  - inspect, plan, and execute support zip bundles without dropping folder-bundle compatibility
+  - zip bundles are read through a guarded temporary extraction path; corrupt or unsafe zip bundles are rejected honestly
 - **Open-folder conveniences baseline**
   - explicit open-folder actions for the key configured workflow locations
   - quick access to real Mods, sandbox Mods, both archive roots, and both watched-download folders
@@ -198,7 +206,7 @@ You can still run focused suites when iterating:
 .\.venv\Scripts\python.exe -m pytest tests\unit\test_main_window_gui_regression.py -q
 ```
 
-### 4) Build Windows portable folder (`0.9.1`)
+### 4) Build Windows portable folder (`0.11.0`)
 
 Packaging baseline in this repo uses **PyInstaller one-folder** output because it is the smallest practical Windows desktop packaging path here without introducing installer/signing work.
 
@@ -217,13 +225,13 @@ Build the portable folder:
 Output folder:
 
 ```text
-dist\stardew-mod-manager-0.9.1-windows-portable\
+dist\stardew-mod-manager-0.11.0-windows-portable\
 ```
 
 Launch the packaged app:
 
 ```powershell
-.\dist\stardew-mod-manager-0.9.1-windows-portable\Stardew Mod Manager.exe
+.\dist\stardew-mod-manager-0.11.0-windows-portable\Stardew Mod Manager.exe
 ```
 
 Current caveats:
@@ -242,9 +250,10 @@ Current caveats:
 - no packaging/installer/release hardening yet
 - no cross-platform polish emphasis yet (Windows workflow is the primary dev path)
 - restore/import now handles reviewed version/content conflicts through archive-aware mod-folder replacement; file-level merge behavior is still deferred
+- Steam prelaunch help is now shipped as best-effort launch assistance with a persisted user-controlled toggle; it does not do background Steam management or retry loops
 - near-term usability priorities are now:
-  - Steam prelaunch best-effort behavior
-  - compare follow-up only after current restore/import and launch flows settle
+  - compare follow-up after the current restore/import and Steam-assisted launch baselines
+  - restore/import file-level merge follow-up only if safety/review semantics are explicitly designed
 - downloader automation, profile systems, and broad UI polish remain lower priority than restore/import trust work
 
 ## Data and persistence notes
@@ -252,10 +261,11 @@ Current caveats:
 - local file-based app state (JSON), no database
 - install and recovery history are recorded for audit/recovery workflows
 - update-source intent overlay is persisted separately and merged at app-layer update check time
-- `Export backup bundle` creates a local folder snapshot using the current validated setup values, not just the last saved `app-state.json`
+- `Export backup bundle` creates a local backup artifact using the current validated setup values, not just the last saved `app-state.json`
 - the export bundle can include app state/config, install/recovery history, update-source intent overlay, real/sandbox Mods, and app-managed archive roots when they exist
 - export now also includes common per-mod config artifacts found inside installed Mods trees under `mod-config\real-mods\...` and `mod-config\sandbox-mods\...`
-- `Inspect backup bundle` reads an exported bundle and reports structure/usability without applying restore changes
+- export supports both folder bundles and `.zip` bundles; folder bundles remain fully supported for compatibility
+- `Inspect backup bundle` reads an exported folder or zip bundle and reports structure/usability without applying restore changes
 - `Plan restore/import` compares the current active backup bundle against the current local machine and reports what looks safe later, what needs review, and what is blocked, including config artifact visibility
 - `Execute restore/import` now restores clearly missing content and reviewed conflict cases into the current configured destinations, reusing the current active bundle context when available
 - reviewed conflicts use archive-aware mod-folder replacement; file-level merge behavior for conflicting local content is still intentionally not implemented

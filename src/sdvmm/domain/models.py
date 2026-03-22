@@ -43,6 +43,7 @@ class AppConfig:
     nexus_api_key: str | None = None
     scan_target: str = "configured_real_mods"
     install_target: str = "sandbox_mods"
+    steam_auto_start_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -239,6 +240,8 @@ class BackupBundleInspectionResult:
     message: str
     warnings: tuple[str, ...] = tuple()
     intentionally_not_included: tuple[str, ...] = tuple()
+    bundle_storage_kind: Literal["directory", "zip"] = "directory"
+    content_root_path: Path | None = None
 
 
 RestoreImportPlanningItemState = Literal[

@@ -73,6 +73,7 @@ def load_app_config(state_file: Path) -> AppConfig | None:
     nexus_api_key = _optional_non_empty_string(app_config, "nexus_api_key")
     scan_target = _optional_non_empty_string(app_config, "scan_target") or "configured_real_mods"
     install_target = _optional_non_empty_string(app_config, "install_target") or "sandbox_mods"
+    steam_auto_start_enabled = _optional_bool(app_config, "steam_auto_start_enabled")
 
     return AppConfig(
         game_path=Path(game_path),
@@ -88,6 +89,9 @@ def load_app_config(state_file: Path) -> AppConfig | None:
         nexus_api_key=nexus_api_key,
         scan_target=scan_target,
         install_target=install_target,
+        steam_auto_start_enabled=(
+            True if steam_auto_start_enabled is None else steam_auto_start_enabled
+        ),
     )
 
 
@@ -116,6 +120,7 @@ def save_app_config(state_file: Path, config: AppConfig) -> None:
             "nexus_api_key": config.nexus_api_key,
             "scan_target": config.scan_target,
             "install_target": config.install_target,
+            "steam_auto_start_enabled": config.steam_auto_start_enabled,
         },
     }
 
@@ -627,4 +632,18 @@ def _require_bool(data: dict[str, object], key: str, *, prefix: str) -> bool:
     value = data.get(key)
     if not isinstance(value, bool):
         raise AppStateStoreError(f"{prefix}.{key} must be a boolean")
+    return value
+
+
+def _optional_bool(
+    data: dict[str, object],
+    key: str,
+    *,
+    prefix: str = "app_config",
+) -> bool | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise AppStateStoreError(f"{prefix}.{key} must be a boolean when provided")
     return value

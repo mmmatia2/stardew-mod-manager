@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QFrame
 from PySide6.QtWidgets import QGridLayout
 from PySide6.QtWidgets import QGroupBox
 from PySide6.QtWidgets import QHBoxLayout
+from PySide6.QtWidgets import QCheckBox
 from PySide6.QtWidgets import QLabel
 from PySide6.QtWidgets import QLineEdit
 from PySide6.QtWidgets import QPlainTextEdit
@@ -25,6 +26,7 @@ class SetupConfigurationSurface(QScrollArea):
         sandbox_archive_path_input: QLineEdit,
         real_archive_path_input: QLineEdit,
         nexus_api_key_input: QLineEdit,
+        steam_auto_start_checkbox: QCheckBox,
         browse_game_button: QPushButton,
         browse_mods_button: QPushButton,
         open_mods_button: QPushButton,
@@ -86,6 +88,7 @@ class SetupConfigurationSurface(QScrollArea):
         setup_layout.addWidget(QLabel("Nexus API key"), 5, 0)
         setup_layout.addWidget(nexus_api_key_input, 5, 1)
         setup_layout.addWidget(check_nexus_button, 5, 2)
+        setup_layout.addWidget(steam_auto_start_checkbox, 6, 0, 1, 4)
 
         setup_actions_widget = QWidget()
         setup_actions_widget.setObjectName("setup_actions_widget")
@@ -105,10 +108,10 @@ class SetupConfigurationSurface(QScrollArea):
             setup_actions_layout.addWidget(button, index // 3, index % 3)
         for column in range(3):
             setup_actions_layout.setColumnStretch(column, 1)
-        setup_layout.addWidget(setup_actions_widget, 6, 0, 1, 4)
-        setup_layout.addWidget(active_backup_bundle_label, 7, 0, 1, 4)
-        setup_layout.addWidget(backup_bundle_inspection_summary_label, 8, 0, 1, 4)
-        setup_layout.addWidget(restore_import_planning_summary_label, 9, 0, 1, 4)
+        setup_layout.addWidget(setup_actions_widget, 7, 0, 1, 4)
+        setup_layout.addWidget(active_backup_bundle_label, 8, 0, 1, 4)
+        setup_layout.addWidget(backup_bundle_inspection_summary_label, 9, 0, 1, 4)
+        setup_layout.addWidget(restore_import_planning_summary_label, 10, 0, 1, 4)
         setup_layout.setColumnStretch(1, 1)
 
         setup_output_group = QGroupBox("Setup detail")
