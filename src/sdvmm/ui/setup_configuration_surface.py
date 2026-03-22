@@ -54,41 +54,66 @@ class SetupConfigurationSurface(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        setup_group = QGroupBox("Setup and Configuration")
+        setup_group = QGroupBox("Essential folders")
         setup_group.setObjectName("setup_surface_group")
         setup_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         setup_layout = QGridLayout(setup_group)
         setup_layout.setContentsMargins(6, 4, 6, 4)
         setup_layout.setHorizontalSpacing(8)
         setup_layout.setVerticalSpacing(3)
-        setup_layout.addWidget(QLabel("Game directory (real install)"), 0, 0)
-        setup_layout.addWidget(game_path_input, 0, 1)
-        setup_layout.addWidget(browse_game_button, 0, 2)
+        setup_intro_label = QLabel(
+            "Start with the live game folder plus your real and sandbox Mods folders. "
+            "Saving setup or detecting folders here does not change installed mods."
+        )
+        setup_intro_label.setObjectName("setup_local_setup_intro_label")
+        setup_intro_label.setWordWrap(True)
+        setup_layout.addWidget(setup_intro_label, 0, 0, 1, 4)
 
-        setup_layout.addWidget(QLabel("Mods directory (real path)"), 1, 0)
-        setup_layout.addWidget(mods_path_input, 1, 1)
-        setup_layout.addWidget(browse_mods_button, 1, 2)
-        setup_layout.addWidget(open_mods_button, 1, 3)
+        setup_layout.addWidget(QLabel("Game folder (live install)"), 1, 0)
+        setup_layout.addWidget(game_path_input, 1, 1)
+        setup_layout.addWidget(browse_game_button, 1, 2)
 
-        setup_layout.addWidget(QLabel("Sandbox Mods target"), 2, 0)
-        setup_layout.addWidget(sandbox_mods_path_input, 2, 1)
-        setup_layout.addWidget(browse_sandbox_button, 2, 2)
-        setup_layout.addWidget(open_sandbox_button, 2, 3)
+        setup_layout.addWidget(QLabel("Real Mods folder"), 2, 0)
+        setup_layout.addWidget(mods_path_input, 2, 1)
+        setup_layout.addWidget(browse_mods_button, 2, 2)
+        setup_layout.addWidget(open_mods_button, 2, 3)
 
-        setup_layout.addWidget(QLabel("Sandbox archive path"), 3, 0)
-        setup_layout.addWidget(sandbox_archive_path_input, 3, 1)
-        setup_layout.addWidget(browse_sandbox_archive_button, 3, 2)
-        setup_layout.addWidget(open_sandbox_archive_button, 3, 3)
+        setup_layout.addWidget(QLabel("Sandbox Mods folder"), 3, 0)
+        setup_layout.addWidget(sandbox_mods_path_input, 3, 1)
+        setup_layout.addWidget(browse_sandbox_button, 3, 2)
+        setup_layout.addWidget(open_sandbox_button, 3, 3)
 
-        setup_layout.addWidget(QLabel("Real Mods archive path"), 4, 0)
-        setup_layout.addWidget(real_archive_path_input, 4, 1)
-        setup_layout.addWidget(browse_real_archive_button, 4, 2)
-        setup_layout.addWidget(open_real_archive_button, 4, 3)
+        setup_layout.setColumnStretch(1, 1)
 
-        setup_layout.addWidget(QLabel("Nexus API key"), 5, 0)
-        setup_layout.addWidget(nexus_api_key_input, 5, 1)
-        setup_layout.addWidget(check_nexus_button, 5, 2)
-        setup_layout.addWidget(steam_auto_start_checkbox, 6, 0, 1, 4)
+        advanced_group = QGroupBox("Advanced and safety options")
+        advanced_group.setObjectName("setup_advanced_group")
+        advanced_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        advanced_layout = QGridLayout(advanced_group)
+        advanced_layout.setContentsMargins(6, 4, 6, 4)
+        advanced_layout.setHorizontalSpacing(8)
+        advanced_layout.setVerticalSpacing(3)
+        advanced_intro_label = QLabel(
+            "Archive folders protect live and sandbox workflows. Nexus and Steam options are optional helpers."
+        )
+        advanced_intro_label.setObjectName("setup_advanced_intro_label")
+        advanced_intro_label.setWordWrap(True)
+        advanced_layout.addWidget(advanced_intro_label, 0, 0, 1, 4)
+
+        advanced_layout.addWidget(QLabel("Sandbox archive folder"), 1, 0)
+        advanced_layout.addWidget(sandbox_archive_path_input, 1, 1)
+        advanced_layout.addWidget(browse_sandbox_archive_button, 1, 2)
+        advanced_layout.addWidget(open_sandbox_archive_button, 1, 3)
+
+        advanced_layout.addWidget(QLabel("Real Mods archive folder"), 2, 0)
+        advanced_layout.addWidget(real_archive_path_input, 2, 1)
+        advanced_layout.addWidget(browse_real_archive_button, 2, 2)
+        advanced_layout.addWidget(open_real_archive_button, 2, 3)
+
+        advanced_layout.addWidget(QLabel("Nexus API key"), 3, 0)
+        advanced_layout.addWidget(nexus_api_key_input, 3, 1)
+        advanced_layout.addWidget(check_nexus_button, 3, 2)
+        advanced_layout.addWidget(steam_auto_start_checkbox, 4, 0, 1, 4)
+        advanced_layout.setColumnStretch(1, 1)
 
         setup_actions_widget = QWidget()
         setup_actions_widget.setObjectName("setup_actions_widget")
@@ -108,17 +133,31 @@ class SetupConfigurationSurface(QScrollArea):
             setup_actions_layout.addWidget(button, index // 3, index % 3)
         for column in range(3):
             setup_actions_layout.setColumnStretch(column, 1)
-        setup_layout.addWidget(setup_actions_widget, 7, 0, 1, 4)
-        setup_layout.addWidget(active_backup_bundle_label, 8, 0, 1, 4)
-        setup_layout.addWidget(backup_bundle_inspection_summary_label, 9, 0, 1, 4)
-        setup_layout.addWidget(restore_import_planning_summary_label, 10, 0, 1, 4)
-        setup_layout.setColumnStretch(1, 1)
 
-        setup_output_group = QGroupBox("Setup detail")
+        backup_group = QGroupBox("Back Up, Inspect, and Restore")
+        backup_group.setObjectName("setup_backup_restore_group")
+        backup_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        backup_layout = QVBoxLayout(backup_group)
+        backup_layout.setContentsMargins(6, 4, 6, 6)
+        backup_layout.setSpacing(4)
+
+        backup_intro_label = QLabel(
+            "Export creates a backup bundle. Inspect and Plan are read-only. "
+            "Execute restore/import writes only into the current configured folders."
+        )
+        backup_intro_label.setObjectName("setup_backup_restore_intro_label")
+        backup_intro_label.setWordWrap(True)
+        backup_layout.addWidget(backup_intro_label)
+        backup_layout.addWidget(setup_actions_widget)
+        backup_layout.addWidget(active_backup_bundle_label)
+        backup_layout.addWidget(backup_bundle_inspection_summary_label)
+        backup_layout.addWidget(restore_import_planning_summary_label)
+
+        setup_output_group = QGroupBox("Setup and migration details")
         setup_output_group.setObjectName("setup_output_group")
         setup_output_group.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
         )
         setup_output_layout = QVBoxLayout(setup_output_group)
         setup_output_layout.setContentsMargins(6, 4, 6, 6)
@@ -135,9 +174,14 @@ class SetupConfigurationSurface(QScrollArea):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(6)
         content_layout.addWidget(setup_group)
-        content_layout.addWidget(setup_output_group, 1)
+        content_layout.addWidget(advanced_group)
+        content_layout.addWidget(backup_group)
+        content_layout.addWidget(setup_output_group)
+        content_layout.addStretch(1)
 
         self.setWidget(content_widget)
         self.content_widget = content_widget
         self.setup_group = setup_group
+        self.advanced_group = advanced_group
+        self.backup_group = backup_group
         self.setup_output_group = setup_output_group

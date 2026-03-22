@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QGridLayout
 from PySide6.QtWidgets import QGroupBox
 from PySide6.QtWidgets import QHBoxLayout
 from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QPlainTextEdit
 from PySide6.QtWidgets import QPushButton
 from PySide6.QtWidgets import QScrollArea
 from PySide6.QtWidgets import QSizePolicy
@@ -25,6 +26,7 @@ class PlanInstallTabSurface(QWidget):
         install_archive_label: QLabel,
         plan_install_button: QPushButton,
         run_install_button: QPushButton,
+        review_output_box: QPlainTextEdit,
     ) -> None:
         super().__init__()
         self.setObjectName("plan_install_tab")
@@ -48,7 +50,15 @@ class PlanInstallTabSurface(QWidget):
         scroll_area.setWidget(content)
         layout.addWidget(scroll_area)
 
-        destination_group = QGroupBox("Destination and Safety Context")
+        intro_label = QLabel(
+            "Confirm the current package, choose where it goes, then use Review install before Apply install."
+        )
+        intro_label.setObjectName("plan_install_intro_label")
+        intro_label.setWordWrap(True)
+        _set_auxiliary_label_style(intro_label, bold=True)
+        content_layout.addWidget(intro_label)
+
+        destination_group = QGroupBox("Destination")
         destination_group.setObjectName("plan_install_destination_group")
         destination_group.setFlat(True)
         destination_group.setSizePolicy(
@@ -74,7 +84,7 @@ class PlanInstallTabSurface(QWidget):
         destination_layout.addWidget(install_archive_label, 3, 0, 1, 3)
         content_layout.addWidget(destination_group)
 
-        execute_group = QGroupBox("Plan and Execute")
+        execute_group = QGroupBox("Main actions")
         execute_group.setObjectName("plan_install_execute_group")
         execute_group.setFlat(True)
         execute_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
@@ -90,17 +100,30 @@ class PlanInstallTabSurface(QWidget):
         execute_layout.addLayout(plan_actions)
 
         caution_label = QLabel(
-            "No automatic install: review plan details and warnings before running install."
+            "Review install is read-only. Apply install writes to the selected destination when you are ready."
         )
+        caution_label.setObjectName("plan_install_execute_help_label")
         caution_label.setWordWrap(True)
         _set_auxiliary_label_style(caution_label)
         execute_layout.addWidget(caution_label)
 
         content_layout.addWidget(execute_group)
+
+        review_output_group = QGroupBox("Install detail")
+        review_output_group.setObjectName("plan_install_output_group")
+        review_output_group.setFlat(True)
+        review_output_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        review_output_layout = QVBoxLayout(review_output_group)
+        review_output_layout.setContentsMargins(8, 6, 8, 6)
+        review_output_layout.setSpacing(4)
+        review_output_layout.addWidget(review_output_box)
+        content_layout.addWidget(review_output_group)
+
         content_layout.addStretch(1)
 
         self.destination_group = destination_group
         self.execute_group = execute_group
+        self.review_output_group = review_output_group
         self.scroll_area = scroll_area
         self.content_widget = content
         self.content_layout = content_layout

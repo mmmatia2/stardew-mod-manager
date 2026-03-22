@@ -1,6 +1,6 @@
 # Roadmap
 
-## Product direction after `0.11.0`
+## Product direction after `1.0.0`
 
 The app is now a local-first Stardew Valley mod workflow manager with a sandbox-first safety model.
 
@@ -16,7 +16,7 @@ It is not trying to become, in the near term:
 - a broad profile or instance manager
 - a broad shell-polish project divorced from workflow value
 
-## Shipped through `0.11.0`
+## Shipped through `1.0.0`
 
 ### Core workflow and safety baseline
 
@@ -37,11 +37,16 @@ Shipped:
 - manual source association participation in update checks
 - atomic app-state/history writes and explicit critical history-failure handling
 
-### Daily-use ergonomics and sandbox dev loop
+### Daily-use ergonomics, sandbox dev loop, and v1 shell
 
 Shipped:
 
 - session persistence ergonomics for practical setup/session fields
+- v1 shell redesign foundation around three user journeys:
+  - install/update
+  - sandbox compare/archive/promotion
+  - backup/restore/migration
+- backup/restore surface split between local setup/launch preferences and migration actions with local detail output
 - sandbox-only launch (SMAPI with sandbox Mods path)
 - best-effort Steam prelaunch assistance for vanilla, SMAPI, and sandbox-dev launch
 - persisted user-controlled Setup toggle for Steam auto-start assistance
@@ -91,9 +96,9 @@ Implemented enough for now:
 - setup moved into main workspace ownership
 - duplicated detail scaffolding reduced
 
-Still paused because workflow completion and trust are higher-value than more decomposition.
+Still paused because post-v1 workflow value is higher than more shell refactor churn.
 
-## Near-term priorities
+## Post-v1 priorities
 
 ### 1. Compare follow-up
 
@@ -107,7 +112,7 @@ Still paused because workflow completion and trust are higher-value than more de
 - do not introduce file-level merge semantics until review, safety, and recovery semantics are explicitly designed
 - no casual overwrite shortcuts
 
-Why this is next:
+Why this is next after `1.0.0`:
 
 - restore/import now has a coherent trust chain from export through reviewed conflict-capable execution across both folder and zip bundle artifacts
 - Steam-assisted launch ergonomics are now shipped with a persisted user-controlled toggle

@@ -18,9 +18,9 @@ The goal is not to restate the whole codebase. The goal is to give enough high-s
 - Entry point: `sdvmm-ui` -> [`src/sdvmm/app/main.py`](/Users/darth/Projects/stardew-mod-manager/src/sdvmm/app/main.py)
 - Current validation baseline:
   - `.\.venv\Scripts\python.exe -m pytest tests\unit -q`
-  - latest verified result in this thread: `513 passed, 1 skipped`
+  - latest verified result in this thread: `524 passed, 1 skipped`
   - UI startup smoke also passes offscreen
-- Shipped baseline in this brief: `0.11.0` (includes real-vs-sandbox compare visibility baseline, config-aware backup export, folder/zip backup-bundle compatibility, backup-bundle inspection baseline, restore/import planning baseline, restore/import execution baseline, first restore conflict-resolution baseline, open-folder conveniences baseline, and Steam prelaunch best-effort behavior with a persisted user-controlled toggle)
+- Shipped baseline in this brief: `1.0.0` (the first stable user-facing release, including real-vs-sandbox compare visibility, config-aware backup export, folder/zip backup-bundle compatibility, backup-bundle inspection, restore/import planning, restore/import execution, restore conflict handling, open-folder conveniences, Steam prelaunch best-effort behavior with a persisted user-controlled toggle, and the v1 shell cleanup passes)
 - Product posture:
   - local-first
   - safe-by-default
@@ -51,10 +51,10 @@ The app is no longer just a scanner. It now has a coherent local workflow:
 15. promote selected sandbox Mods into real Mods through an explicit managed flow
 16. compare configured real Mods vs sandbox Mods in a dedicated drift view before sync/promotion decisions
 
-The product is not feature-complete for public release, but it is materially beyond prototype state.
+The product is now at its first stable user-facing release baseline, while still intentionally leaving some post-v1 areas unfinished.
 
-The near-term product direction now explicitly includes a mod-development workflow, not only general end-user mod management.
-The current private-testing build includes the first multi-zip intake step, second watcher-path intake convenience, a visibility-first real-vs-sandbox compare baseline, config-aware backup export, folder/zip backup-bundle support, backup-bundle inspection, restore/import planning, restore/import execution for clearly missing content, reviewed restore conflict handling through archive-aware mod-folder replacement, explicit open-folder conveniences for the key configured workflow folders, and best-effort Steam prelaunch assistance with a persisted user-controlled toggle, while intentionally stopping short of blind multi-package planning/install behavior, compare-driven write shortcuts, file-level merge restore behavior, and background Steam management.
+The product direction now explicitly includes a mod-development workflow, not only general end-user mod management.
+The shipped `1.0.0` build includes the multi-zip intake step, second watcher-path intake convenience, a visibility-first real-vs-sandbox compare baseline, config-aware backup export, folder/zip backup-bundle support, backup-bundle inspection, restore/import planning, restore/import execution for clearly missing content, reviewed restore conflict handling through archive-aware mod-folder replacement, explicit open-folder conveniences for the key configured workflow folders, best-effort Steam prelaunch assistance with a persisted user-controlled toggle, and the v1 shell cleanup passes, while intentionally stopping short of blind multi-package planning/install behavior, compare-driven write shortcuts, file-level merge restore behavior, and background Steam management.
 
 ## Current Architecture
 
@@ -273,7 +273,7 @@ Implemented for `0.4.0`:
 
 #### 8. Backup Bundle Inspection + Restore/Import Planning + Execution + Open-Folder Baseline
 
-Implemented through `0.11.0`:
+Implemented through `1.0.0`:
 
 - explicit local backup export baseline for migration/recovery groundwork
 - explicit read-only inspection of exported backup bundle folders
@@ -293,7 +293,7 @@ Implemented through `0.11.0`:
 - no background Steam management or retry loops in this baseline
 - no file-level merge restore behavior in this baseline
 
-### Next likely phases (real-world usability first)
+### Post-v1 likely phases (real-world usability first)
 
 #### 9. Compare Follow-up
 
@@ -347,7 +347,7 @@ The app now has:
 - a global status strip
 - tab-local workflow surfaces
 - selected-row guidance in `Inventory`
-- a bottom detailed-output surface
+- local detail surfaces instead of a shared bottom console
 
 Question:
 

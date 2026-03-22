@@ -27,7 +27,7 @@ class ArchiveTabSurface(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(0)
+        layout.setSpacing(4)
 
         archive_controls_group = QGroupBox("Archive Browser")
         archive_controls_group.setObjectName("archive_controls_group")
@@ -47,6 +47,16 @@ class ArchiveTabSurface(QWidget):
         archive_controls_layout.addWidget(delete_archived_button, 1, 3)
         layout.addWidget(archive_controls_group)
 
+        archive_empty_state_label = QLabel(
+            "Refresh archive list to browse archived entries from real and sandbox workflows."
+        )
+        archive_empty_state_label.setObjectName("archive_empty_state_label")
+        archive_empty_state_label.setWordWrap(True)
+        archive_empty_state_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        layout.addWidget(archive_empty_state_label)
+
         archive_results_group = QGroupBox("Archived Entries (real + sandbox)")
         archive_results_group.setObjectName("archive_results_group")
         archive_results_group.setFlat(True)
@@ -55,7 +65,10 @@ class ArchiveTabSurface(QWidget):
         archive_results_layout.setContentsMargins(8, 2, 8, 6)
         archive_results_layout.setSpacing(2)
         archive_results_layout.addWidget(archive_table)
-        layout.addWidget(archive_results_group, 1)
+        layout.addWidget(archive_results_group)
+        archive_results_group.setVisible(False)
+        layout.addStretch(1)
 
         self.controls_group = archive_controls_group
+        self.empty_state_label = archive_empty_state_label
         self.results_group = archive_results_group

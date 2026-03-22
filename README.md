@@ -4,16 +4,16 @@ Local-first Stardew Valley mod workflow manager with a sandbox-first safety mode
 
 ## Project status
 
-This app is currently a **working local desktop tool** with meaningful workflow coverage, but it is **not release-hardened consumer software yet**.
+This app is now the **first stable user-facing release** of the local desktop workflow manager in this repository.
 
 In this repo, **semi-automatic** means:
 - the app automates local scan, update awareness, intake detection, install planning, install execution, and recovery planning/execution
 - the user still controls critical steps like opening provider pages, downloading files manually, choosing destinations, and confirming live (real Mods) writes
 
 Current maturity is best described as:
-- useful for technically literate early users and close-friend sharing
+- stable for careful local users who want a clear, safety-first Stardew mod workflow
 - safety-oriented and increasingly test-covered
-- still evolving, with some UX and product-completion gaps called out below
+- still evolving beyond v1 in packaging, polish, and post-release ergonomics
 
 Current workflow emphasis:
 - safe local mod workflow over broad platform-management ambitions
@@ -37,8 +37,8 @@ Near-term product identity:
 5. Open remote provider page for actionable rows.
 6. Download mod archives manually.
 7. Select one or more zip packages for batch inspection, or let watcher/package intake detect new zip files from one or two configured watch paths.
-8. Review per-package inspection results, then stage one selected package into Plan & Install.
-9. Build plan, review safety/summary/facts, then run install.
+8. Review per-package inspection results; the current valid selection becomes the Review target automatically.
+9. Build the install review, confirm the safety context, then run install.
 10. Promote selected sandbox mods into real Mods through an explicit managed action when ready.
 11. Inspect recovery readiness and run recovery from recorded install history when allowed.
 
@@ -53,21 +53,30 @@ Live Mods safety expectations:
 
 ## Feature summary (current)
 
+- **v1 shell structure**
+  - the main workspace now reads as three journeys: install/update, sandbox compare/archive, and backup/restore
+  - right-side tabs now use simple product-facing names (`Setup`, `Discover`, `Compare`, `Packages`, `Review`, `Recovery`, `Archive`) instead of overloaded prefixed labels
+  - `Review` now focuses only on install review/apply, while `Recovery` is its own separate tab
+  - the left-side shell is reduced to `Installed Mods` and `Launch`, with selected-mod archive actions moved back into the installed-mod workflow
+  - the old bottom detail/log panel is gone, and the old left-side `Current detail` panel is gone too; detail now lives only in the relevant workflow surface instead of shared console-style panels
+  - setup and review surfaces now spell out real Mods vs sandbox and distinguish read-only review steps from actions that write files
+  - empty local detail panels stay collapsed until that workflow actually has useful detail to show
+  - this is a user-facing shell consolidation step, not a backend workflow rewrite
 - **Inventory + update awareness**
   - installed mod scan/inventory view
   - update checks across supported providers
   - actionable vs blocked update status, with typed diagnostics
-- **Discovery/search**
-  - discovery tab with provider/context correlation signals
-- **Packages & Intake**
+- **Install / Update**
+  - discovery surface with provider/context correlation signals
+  - choosing zip packages now kicks off inspection directly for the normal flow
   - multi-zip selection and batch inspection
   - per-package inspection results with explicit selection
   - watcher-based downloads intake from up to two configured watch paths
-  - single-package staging handoff to Plan & Install
+  - the current valid package selection drives Install / Update review directly, without a separate user-facing staging step
 - **Session persistence ergonomics**
   - practical setup/session fields survive restart
   - watcher paths, key Mods/archive paths, and active scan/install targets reload automatically
-- **Plan & Install**
+- **Install / Update review**
   - destination selection (sandbox vs real)
   - plan review summary/explanation/facts
   - controlled execution flow
@@ -115,12 +124,12 @@ Live Mods safety expectations:
   - ambiguous or structurally blocked restore cases still do not execute
 - **Backup flow continuity fix**
   - inspect, plan, and execute now reuse the current active backup bundle context instead of repeatedly asking for the same bundle artifact
-  - the active bundle is shown in Setup so restore/import actions stay explicit about which bundle they will use
+  - the active bundle is shown in Backup / Restore so restore/import actions stay explicit about which bundle they will use
 - **Config-aware backup baseline**
   - backup export now carries common per-mod config artifacts found inside installed real/sandbox Mods trees
   - bundle inspection reports config snapshot coverage explicitly
   - restore/import planning surfaces config entries as missing locally, same content, different content, or blocked
- - **Zip backup bundle support baseline**
+- **Zip backup bundle support baseline**
   - backup export can now create `.zip` bundle artifacts as a first-class option
   - inspect, plan, and execute support zip bundles without dropping folder-bundle compatibility
   - zip bundles are read through a guarded temporary extraction path; corrupt or unsafe zip bundles are rejected honestly
@@ -129,8 +138,11 @@ Live Mods safety expectations:
   - quick access to real Mods, sandbox Mods, both archive roots, and both watched-download folders
   - honest feedback when a path is unconfigured, missing, or cannot be opened
 - **Setup ergonomics patch**
-  - Setup remains usable at smaller window sizes through a more scroll-friendly layout and less fragile action-row compression
-  - setup-local detail output now keeps backup/setup results readable inside the Setup tab while the shared global detailed output still mirrors those details
+  - Backup / Restore remains usable at smaller window sizes through a more scroll-friendly layout and less fragile action-row compression
+  - setup-local detail output now keeps backup/setup results readable inside Setup without relying on a shared bottom log surface
+  - Setup now separates essential live/sandbox folders from lower-priority archive, Nexus, and Steam safety options
+- **Compact idle states**
+  - Compare and Archive stay compact until they have real results to show, instead of opening on large empty result panes
 
 ## Manual source guidance
 
@@ -206,7 +218,7 @@ You can still run focused suites when iterating:
 .\.venv\Scripts\python.exe -m pytest tests\unit\test_main_window_gui_regression.py -q
 ```
 
-### 4) Build Windows portable folder (`0.11.0`)
+### 4) Build Windows portable folder (`1.0.0`)
 
 Packaging baseline in this repo uses **PyInstaller one-folder** output because it is the smallest practical Windows desktop packaging path here without introducing installer/signing work.
 
@@ -225,19 +237,19 @@ Build the portable folder:
 Output folder:
 
 ```text
-dist\stardew-mod-manager-0.11.0-windows-portable\
+dist\stardew-mod-manager-1.0.0-windows-portable\
 ```
 
 Launch the packaged app:
 
 ```powershell
-.\dist\stardew-mod-manager-0.11.0-windows-portable\Stardew Mod Manager.exe
+.\dist\stardew-mod-manager-1.0.0-windows-portable\Stardew Mod Manager.exe
 ```
 
 Current caveats:
 - this is a portable folder build, not an installer
 - no code signing yet, so Windows reputation prompts are still expected
-- no auto-update or release-hardening work yet
+- no auto-update or installer/signing hardening yet
 - packaged runtime is pinned to bundled Qt plugin paths (`_internal\PySide6\plugins`) to avoid host Qt path conflicts
 
 ## Known limitations (current)

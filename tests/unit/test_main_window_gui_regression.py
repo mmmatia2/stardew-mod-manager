@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QGridLayout,
     QGroupBox,
     QLabel,
     QLineEdit,
@@ -275,68 +276,57 @@ def test_main_window_close_persists_practical_setup_paths_across_restart(
     qapp.processEvents()
 
 
-def test_main_window_has_separate_status_strip_and_bottom_details_region(
+def test_main_window_keeps_status_strip_and_removes_bottom_details_region(
     main_window: MainWindow,
 ) -> None:
     status_strip_group = main_window.findChild(QGroupBox, "global_status_strip_group")
     bottom_details_group = main_window.findChild(QGroupBox, "bottom_details_group")
 
     assert status_strip_group is not None
-    assert bottom_details_group is not None
-    assert status_strip_group is not bottom_details_group
     assert status_strip_group.isVisible()
-    assert bottom_details_group.isVisible()
+    assert bottom_details_group is None
 
 
-def test_main_window_bottom_details_surface_is_output_only(
+def test_main_window_bottom_details_region_contract_is_removed(
     main_window: MainWindow,
 ) -> None:
-    bottom_details_group = main_window.findChild(QGroupBox, "bottom_details_group")
-    detail_identity_label = main_window.findChild(QLabel, "bottom_detail_identity_label")
-    details_group = main_window.findChild(QGroupBox, "bottom_summary_details_group")
-
-    assert bottom_details_group is not None
-    assert detail_identity_label is not None
-    assert details_group is not None
-
-    assert bottom_details_group.title() == "Operational Detail"
-    assert detail_identity_label.text() == "Detailed output"
-    assert details_group.parentWidget() is bottom_details_group
+    assert main_window.findChild(QGroupBox, "bottom_details_group") is None
+    assert main_window.findChild(QLabel, "bottom_detail_identity_label") is None
+    assert main_window.findChild(QLabel, "bottom_detail_help_label") is None
+    assert main_window.findChild(QGroupBox, "bottom_summary_details_group") is None
     assert main_window.findChild(QGroupBox, "bottom_setup_group") is None
     assert main_window.findChild(QScrollArea, "bottom_setup_tab") is None
     assert main_window.findChild(QTabWidget, "bottom_details_tabs") is None
     assert main_window.findChild(QWidget, "bottom_summary_tab") is None
 
 
-def test_main_window_bottom_details_surface_uses_simple_identity_copy(
+def test_main_window_bottom_details_toggle_contract_is_removed(
     main_window: MainWindow,
 ) -> None:
-    identity_label = main_window.findChild(QLabel, "bottom_detail_identity_label")
-
-    assert identity_label is not None
-    assert identity_label.text() == "Detailed output"
-    assert main_window.findChild(QLabel, "bottom_detail_help_label") is None
+    assert hasattr(main_window, "_details_toggle") is False
+    assert main_window.findChild(QCheckBox, "bottom_details_toggle") is None
 
 
 def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow) -> None:
-    plan_tab = main_window.findChild(QWidget, "plan_install_tab")
-    plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
+    recovery_tab = main_window.findChild(QWidget, "recovery_tab")
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
+    recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
     recovery_combo = main_window.findChild(QComboBox, "recovery_inspection_operation_combo")
     recovery_filter_combo = main_window.findChild(QComboBox, "recovery_selector_filter_combo")
     recovery_summary_label = main_window.findChild(QLabel, "recovery_selection_summary_label")
     recovery_button = main_window.findChild(QPushButton, "recovery_inspection_button")
     run_recovery_button = main_window.findChild(QPushButton, "recovery_execute_button")
 
-    assert plan_tab is not None
-    assert plan_content is not None
+    assert recovery_tab is not None
     assert recovery_group is not None
+    assert recovery_output_group is not None
     assert recovery_combo is not None
     assert recovery_filter_combo is not None
     assert recovery_summary_label is not None
     assert recovery_button is not None
     assert run_recovery_button is not None
-    assert recovery_group.parentWidget() is plan_content
+    assert recovery_group.parentWidget() is recovery_tab
+    assert recovery_output_group.parentWidget() is recovery_group
     assert main_window._install_history_combo is recovery_combo
     assert main_window._install_history_filter_combo is recovery_filter_combo
     assert main_window._recovery_selection_summary_label is recovery_summary_label
@@ -347,39 +337,18 @@ def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow)
     assert run_recovery_button.isEnabled() is False
 
 
-def test_main_window_bottom_details_start_hidden_by_default(main_window: MainWindow) -> None:
-    details_group = main_window.findChild(QGroupBox, "bottom_summary_details_group")
-
-    assert details_group is not None
-    assert details_group.isVisible() is False
-    assert main_window._details_group is details_group
-    assert main_window._details_toggle.isChecked() is False
-    assert main_window._details_toggle.text() == "Show detailed output"
-
-
-def test_main_window_bottom_details_toggle_shows_and_hides_details_group(
+def test_main_window_review_tab_no_longer_hosts_recovery_controls(
     main_window: MainWindow,
-    qapp: QApplication,
 ) -> None:
-    details_group = main_window.findChild(QGroupBox, "bottom_summary_details_group")
+    plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
+    recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
 
-    assert details_group is not None
-
-    main_window._details_toggle.setChecked(True)
-    qapp.processEvents()
-
-    assert details_group.isHidden() is False
-    assert details_group.isVisible() is True
-    assert main_window._details_toggle.text() == "Hide detailed output"
-
-    main_window._details_toggle.setChecked(False)
-    qapp.processEvents()
-
-    assert details_group.isVisible() is False
-    assert main_window._details_toggle.text() == "Show detailed output"
+    assert plan_content is not None
+    assert recovery_group is not None
+    assert recovery_group.parentWidget() is not plan_content
 
 
-def test_main_window_recovery_controls_remain_visible_when_details_toggle_changes(
+def test_main_window_recovery_controls_remain_visible_without_bottom_details_region(
     main_window: MainWindow,
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
@@ -392,31 +361,74 @@ def test_main_window_recovery_controls_remain_visible_when_details_toggle_change
         lambda: SimpleNamespace(operations=(operation,)),
     )
     main_window._refresh_install_operation_selector()
-    plan_tab = main_window.findChild(QWidget, "plan_install_tab")
+    recovery_tab = main_window.findChild(QWidget, "recovery_tab")
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
-    details_group = main_window.findChild(QGroupBox, "bottom_summary_details_group")
 
-    assert plan_tab is not None
+    assert recovery_tab is not None
     assert recovery_group is not None
-    assert details_group is not None
 
-    main_window._context_tabs.setCurrentWidget(plan_tab)
+    main_window._context_tabs.setCurrentWidget(recovery_tab)
     qapp.processEvents()
     assert recovery_group.isVisible() is True
     assert main_window._install_history_combo.isEnabled() is True
     assert main_window._inspect_recovery_button.isEnabled() is True
 
-    main_window._details_toggle.setChecked(True)
-    qapp.processEvents()
-    assert recovery_group.isVisible() is True
-    assert main_window._install_history_combo.isEnabled() is True
-    assert main_window._inspect_recovery_button.isEnabled() is True
 
-    main_window._details_toggle.setChecked(False)
+def test_main_window_recovery_surface_keeps_detail_group_tight_with_review_controls(
+    main_window: MainWindow,
+) -> None:
+    recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
+    recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
+
+    assert recovery_group is not None
+    assert recovery_output_group is not None
+    assert (
+        recovery_group.sizePolicy().verticalPolicy()
+        == QSizePolicy.Policy.Maximum
+    )
+    assert recovery_output_group.parentWidget() is recovery_group
+
+
+def test_main_window_local_detail_groups_start_hidden_until_they_have_useful_text(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    setup_tab = main_window._setup_scroll
+    discovery_page = main_window.findChild(QWidget, "discovery_workspace_page")
+    compare_tab = main_window.findChild(QWidget, "compare_tab")
+    archive_page = main_window.findChild(QWidget, "archive_workspace_page")
+    review_tab = main_window.findChild(QWidget, "plan_install_tab")
+    recovery_tab = main_window.findChild(QWidget, "recovery_tab")
+
+    assert discovery_page is not None
+    assert compare_tab is not None
+    assert archive_page is not None
+    assert review_tab is not None
+    assert recovery_tab is not None
+
+    main_window._context_tabs.setCurrentWidget(discovery_page)
     qapp.processEvents()
-    assert recovery_group.isVisible() is True
-    assert main_window._install_history_combo.isEnabled() is True
-    assert main_window._inspect_recovery_button.isEnabled() is True
+    assert main_window._discovery_output_group.isHidden() is True
+
+    main_window._context_tabs.setCurrentWidget(compare_tab)
+    qapp.processEvents()
+    assert main_window._compare_output_group.isHidden() is True
+
+    main_window._context_tabs.setCurrentWidget(archive_page)
+    qapp.processEvents()
+    assert main_window._archive_output_group.isHidden() is True
+
+    main_window._context_tabs.setCurrentWidget(setup_tab)
+    qapp.processEvents()
+    assert main_window._setup_output_group.isHidden() is True
+
+    main_window._context_tabs.setCurrentWidget(review_tab)
+    qapp.processEvents()
+    assert main_window._review_output_group.isHidden() is True
+
+    main_window._context_tabs.setCurrentWidget(recovery_tab)
+    qapp.processEvents()
+    assert main_window._recovery_output_group.isHidden() is True
 
 
 def test_main_window_status_strip_labels_do_not_use_hardcoded_color_stylesheets(
@@ -2147,22 +2159,32 @@ def test_main_window_real_archive_autofill_only_when_empty(
 def test_main_window_setup_surface_group_and_scroll_exist(main_window: MainWindow) -> None:
     context_tabs = main_window._context_tabs
     setup_group = main_window.findChild(QGroupBox, "setup_surface_group")
+    advanced_group = main_window.findChild(QGroupBox, "setup_advanced_group")
+    backup_group = main_window.findChild(QGroupBox, "setup_backup_restore_group")
     setup_output_group = main_window.findChild(QGroupBox, "setup_output_group")
     setup_output_box = main_window.findChild(QPlainTextEdit, "setup_output_box")
     setup_scroll = main_window._setup_scroll
 
     assert context_tabs is not None
     assert setup_group is not None
+    assert advanced_group is not None
+    assert backup_group is not None
     assert setup_output_group is not None
     assert setup_output_box is not None
     assert setup_scroll is not None
     assert isinstance(setup_scroll, QScrollArea)
     assert setup_group.isVisible()
+    assert advanced_group.isVisible()
+    assert backup_group.isVisible()
     assert setup_scroll.widget() is not None
     assert setup_group.parentWidget() is setup_scroll.widget()
+    assert advanced_group.parentWidget() is setup_scroll.widget()
+    assert backup_group.parentWidget() is setup_scroll.widget()
     assert setup_output_group.parentWidget() is setup_scroll.widget()
     assert setup_output_box.parentWidget() is setup_output_group
     assert main_window._setup_group is setup_group
+    assert main_window._setup_scroll.advanced_group is advanced_group
+    assert main_window._setup_scroll.backup_group is backup_group
     assert main_window._setup_output_group is setup_output_group
     assert main_window._setup_scroll is setup_scroll
     assert setup_scroll.objectName() == "setup_workspace_tab"
@@ -2172,13 +2194,61 @@ def test_main_window_setup_surface_group_and_scroll_exist(main_window: MainWindo
         == QSizePolicy.Policy.Expanding
     )
     assert setup_output_box.isReadOnly() is True
-    assert setup_output_box.minimumHeight() >= 120
+    assert setup_output_box.minimumHeight() >= 70
+    assert setup_output_group.isHidden() is True
     setup_index = context_tabs.indexOf(setup_scroll)
     assert setup_index >= 0
     assert context_tabs.widget(setup_index) is setup_scroll
     assert "Setup" in {
         context_tabs.tabText(index) for index in range(context_tabs.count())
     }
+
+
+def test_main_window_top_level_context_tabs_follow_v1_workflow_order(
+    main_window: MainWindow,
+) -> None:
+    context_tabs = main_window._context_tabs
+
+    assert context_tabs is not None
+    assert [context_tabs.tabText(index) for index in range(context_tabs.count())] == [
+        "Setup",
+        "Discover",
+        "Compare",
+        "Packages",
+        "Review",
+        "Recovery",
+        "Archive",
+    ]
+
+
+def test_main_window_left_inventory_tabs_are_simplified_for_v1_shell(
+    main_window: MainWindow,
+) -> None:
+    inventory_tabs = main_window._inventory_controls_tabs
+
+    assert inventory_tabs is not None
+    assert [inventory_tabs.tabText(index) for index in range(inventory_tabs.count())] == [
+        "Installed Mods",
+        "Launch",
+    ]
+
+
+def test_main_window_setup_surface_onboarding_copy_is_user_facing(
+    main_window: MainWindow,
+) -> None:
+    setup_intro_label = main_window.findChild(QLabel, "setup_local_setup_intro_label")
+    backup_intro_label = main_window.findChild(QLabel, "setup_backup_restore_intro_label")
+
+    assert setup_intro_label is not None
+    assert backup_intro_label is not None
+    assert "live game folder plus your real and sandbox Mods folders" in (
+        setup_intro_label.text()
+    )
+    assert "does not change installed mods" in setup_intro_label.text()
+    assert "Inspect and Plan are read-only." in backup_intro_label.text()
+    assert "Execute restore/import writes only into the current configured folders." in (
+        backup_intro_label.text()
+    )
 
 
 def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: MainWindow) -> None:
@@ -2222,6 +2292,85 @@ def test_main_window_setup_surface_key_inputs_and_actions_exist(main_window: Mai
     steam_checkbox = main_window.findChild(QCheckBox, "setup_steam_auto_start_checkbox")
     assert steam_checkbox is not None
     assert steam_checkbox.isChecked() is True
+
+
+def test_main_window_packages_watcher_section_uses_separate_rows_for_paths_and_actions(
+    main_window: MainWindow,
+) -> None:
+    watcher_group = main_window.findChild(QGroupBox, "packages_watcher_group")
+    primary_actions_widget = main_window.findChild(
+        QWidget,
+        "packages_watcher_primary_actions_widget",
+    )
+    secondary_actions_widget = main_window.findChild(
+        QWidget,
+        "packages_watcher_secondary_actions_widget",
+    )
+    runtime_actions_widget = main_window.findChild(
+        QWidget,
+        "packages_watcher_runtime_actions_widget",
+    )
+    watcher_scope_label = main_window.findChild(QLabel, "packages_watcher_scope_label")
+
+    assert watcher_group is not None
+    assert primary_actions_widget is not None
+    assert secondary_actions_widget is not None
+    assert runtime_actions_widget is not None
+    assert watcher_scope_label is not None
+
+    watcher_layout = watcher_group.layout()
+    assert isinstance(watcher_layout, QGridLayout)
+    assert watcher_layout.itemAtPosition(0, 1).widget() is main_window._watched_downloads_path_input
+    assert (
+        watcher_layout.itemAtPosition(1, 1).widget()
+        is primary_actions_widget
+    )
+    assert (
+        watcher_layout.itemAtPosition(2, 1).widget()
+        is main_window._secondary_watched_downloads_path_input
+    )
+    assert (
+        watcher_layout.itemAtPosition(3, 1).widget()
+        is secondary_actions_widget
+    )
+    assert watcher_layout.itemAtPosition(4, 1).widget() is watcher_scope_label
+    assert watcher_layout.itemAtPosition(5, 1).widget() is runtime_actions_widget
+
+    primary_button_texts = {
+        button.text() for button in primary_actions_widget.findChildren(QPushButton)
+    }
+    secondary_button_texts = {
+        button.text() for button in secondary_actions_widget.findChildren(QPushButton)
+    }
+    runtime_button_texts = {
+        button.text() for button in runtime_actions_widget.findChildren(QPushButton)
+    }
+    assert primary_button_texts == {"Choose folder", "Open"}
+    assert secondary_button_texts == {"Choose folder 2", "Open"}
+    assert runtime_button_texts == {"Start intake watch", "Stop intake watch"}
+
+
+def test_main_window_install_review_surface_onboarding_copy_is_user_facing(
+    main_window: MainWindow,
+) -> None:
+    intro_label = main_window.findChild(QLabel, "plan_install_intro_label")
+    execute_help_label = main_window.findChild(QLabel, "plan_install_execute_help_label")
+    review_summary_label = main_window.findChild(
+        QLabel,
+        "plan_install_review_summary_label",
+    )
+
+    assert intro_label is not None
+    assert execute_help_label is not None
+    assert review_summary_label is not None
+    assert "choose where it goes" in intro_label.text()
+    assert "Review install before Apply install" in intro_label.text()
+    assert "Review install is read-only." in execute_help_label.text()
+    assert "Apply install writes to the selected destination" in execute_help_label.text()
+    assert (
+        review_summary_label.text()
+        == "Review summary: no plan yet. Click Review install to inspect changes."
+    )
 
 
 def test_main_window_loads_saved_steam_auto_start_preference(
@@ -3783,7 +3932,7 @@ def test_main_window_plan_install_surface_has_expected_structure(
     execute_group = main_window.findChild(QGroupBox, "plan_install_execute_group")
     plan_review_summary_group = main_window.findChild(QGroupBox, "plan_install_review_summary_group")
     plan_facts_group = main_window.findChild(QGroupBox, "plan_install_facts_group")
-    recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
+    review_output_group = main_window.findChild(QGroupBox, "plan_install_output_group")
 
     assert inventory_tabs is not None
     assert inventory_shell is not None
@@ -3800,10 +3949,10 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert execute_group is not None
     assert plan_review_summary_group is not None
     assert plan_facts_group is not None
-    assert recovery_group is not None
+    assert review_output_group is not None
 
     tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
-    assert "Plan & Install" in tab_labels
+    assert "Review" in tab_labels
     assert context_tabs.indexOf(plan_tab) >= 0
     assert inventory_tabs.parentWidget() is inventory_shell
     assert context_tabs.parentWidget() is context_shell
@@ -3838,13 +3987,16 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert plan_scroll.widget() is plan_content
 
     plan_layout = plan_content.layout()
+    intro_label = main_window.findChild(QLabel, "plan_install_intro_label")
     assert plan_layout is not None
-    assert plan_layout.indexOf(destination_group) < plan_layout.indexOf(safety_panel_group)
+    assert intro_label is not None
+    assert plan_layout.indexOf(intro_label) < plan_layout.indexOf(safety_panel_group)
     assert plan_layout.indexOf(safety_panel_group) < plan_layout.indexOf(staged_package_group)
-    assert plan_layout.indexOf(staged_package_group) < plan_layout.indexOf(execute_group)
-    assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(plan_review_summary_group)
+    assert plan_layout.indexOf(staged_package_group) < plan_layout.indexOf(destination_group)
+    assert plan_layout.indexOf(destination_group) < plan_layout.indexOf(plan_review_summary_group)
     assert plan_layout.indexOf(plan_review_summary_group) < plan_layout.indexOf(plan_facts_group)
-    assert plan_layout.indexOf(plan_facts_group) < plan_layout.indexOf(recovery_group)
+    assert plan_layout.indexOf(plan_facts_group) < plan_layout.indexOf(execute_group)
+    assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(review_output_group)
 
 
 def test_main_window_plan_install_tab_hosts_scroll_content_for_constrained_height(
@@ -3973,12 +4125,14 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert main_window._plan_review_explanation_label is plan_review_explanation_label
     assert main_window._plan_facts_label is plan_facts_label
     assert staged_package_label.isReadOnly() is True
+    assert staged_package_group.title() == "Current package"
     assert overwrite_checkbox.text() == "Enable archive-aware replace"
     assert overwrite_checkbox.isVisible() is True
+    assert plan_button.text() == "Review install"
     assert "archive-aware replace" in overwrite_help_label.text().casefold()
     assert (
         plan_review_explanation_label.text()
-        == "Plan detail: no plan selected."
+        == "Review detail: no plan selected."
     )
     assert plan_facts_label.text() == (
         "Entries: -\n"
@@ -4004,33 +4158,63 @@ def test_main_window_recovery_selector_uses_readability_contract(
     assert recovery_combo.view().minimumWidth() > 0
 
 
-def test_main_window_plan_and_recovery_output_routes_to_shared_detail_surface(
+def test_main_window_plan_and_recovery_output_route_to_local_detail_surfaces(
     main_window: MainWindow,
 ) -> None:
     main_window._set_plan_install_output_text("Plan output narrative")
-    assert main_window._findings_box.toPlainText() == "Plan output narrative"
+    assert main_window._review_output_box.toPlainText() == "Plan output narrative"
+    assert main_window._findings_box is main_window._review_output_box
+    assert main_window._review_output_group.isHidden() is False
     main_window._set_recovery_output_text("Recovery output narrative")
 
-    assert main_window._findings_box.toPlainText() == "Recovery output narrative"
+    assert main_window._recovery_output_box.toPlainText() == "Recovery output narrative"
+    assert main_window._findings_box is main_window._recovery_output_box
+    assert main_window._recovery_output_group.isHidden() is False
 
 
-def test_main_window_removed_detail_access_scaffolding_is_not_present(
+def test_main_window_setup_output_surface_shows_when_text_is_written(
+    main_window: MainWindow,
+) -> None:
+    main_window._set_setup_output_text("Setup output narrative")
+
+    assert main_window._setup_output_box.toPlainText() == "Setup output narrative"
+    assert main_window._findings_box is main_window._setup_output_box
+    assert main_window._setup_output_group.isHidden() is False
+
+
+def test_main_window_left_inventory_detail_panel_is_removed_from_visible_shell(
+    main_window: MainWindow,
+) -> None:
+    assert main_window.findChild(QGroupBox, "inventory_output_group") is None
+
+    main_window._set_inventory_output_text("Inventory output narrative")
+
+    assert main_window._inventory_output_box.toPlainText() == "Inventory output narrative"
+    assert main_window._findings_box is main_window._inventory_output_box
+
+
+def test_main_window_local_output_surfaces_exist_without_bottom_detail_region(
     main_window: MainWindow,
 ) -> None:
     assert main_window.findChild(QGroupBox, "plan_install_detail_access_group") is None
     assert main_window.findChild(QPushButton, "plan_install_view_shared_details_button") is None
     assert main_window.findChild(QCheckBox, "plan_install_show_local_output_toggle") is None
     assert main_window.findChild(QCheckBox, "recovery_show_local_output_toggle") is None
-    assert main_window.findChild(QGroupBox, "plan_install_output_group") is None
-    assert main_window.findChild(QGroupBox, "recovery_output_group") is None
+    assert main_window.findChild(QGroupBox, "discovery_output_group") is not None
+    assert main_window.findChild(QGroupBox, "compare_output_group") is not None
+    assert main_window.findChild(QGroupBox, "archive_output_group") is not None
+    assert main_window.findChild(QGroupBox, "plan_install_output_group") is not None
+    assert main_window.findChild(QGroupBox, "recovery_output_group") is not None
     assert main_window.findChild(QGroupBox, "packages_intake_detail_access_group") is None
     assert main_window.findChild(QPushButton, "packages_intake_view_shared_details_button") is None
     assert main_window.findChild(QCheckBox, "packages_intake_show_local_output_toggle") is None
-    assert main_window.findChild(QGroupBox, "packages_intake_output_group") is None
+    assert main_window.findChild(QGroupBox, "packages_output_group") is not None
+    assert main_window.findChild(QGroupBox, "inventory_output_group") is None
 
 
-def test_main_window_package_inspection_writes_to_shared_detail_surface(
+def test_main_window_package_inspection_writes_to_packages_detail_surface(
     main_window: MainWindow,
+    qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     inspection = _package_inspection_result("InspectMe.zip", "Sample.InspectMe", mod_count=2)
@@ -4055,9 +4239,21 @@ def test_main_window_package_inspection_writes_to_shared_detail_surface(
 
     main_window._zip_path_input.setText(r"C:\Downloads\InspectMe.zip")
     main_window._on_inspect_zip()
+    packages_tab = next(
+        index
+        for index in range(main_window._context_tabs.count())
+        if main_window._context_tabs.tabText(index) == "Packages"
+    )
+    main_window._context_tabs.setCurrentIndex(packages_tab)
+    qapp.processEvents()
 
-    assert main_window._findings_box.toPlainText() == "Inspection narrative output"
-    assert main_window._status_strip_label.text() == "Zip inspection complete: 2 mod(s) detected"
+    assert main_window._packages_output_box.toPlainText() == "Inspection narrative output"
+    assert main_window._findings_box is main_window._packages_output_box
+    assert (
+        main_window._status_strip_label.text()
+        == "Zip inspection complete: 2 mod(s) detected. Next step: open Review."
+    )
+    assert main_window._packages_output_group.isVisible() is True
 
 
 def test_main_window_browse_zip_accepts_multiple_selected_packages(
@@ -4068,10 +4264,27 @@ def test_main_window_browse_zip_accepts_multiple_selected_packages(
         r"C:\Downloads\Alpha.zip",
         r"C:\Downloads\Beta.zip",
     ]
+    first = _package_inspection_result("Alpha.zip", "Sample.Alpha")
+    second = _package_inspection_result("Beta.zip", "Sample.Beta")
+    batch_result = PackageInspectionBatchResult(
+        entries=(
+            PackageInspectionBatchEntry(package_path=first.package_path, inspection=first),
+            PackageInspectionBatchEntry(package_path=second.package_path, inspection=second),
+        )
+    )
 
     monkeypatch.setattr(
         "sdvmm.ui.main_window.QFileDialog.getOpenFileNames",
         lambda *args, **kwargs: (selected_paths, "Zip packages (*.zip)"),
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "inspect_zip_batch_with_inventory_context",
+        lambda *args, **kwargs: batch_result,
+    )
+    monkeypatch.setattr(
+        "sdvmm.ui.main_window.build_package_inspection_text",
+        lambda payload: f"Inspection detail for {payload.package_path.name}",
     )
 
     main_window._on_browse_zip()
@@ -4080,9 +4293,13 @@ def test_main_window_browse_zip_accepts_multiple_selected_packages(
     assert main_window._selected_zip_package_paths == tuple(Path(path) for path in selected_paths)
     assert (
         main_window._zip_selection_summary_label.text()
-        == "2 zip packages selected for inspection."
+        == "2 zip packages chosen for inspection."
     )
     assert main_window._zip_selection_summary_label.toolTip() == "Alpha.zip\nBeta.zip"
+    assert main_window._package_inspection_selector.count() == 2
+    assert main_window._package_inspection_selector.isHidden() is False
+    assert main_window._package_inspection_selector_label.isHidden() is False
+    assert "2 packages inspected" in main_window._package_inspection_summary_label.text()
 
 
 def test_main_window_zip_selection_summary_reflects_single_manual_path_entry(
@@ -4093,7 +4310,7 @@ def test_main_window_zip_selection_summary_reflects_single_manual_path_entry(
     assert main_window._selected_zip_package_paths == (Path(r"C:\Downloads\Single.zip"),)
     assert (
         main_window._zip_selection_summary_label.text()
-        == "1 zip package selected: Single.zip"
+        == "1 zip package chosen: Single.zip"
     )
     assert main_window._zip_selection_summary_label.toolTip() == "Single.zip"
 
@@ -4137,19 +4354,19 @@ def test_main_window_multi_zip_inspection_keeps_results_per_package(
     assert "Package Inspection Batch" in main_window._findings_box.toPlainText()
     assert "- Alpha.zip: 1 mod(s), 0 finding(s), 0 warning(s)" in main_window._findings_box.toPlainText()
     assert "- Broken.zip: failed" in main_window._findings_box.toPlainText()
-    assert "select one inspected package at a time for planning" in main_window._findings_box.toPlainText()
+    assert "select one inspected package at a time for install review" in main_window._findings_box.toPlainText()
 
 
-def test_main_window_packages_intake_shows_explicit_single_package_staging_rule(
+def test_main_window_packages_intake_shows_explicit_single_package_review_rule(
     main_window: MainWindow,
 ) -> None:
     assert (
         main_window._zip_staging_rule_label.text()
-        == "Inspection supports multiple packages. Staging remains one package at a time."
+        == "Choose as many zip packages as you want. After inspection, pick one package at a time for Review."
     )
 
 
-def test_main_window_staging_selected_inspected_package_uses_current_inspection_selection(
+def test_main_window_selected_inspected_package_auto_updates_current_review_target(
     main_window: MainWindow,
     qapp: QApplication,
 ) -> None:
@@ -4167,59 +4384,73 @@ def test_main_window_staging_selected_inspected_package_uses_current_inspection_
     main_window._package_inspection_selector.setCurrentIndex(1)
     qapp.processEvents()
 
-    main_window._on_plan_selected_intake()
     qapp.processEvents()
 
     assert main_window._zip_path_input.text() == str(second.package_path)
     assert main_window._staged_package_label.text() == str(second.package_path)
     assert main_window._staged_package_label.toolTip() == str(second.package_path)
-    assert (
-        main_window._status_strip_label.text()
-        == "Staged package for planning: Beta.zip"
+    assert main_window._plan_selected_intake_button.isHidden() is True
+
+
+def test_main_window_single_valid_inspected_package_hides_selector_and_targets_review(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    failed = PackageInspectionBatchEntry(
+        package_path=Path(r"C:\Downloads\Broken.zip"),
+        error_message="Bad zip",
     )
+    valid = _package_inspection_result("Alpha.zip", "Sample.Alpha")
+
+    main_window._show_package_inspection_results(
+        PackageInspectionBatchResult(
+            entries=(
+                failed,
+                PackageInspectionBatchEntry(
+                    package_path=valid.package_path,
+                    inspection=valid,
+                ),
+            )
+        )
+    )
+    qapp.processEvents()
+
+    assert main_window._package_inspection_selector.isHidden() is True
+    assert main_window._package_inspection_selector_label.isHidden() is True
+    assert main_window._zip_path_input.text() == str(valid.package_path)
+    assert main_window._staged_package_label.text() == str(valid.package_path)
+    assert "Next step: open Review." in main_window._package_inspection_summary_label.text()
 
 
-def test_main_window_staging_valid_intake_switches_to_plan_install_and_updates_display(
+def test_main_window_selected_detected_package_auto_updates_current_review_target(
     main_window: MainWindow,
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     intake = _intake_result("AlphaPack.zip", "new_install_candidate", "Alpha Mod", "Sample.Alpha")
-    packages_tab = next(
-        index
-        for index in range(main_window._context_tabs.count())
-        if main_window._context_tabs.tabText(index) == "Packages & Intake"
-    )
-    plan_tab = main_window.findChild(QWidget, "plan_install_tab")
 
     monkeypatch.setattr(
         main_window._shell_service,
         "build_install_plan_from_intake",
-        lambda **_: pytest.fail("Staging must not build an install plan in Packages & Intake."),
+        lambda **_: pytest.fail(
+            "Selecting a detected package must not build an install plan."
+        ),
     )
     monkeypatch.setattr(
         main_window._shell_service,
         "execute_sandbox_install_plan",
-        lambda *args, **kwargs: pytest.fail("Staging must not execute install."),
+        lambda *args, **kwargs: pytest.fail("Selecting a detected package must not execute install."),
     )
 
     main_window._detected_intakes = (intake,)
     main_window._intake_correlations = (_intake_correlation(intake, next_step="Review AlphaPack.zip"),)
     main_window._refresh_intake_selector()
-    main_window._context_tabs.setCurrentIndex(packages_tab)
     qapp.processEvents()
-
-    main_window._on_plan_selected_intake()
-    qapp.processEvents()
-
-    assert plan_tab is not None
-    assert main_window._context_tabs.currentWidget() is plan_tab
     assert main_window._zip_path_input.text() == str(intake.package_path)
     assert main_window._staged_package_label.toolTip() == str(intake.package_path)
     assert main_window._staged_package_label.text() == str(intake.package_path)
-    assert main_window._findings_box.toPlainText() == "Staged package for planning: AlphaPack.zip"
-    assert main_window._status_strip_label.text() == "Staged package for planning: AlphaPack.zip"
     assert main_window._pending_install_plan is None
+    assert main_window._plan_selected_intake_button.isHidden() is True
 
 
 def test_main_window_single_guided_match_auto_selects_detected_package_and_surfaces_message(
@@ -4267,7 +4498,7 @@ def test_main_window_single_guided_match_auto_selects_detected_package_and_surfa
 
     main_window._on_watch_tick()
 
-    expected_message = "Matched update package ready to stage: MatchedPack.zip"
+    expected_message = "Matched update package ready to review: MatchedPack.zip"
     assert main_window._selected_intake_index() == 0
     assert main_window._intake_result_combo.currentData() == 0
     assert "watch intake" in main_window._findings_box.toPlainText()
@@ -4337,7 +4568,7 @@ def test_main_window_multiple_guided_matches_do_not_guess_and_surface_message(
     main_window._on_watch_tick()
 
     expected_message = (
-        "Multiple matched update packages are ready. Choose which package to stage in Packages & Intake."
+        "Multiple matched update packages are ready. Choose which package to review in Packages."
     )
     assert main_window._selected_intake_index() == 0
     assert main_window._intake_result_combo.currentData() == 0
@@ -4416,14 +4647,16 @@ def test_main_window_staging_auto_selected_guided_match_switches_to_plan_install
     packages_tab = next(
         index
         for index in range(main_window._context_tabs.count())
-        if main_window._context_tabs.tabText(index) == "Packages & Intake"
+        if main_window._context_tabs.tabText(index) == "Packages"
     )
     plan_tab = main_window.findChild(QWidget, "plan_install_tab")
 
     monkeypatch.setattr(
         main_window._shell_service,
         "build_install_plan_from_intake",
-        lambda **_: pytest.fail("Staging must not plan or execute inside Packages & Intake."),
+        lambda **_: pytest.fail(
+            "Opening review must not plan or execute inside Packages."
+        ),
     )
 
     def fake_poll_downloads_watch(**_: object) -> object:
@@ -4503,7 +4736,7 @@ def test_main_window_staging_without_valid_package_surfaces_message_and_keeps_st
     packages_tab = next(
         index
         for index in range(main_window._context_tabs.count())
-        if main_window._context_tabs.tabText(index) == "Packages & Intake"
+        if main_window._context_tabs.tabText(index) == "Packages"
     )
 
     monkeypatch.setattr(
@@ -4523,13 +4756,16 @@ def test_main_window_staging_without_valid_package_surfaces_message_and_keeps_st
     main_window._on_plan_selected_intake()
     qapp.processEvents()
 
-    expected_message = "Select a detected package or inspect a zip package before staging for install."
+    expected_message = "Select a detected package or inspect a zip package before opening install review."
     assert warnings == [expected_message]
     assert main_window._findings_box.toPlainText() == expected_message
     assert main_window._status_strip_label.text() == expected_message
     assert main_window._zip_path_input.text() == r"C:\Packages\Existing.zip"
     assert main_window._pending_install_plan is existing_plan
-    assert main_window._context_tabs.tabText(main_window._context_tabs.currentIndex()) == "Packages & Intake"
+    assert (
+        main_window._context_tabs.tabText(main_window._context_tabs.currentIndex())
+        == "Packages"
+    )
 
 
 def test_main_window_run_install_without_pending_plan_sets_expected_status(
@@ -4575,9 +4811,9 @@ def test_main_window_install_related_inputs_invalidate_pending_plan(
         qapp.processEvents()
         assert main_window._pending_install_plan is None
         assert main_window._plan_review_summary_label.text() == (
-            "Plan review: no plan yet. Click Plan install to review."
+            "Review summary: no plan yet. Click Review install to inspect changes."
         )
-        assert main_window._plan_review_explanation_label.text() == "Plan detail: no plan selected."
+        assert main_window._plan_review_explanation_label.text() == "Review detail: no plan selected."
         assert main_window._plan_facts_label.text() == (
             "Entries: -\n"
             "Replace existing: -\n"
@@ -5604,19 +5840,39 @@ def test_main_window_discovery_surface_has_expected_structure(
     main_window: MainWindow,
 ) -> None:
     context_tabs = main_window._context_tabs
+    discovery_page = main_window.findChild(QWidget, "discovery_workspace_page")
     discovery_tab = main_window.findChild(QWidget, "discovery_tab")
+    discovery_intro_label = main_window.findChild(QLabel, "discovery_intro_label")
+    discovery_output_group = main_window.findChild(QGroupBox, "discovery_output_group")
     discovery_search_group = main_window.findChild(QGroupBox, "discovery_search_group")
     discovery_results_group = main_window.findChild(QGroupBox, "discovery_results_group")
 
     assert context_tabs is not None
     assert isinstance(context_tabs, QTabWidget)
+    assert discovery_page is not None
     assert discovery_tab is not None
+    assert discovery_intro_label is not None
+    assert discovery_output_group is not None
     assert discovery_search_group is not None
     assert discovery_results_group is not None
 
     tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
-    assert "Discovery" in tab_labels
-    assert context_tabs.indexOf(discovery_tab) >= 0
+    assert "Discover" in tab_labels
+    assert context_tabs.indexOf(discovery_page) >= 0
+    assert discovery_tab.parentWidget() is discovery_page
+    assert discovery_output_group.isHidden() is True
+
+
+def test_main_window_discovery_output_surface_shows_when_text_is_written(
+    main_window: MainWindow,
+) -> None:
+    assert main_window._discovery_output_group.isHidden() is True
+
+    main_window._set_discovery_output_text("Discovery output narrative")
+
+    assert main_window._discovery_output_box.toPlainText() == "Discovery output narrative"
+    assert main_window._findings_box is main_window._discovery_output_box
+    assert main_window._discovery_output_group.isHidden() is False
 
 
 def test_main_window_discovery_surface_key_controls_exist(
@@ -5646,6 +5902,7 @@ def test_main_window_compare_surface_has_expected_structure(
     compare_button = main_window.findChild(QPushButton, "compare_run_button")
     compare_table = main_window.findChild(QTableWidget, "compare_results_table")
     compare_summary = main_window.findChild(QLabel, "compare_summary_label")
+    compare_output_group = main_window.findChild(QGroupBox, "compare_output_group")
 
     assert context_tabs is not None
     assert isinstance(context_tabs, QTabWidget)
@@ -5653,6 +5910,7 @@ def test_main_window_compare_surface_has_expected_structure(
     assert compare_button is not None
     assert compare_table is not None
     assert compare_summary is not None
+    assert compare_output_group is not None
 
     tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
     assert "Compare" in tab_labels
@@ -5660,6 +5918,11 @@ def test_main_window_compare_surface_has_expected_structure(
     assert main_window._compare_real_vs_sandbox_button is compare_button
     assert main_window._compare_results_table is compare_table
     assert main_window._compare_summary_label is compare_summary
+    assert compare_table.isHidden() is True
+    assert compare_output_group.isHidden() is True
+    compare_layout = compare_tab.layout()
+    assert isinstance(compare_layout, QVBoxLayout)
+    assert compare_layout.itemAt(compare_layout.count() - 1).spacerItem() is not None
 
 
 def test_main_window_compare_action_renders_real_vs_sandbox_drift(
@@ -6019,7 +6282,7 @@ def test_main_window_open_discovered_page_no_results_sets_expected_status(
 
     main_window._on_open_discovered_page()
 
-    assert main_window._status_strip_label.text() == "Run Search mods first."
+    assert main_window._status_strip_label.text() == "Run Find mods first."
 
 
 def test_main_window_open_discovered_page_no_selection_sets_expected_status(
@@ -6058,19 +6321,34 @@ def test_main_window_archive_surface_has_expected_structure(
     main_window: MainWindow,
 ) -> None:
     context_tabs = main_window._context_tabs
+    archive_page = main_window.findChild(QWidget, "archive_workspace_page")
     archive_tab = main_window.findChild(QWidget, "archive_tab")
+    archive_intro_label = main_window.findChild(QLabel, "archive_intro_label")
+    archive_empty_state_label = main_window.findChild(QLabel, "archive_empty_state_label")
+    archive_output_group = main_window.findChild(QGroupBox, "archive_output_group")
     archive_controls_group = main_window.findChild(QGroupBox, "archive_controls_group")
     archive_results_group = main_window.findChild(QGroupBox, "archive_results_group")
 
     assert context_tabs is not None
     assert isinstance(context_tabs, QTabWidget)
+    assert archive_page is not None
     assert archive_tab is not None
+    assert archive_intro_label is not None
+    assert archive_empty_state_label is not None
+    assert archive_output_group is not None
     assert archive_controls_group is not None
     assert archive_results_group is not None
 
     tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
     assert "Archive" in tab_labels
-    assert context_tabs.indexOf(archive_tab) >= 0
+    assert context_tabs.indexOf(archive_page) >= 0
+    assert archive_tab.parentWidget() is archive_page
+    assert archive_empty_state_label.isHidden() is False
+    assert archive_results_group.isHidden() is True
+    assert archive_output_group.isHidden() is True
+    archive_page_layout = archive_page.layout()
+    assert isinstance(archive_page_layout, QVBoxLayout)
+    assert archive_page_layout.itemAt(archive_page_layout.count() - 1).spacerItem() is not None
 
 
 def test_main_window_archive_surface_key_controls_exist(
@@ -6095,18 +6373,44 @@ def test_main_window_archive_surface_key_controls_exist(
     assert main_window._delete_archived_button is delete_button
 
 
+def test_main_window_recovery_surface_has_expected_structure(
+    main_window: MainWindow,
+) -> None:
+    context_tabs = main_window._context_tabs
+    recovery_tab = main_window.findChild(QWidget, "recovery_tab")
+    recovery_intro_label = main_window.findChild(QLabel, "recovery_intro_label")
+    recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
+    recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
+
+    assert context_tabs is not None
+    assert isinstance(context_tabs, QTabWidget)
+    assert recovery_tab is not None
+    assert recovery_intro_label is not None
+    assert recovery_group is not None
+    assert recovery_output_group is not None
+
+    tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
+    assert "Recovery" in tab_labels
+    assert context_tabs.indexOf(recovery_tab) >= 0
+
+
 def test_main_window_archive_surface_uses_tighter_spacing_between_actions_and_results(
     main_window: MainWindow,
 ) -> None:
     archive_controls_group = main_window.findChild(QGroupBox, "archive_controls_group")
     archive_results_group = main_window.findChild(QGroupBox, "archive_results_group")
+    archive_tab = main_window.findChild(QWidget, "archive_tab")
 
     assert archive_controls_group is not None
     assert archive_results_group is not None
+    assert archive_tab is not None
     assert (
         archive_controls_group.sizePolicy().verticalPolicy()
         == QSizePolicy.Policy.Maximum
     )
+    archive_layout = archive_tab.layout()
+    assert isinstance(archive_layout, QVBoxLayout)
+    assert archive_layout.itemAt(archive_layout.count() - 1).spacerItem() is not None
 
     results_layout = archive_results_group.layout()
     assert isinstance(results_layout, QVBoxLayout)
@@ -6414,7 +6718,7 @@ def test_main_window_stage_update_button_only_appears_for_update_like_detected_p
     main_window._intake_correlations = (
         _intake_correlation(
             non_update_intake,
-            next_step="Stage for Plan & Install.",
+            next_step="Stage for Install / Update review.",
         ),
     )
     main_window._refresh_intake_selector()
@@ -6539,7 +6843,7 @@ def test_main_window_normal_staging_does_not_inherit_auto_overwrite_from_stage_u
     main_window._intake_correlations = (
         _intake_correlation(
             normal_intake,
-            next_step="Stage for Plan & Install.",
+            next_step="Stage for Install / Update review.",
         ),
     )
     main_window._refresh_intake_selector()
@@ -6613,7 +6917,7 @@ def test_main_window_manual_overwrite_choice_still_applies_after_stage_update(
     main_window._intake_correlations = (
         _intake_correlation(
             normal_intake,
-            next_step="Stage for Plan & Install.",
+            next_step="Stage for Install / Update review.",
         ),
     )
     main_window._refresh_intake_selector()
@@ -6670,7 +6974,7 @@ def test_main_window_package_inspection_result_text_controls_visibility(
     package_tab_index = next(
         index
         for index in range(main_window._context_tabs.count())
-        if main_window._context_tabs.tabText(index) == "Packages & Intake"
+        if main_window._context_tabs.tabText(index) == "Packages"
     )
 
     assert inspection_group.isVisible() is False
