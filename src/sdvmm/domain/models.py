@@ -331,6 +331,8 @@ class RestoreImportExecutionReview:
     message: str
     executable_mod_count: int
     executable_config_count: int
+    replace_mod_count: int = 0
+    replace_config_count: int = 0
     covered_config_count: int = 0
     review_entry_count: int = 0
     blocked_entry_count: int = 0
@@ -346,6 +348,9 @@ class RestoreImportExecutionResult:
     restored_config_paths: tuple[Path, ...]
     restored_mod_count: int
     restored_config_count: int
+    archived_target_paths: tuple[Path, ...] = tuple()
+    replaced_mod_count: int = 0
+    replaced_config_count: int = 0
     covered_config_count: int = 0
     skipped_review_entry_count: int = 0
     skipped_blocked_entry_count: int = 0

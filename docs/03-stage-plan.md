@@ -1,6 +1,6 @@
 # Roadmap
 
-## Product direction after `0.8.0`
+## Product direction after `0.9.0`
 
 The app is now a local-first Stardew Valley mod workflow manager with a sandbox-first safety model.
 
@@ -16,7 +16,7 @@ It is not trying to become, in the near term:
 - a broad profile or instance manager
 - a broad shell-polish project divorced from workflow value
 
-## Shipped through `0.8.0`
+## Shipped through `0.9.0`
 
 ### Core workflow and safety baseline
 
@@ -72,7 +72,11 @@ Shipped:
 - clear planning states for safe later vs needs review vs blocked
 - config-aware planning visibility for bundled config artifacts (`missing locally`, `same content`, `different content`, `blocked`)
 - explicit restore/import execution into the currently configured destinations for clearly missing mod content and supported config artifacts
-- no overwrite/merge restore behavior in this baseline; conflicting and ambiguous content remains review-only
+- explicit restore conflict handling for:
+  - existing mod folder with different version
+  - existing config artifact with different content
+- reviewed conflicts use archive-aware mod-folder replacement
+- ambiguous and structurally blocked restore cases still do not execute
 - explicit open-folder actions for the key configured workflow folders
 
 ### Information architecture simplification (paused)
@@ -93,25 +97,25 @@ Still paused because workflow completion and trust are higher-value than more de
 - keep launch intent explicit and sandbox-safe
 - surface when fallback/manual launch is required
 
-### 2. Restore/import conflict/overwrite follow-up
+### 2. Compare follow-up
 
-- keep the shipped execution baseline narrow and trustworthy
-- design the next restore step around explicit review for conflicting local content
-- do not introduce blind overwrite or merge shortcuts
+- keep the shipped compare view readable and trustworthy as a first-class drift/orientation surface
+- revisit richer compare ergonomics only after the current restore/import and launch baselines settle
+- no compare-driven bulk sync/promotion shortcuts yet
 
 Why this is next:
 
-- restore/import now has a coherent trust chain: export, config coverage, inspection, planning, and first execution
-- the remaining restore gap is conflict handling, not basic missing-content recovery
-- Steam-aware launch behavior is the next daily-use friction point outside the migration track
+- restore/import now has a coherent trust chain from export through reviewed conflict-capable execution
+- Steam-aware launch behavior is the main remaining daily-use friction point outside the migration track
+- compare follow-up is the next visibility-focused convenience area once launch behavior is addressed
 
 ## Later or deferred
 
-### Compare follow-up
+### Restore/import file-level merge follow-up
 
-- keep the shipped compare view readable and trustworthy as a first-class drift/orientation surface
-- defer richer compare actions until safety semantics are explicitly designed
-- no compare-driven bulk sync/promotion shortcuts yet
+- keep the shipped conflict-resolution baseline folder-oriented and trustworthy
+- do not introduce file-level merge semantics until review, safety, and recovery semantics are explicitly designed
+- no casual overwrite shortcuts
 
 ### Icon/taskbar refinement
 

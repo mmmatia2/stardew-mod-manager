@@ -18,7 +18,7 @@ Current maturity is best described as:
 Current workflow emphasis:
 - safe local mod workflow over broad platform-management ambitions
 - sandbox-first mod development and validation
-- migration trust through explicit local backup/export, bundle inspection, restore/import planning, and first-baseline restore/import execution
+- migration trust through explicit local backup/export, bundle inspection, restore/import planning, restore/import execution, and first-baseline restore conflict handling
 - explicit, user-triggered movement between sandbox and real Mods
 - no hidden mirroring or blind overwrite of live Mods
 - explicit batch package inspection with single-package staging for planning
@@ -101,8 +101,14 @@ Live Mods safety expectations:
 - **Restore/import execution baseline**
   - explicit `Execute restore/import` action built on the existing planning result
   - restores only clearly missing mod folders and supported missing config artifacts into the currently configured local destinations
-  - keeps overwrite/merge behavior deferred; conflicting or ambiguous content remains review-only and untouched
   - rolls back already-restored paths from the current run if a mid-run restore failure occurs
+- **Restore/import conflict-resolution baseline**
+  - reviewed restore can now resolve:
+    - existing mod folder with different version
+    - existing config artifact with different content
+  - conflict handling is explicit and review-first
+  - conflicting local content is handled through archive-aware mod-folder replacement, not file merge
+  - ambiguous or structurally blocked restore cases still do not execute
 - **Config-aware backup baseline**
   - backup export now carries common per-mod config artifacts found inside installed real/sandbox Mods trees
   - bundle inspection reports config snapshot coverage explicitly
@@ -189,7 +195,7 @@ You can still run focused suites when iterating:
 .\.venv\Scripts\python.exe -m pytest tests\unit\test_main_window_gui_regression.py -q
 ```
 
-### 4) Build Windows portable folder (`0.8.0`)
+### 4) Build Windows portable folder (`0.9.0`)
 
 Packaging baseline in this repo uses **PyInstaller one-folder** output because it is the smallest practical Windows desktop packaging path here without introducing installer/signing work.
 
@@ -208,13 +214,13 @@ Build the portable folder:
 Output folder:
 
 ```text
-dist\stardew-mod-manager-0.8.0-windows-portable\
+dist\stardew-mod-manager-0.9.0-windows-portable\
 ```
 
 Launch the packaged app:
 
 ```powershell
-.\dist\stardew-mod-manager-0.8.0-windows-portable\Stardew Mod Manager.exe
+.\dist\stardew-mod-manager-0.9.0-windows-portable\Stardew Mod Manager.exe
 ```
 
 Current caveats:
@@ -232,11 +238,10 @@ Current caveats:
 - no profiles/instances workflow
 - no packaging/installer/release hardening yet
 - no cross-platform polish emphasis yet (Windows workflow is the primary dev path)
-- restore/import now executes only for clearly missing content; overwrite/merge restore behavior is still deferred
+- restore/import now handles reviewed version/content conflicts through archive-aware mod-folder replacement; file-level merge behavior is still deferred
 - near-term usability priorities are now:
   - Steam prelaunch best-effort behavior
-  - restore/import conflict/overwrite follow-up under the same review-first safety model
-- compare follow-up remains deferred until the current visibility-first baseline has been used enough to justify compare-driven conveniences
+  - compare follow-up only after current restore/import and launch flows settle
 - downloader automation, profile systems, and broad UI polish remain lower priority than restore/import trust work
 
 ## Data and persistence notes
@@ -249,5 +254,5 @@ Current caveats:
 - export now also includes common per-mod config artifacts found inside installed Mods trees under `mod-config\real-mods\...` and `mod-config\sandbox-mods\...`
 - `Inspect backup bundle` reads an exported bundle and reports structure/usability without applying restore changes
 - `Plan restore/import` compares a selected backup bundle against the current local machine and reports what looks safe later, what needs review, and what is blocked, including config artifact visibility
-- `Execute restore/import` writes only clearly missing content from the current plan into the current configured destinations
-- restore/import still does not do overwrite/merge apply behavior for conflicting local content in this baseline
+- `Execute restore/import` now restores clearly missing content and reviewed conflict cases into the current configured destinations
+- reviewed conflicts use archive-aware mod-folder replacement; file-level merge behavior for conflicting local content is still intentionally not implemented

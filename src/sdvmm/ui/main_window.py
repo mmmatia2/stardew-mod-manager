@@ -1844,16 +1844,22 @@ class MainWindow(QMainWindow):
             return
 
         review_lines = [
-            "Restore/import will write only clearly missing content into the current configured destinations.",
+            "Restore/import will write reviewed bundle content into the current configured destinations.",
             "",
-            f"Missing mod folders to restore: {review.executable_mod_count}",
+            f"Mod folders to write: {review.executable_mod_count}",
+            f"Archive-and-replace mod folders: {review.replace_mod_count}",
             f"Missing config artifacts to restore: {review.executable_config_count}",
+            (
+                "Conflicting config artifacts resolved by reviewed mod-folder replace: "
+                f"{review.replace_config_count}"
+            ),
             f"Config artifacts already covered by restored mod folders: {review.covered_config_count}",
             f"Review entries left untouched: {review.review_entry_count}",
             f"Blocked entries left untouched: {review.blocked_entry_count}",
             f"Deferred non-execution bundle items: {review.deferred_item_count}",
             "",
-            "No local content will be merged or overwritten in this stage.",
+            "Conflict replacements archive the current local mod folder before the bundled mod folder is restored.",
+            "No file merge behavior is used in this stage.",
             "",
             "Continue with restore/import execution?",
         ]

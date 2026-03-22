@@ -355,6 +355,10 @@ class _RestoreImportExecutableModAction:
     unique_id: str
     source_path: Path
     destination_path: Path
+    action_kind: Literal["restore_missing", "archive_replace"]
+    archive_root: Path | None = None
+    archive_destination_path: Path | None = None
+    replace_config_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,6 +373,8 @@ class _RestoreImportExecutableConfigAction:
 class _RestoreImportExecutionAnalysis:
     mod_actions: tuple[_RestoreImportExecutableModAction, ...]
     config_actions: tuple[_RestoreImportExecutableConfigAction, ...]
+    replace_mod_count: int
+    replace_config_count: int
     covered_config_count: int
     review_entry_count: int
     blocked_entry_count: int
@@ -781,17 +787,38 @@ class AppShellService:
             planning_result
         )
 
+        archived_target_paths: list[Path] = []
+        archived_target_restores: list[tuple[Path, Path]] = []
         restored_mod_paths: list[Path] = []
         restored_config_paths: list[Path] = []
         try:
             for action in mod_actions:
-                if action.destination_path.exists():
+                if action.action_kind == "archive_replace":
+                    if (
+                        action.archive_root is None
+                        or action.archive_destination_path is None
+                    ):
+                        raise AppShellError(
+                            f"Restore/import replace action is missing archive context for {action.destination_path}."
+                        )
+                    if not action.destination_path.exists() or not action.destination_path.is_dir():
+                        raise AppShellError(
+                            "Restore/import replace target is no longer available for archive-aware replacement: "
+                            f"{action.destination_path}"
+                        )
+                    _ensure_archive_root_service(action.archive_root)
+                    action.destination_path.rename(action.archive_destination_path)
+                    archived_target_paths.append(action.archive_destination_path)
+                    archived_target_restores.append(
+                        (action.archive_destination_path, action.destination_path)
+                    )
+                elif action.destination_path.exists():
                     raise AppShellError(
                         f"Restore/import target already exists unexpectedly: {action.destination_path}"
                     )
                 action.destination_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(action.source_path, action.destination_path)
                 restored_mod_paths.append(action.destination_path)
+                shutil.copytree(action.source_path, action.destination_path)
 
             for action in config_actions:
                 if action.destination_path.exists():
@@ -800,10 +827,11 @@ class AppShellService:
                         f"{action.destination_path}"
                     )
                 action.destination_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(action.source_path, action.destination_path)
                 restored_config_paths.append(action.destination_path)
+                shutil.copy2(action.source_path, action.destination_path)
         except (AppShellError, OSError) as exc:
             rollback_warnings = _rollback_restore_import_paths(
+                archived_target_restores=tuple(archived_target_restores),
                 restored_mod_paths=tuple(restored_mod_paths),
                 restored_config_paths=tuple(restored_config_paths),
             )
@@ -818,6 +846,9 @@ class AppShellService:
             restored_config_paths=tuple(restored_config_paths),
             restored_mod_count=len(restored_mod_paths),
             restored_config_count=len(restored_config_paths),
+            archived_target_paths=tuple(archived_target_paths),
+            replaced_mod_count=review.replace_mod_count,
+            replaced_config_count=review.replace_config_count,
             covered_config_count=review.covered_config_count,
             skipped_review_entry_count=review.review_entry_count,
             skipped_blocked_entry_count=review.blocked_entry_count,
@@ -825,6 +856,8 @@ class AppShellService:
             message=_build_restore_import_execution_summary_message(
                 restored_mod_count=len(restored_mod_paths),
                 restored_config_count=len(restored_config_paths),
+                replaced_mod_count=review.replace_mod_count,
+                replaced_config_count=review.replace_config_count,
                 covered_config_count=review.covered_config_count,
                 review_entry_count=review.review_entry_count,
                 blocked_entry_count=review.blocked_entry_count,
@@ -5516,11 +5549,19 @@ def _build_restore_import_execution_review(
 
     if has_executable_content:
         message = (
-            "Restore/import is ready to copy "
-            f"{executable_mod_count} missing mod folder(s) and "
-            f"{executable_config_count} missing config artifact(s) into the current configured destinations. "
-            "Existing local content will not be merged or overwritten."
+            "Restore/import is ready to write "
+            f"{executable_mod_count} mod folder(s) and "
+            f"{executable_config_count} config artifact(s) into the current configured destinations. "
+            "Existing local content will not be merged."
         )
+        if analysis.replace_mod_count > 0:
+            message += (
+                f" {analysis.replace_mod_count} mod folder(s) will be archive-and-replaced after explicit review."
+            )
+        if analysis.replace_config_count > 0:
+            message += (
+                f" {analysis.replace_config_count} conflicting config artifact(s) will be resolved by archive-and-replacing the containing mod folder."
+            )
         if (
             analysis.review_entry_count > 0
             or analysis.blocked_entry_count > 0
@@ -5543,6 +5584,8 @@ def _build_restore_import_execution_review(
         message=message,
         executable_mod_count=executable_mod_count,
         executable_config_count=executable_config_count,
+        replace_mod_count=analysis.replace_mod_count,
+        replace_config_count=analysis.replace_config_count,
         covered_config_count=analysis.covered_config_count,
         review_entry_count=analysis.review_entry_count,
         blocked_entry_count=analysis.blocked_entry_count,
@@ -5594,16 +5637,18 @@ def _analyze_restore_import_execution(
 
     planning_items_by_key = {item.key: item for item in planning_result.items}
     mod_source_paths = _build_restore_import_mod_source_index(planning_result, warnings)
+    mod_source_paths_by_folder = _build_restore_import_mod_folder_source_index(planning_result, warnings)
 
     mod_actions: list[_RestoreImportExecutableModAction] = []
     covered_config_folders_by_key: dict[str, set[str]] = {
         "real_mod_configs": set(),
         "sandbox_mod_configs": set(),
     }
+    scheduled_replace_destinations: set[tuple[str, str]] = set()
     for entry in planning_result.mod_entries:
         if entry.bundle_item_key not in {"real_mods", "sandbox_mods"}:
             continue
-        if entry.state != "missing_locally":
+        if entry.state not in {"missing_locally", "different_version"}:
             continue
         if entry.local_target_path is None or not _restore_import_directory_target_is_ready(
             entry.local_target_path
@@ -5625,10 +5670,48 @@ def _analyze_restore_import_execution(
             continue
 
         destination_path = entry.local_target_path / source_path.name
-        if destination_path.exists():
+        action_kind: Literal["restore_missing", "archive_replace"] = "restore_missing"
+        archive_root: Path | None = None
+        archive_destination_path: Path | None = None
+        replace_config_count = 0
+        if entry.state == "different_version":
+            if not destination_path.exists() or not destination_path.is_dir():
+                blocked_entry_count += 1
+                warnings.append(
+                    "Restore/import replace target is not available for archive-aware replacement: "
+                    f"{destination_path}"
+                )
+                continue
+            archive_root = _restore_import_archive_root_for_mod_item(
+                mod_item_key=entry.bundle_item_key,
+                planning_items_by_key=planning_items_by_key,
+            )
+            if archive_root is None:
+                blocked_entry_count += 1
+                warnings.append(
+                    f"No archive destination is configured for reviewed restore/import replacement of {destination_path}."
+                )
+                continue
+            try:
+                _ensure_archive_root_service(archive_root)
+                archive_destination_path = allocate_archive_destination(
+                    archive_root=archive_root,
+                    target_folder_name=destination_path.name,
+                )
+            except (SandboxInstallError, ArchiveManagerError, OSError) as exc:
+                blocked_entry_count += 1
+                warnings.append(
+                    f"Could not prepare archive-aware replacement for {destination_path}: {exc}"
+                )
+                continue
+            action_kind = "archive_replace"
+            scheduled_replace_destinations.add(
+                (entry.bundle_item_key, destination_path.name.casefold())
+            )
+        elif destination_path.exists():
             blocked_entry_count += 1
             warnings.append(
-                f"Restore/import target already exists and will not be overwritten: {destination_path}"
+                f"Restore/import target already exists and will not be overwritten without review: {destination_path}"
             )
             continue
 
@@ -5638,6 +5721,10 @@ def _analyze_restore_import_execution(
                 unique_id=entry.unique_id,
                 source_path=source_path,
                 destination_path=destination_path,
+                action_kind=action_kind,
+                archive_root=archive_root,
+                archive_destination_path=archive_destination_path,
+                replace_config_count=replace_config_count,
             )
         )
         covered_config_key = _restore_import_config_key_for_mod_item(entry.bundle_item_key)
@@ -5648,14 +5735,28 @@ def _analyze_restore_import_execution(
 
     config_actions: list[_RestoreImportExecutableConfigAction] = []
     covered_config_count = 0
+    replace_config_count = 0
+    config_conflicts_by_folder: dict[tuple[str, str], list[RestoreImportPlanningConfigEntry]] = {}
     for entry in planning_result.config_entries:
         if entry.bundle_item_key not in {"real_mod_configs", "sandbox_mod_configs"}:
+            continue
+        relative_parts = entry.relative_path.parts
+        top_level_folder = relative_parts[0] if relative_parts else None
+        if entry.state == "different_content":
+            if top_level_folder is None:
+                blocked_entry_count += 1
+                warnings.append(
+                    "Bundled config conflict has an invalid relative path and cannot be reviewed for replacement."
+                )
+                continue
+            config_conflicts_by_folder.setdefault(
+                (entry.bundle_item_key, top_level_folder.casefold()),
+                [],
+            ).append(entry)
             continue
         if entry.state != "missing_locally":
             continue
 
-        relative_parts = entry.relative_path.parts
-        top_level_folder = relative_parts[0] if relative_parts else None
         if (
             top_level_folder is not None
             and top_level_folder in covered_config_folders_by_key.get(entry.bundle_item_key, set())
@@ -5729,9 +5830,91 @@ def _analyze_restore_import_execution(
             )
         )
 
+    for (config_item_key, folder_key), conflict_entries in sorted(
+        config_conflicts_by_folder.items(),
+        key=lambda item: (item[0][0], item[0][1]),
+    ):
+        planning_item = planning_items_by_key.get(config_item_key)
+        if planning_item is None or planning_item.local_target_path is None:
+            blocked_entry_count += len(conflict_entries)
+            warnings.append(
+                f"No local destination is available for reviewed config restore conflicts in {folder_key}."
+            )
+            continue
+        destination_path = planning_item.local_target_path / conflict_entries[0].relative_path.parts[0]
+        if not destination_path.exists() or not destination_path.is_dir():
+            blocked_entry_count += len(conflict_entries)
+            warnings.append(
+                "Config conflict replacement target is not available for archive-aware replacement: "
+                f"{destination_path}"
+            )
+            continue
+
+        mod_item_key = _restore_import_mod_item_key_for_config_item(config_item_key)
+        if mod_item_key is None:
+            blocked_entry_count += len(conflict_entries)
+            warnings.append(
+                f"Config conflict group {destination_path.name} is missing a matching bundled Mods directory."
+            )
+            continue
+        if (mod_item_key, folder_key) in scheduled_replace_destinations:
+            replace_config_count += len(conflict_entries)
+            continue
+        source_path = mod_source_paths_by_folder.get((mod_item_key, folder_key))
+        if source_path is None:
+            blocked_entry_count += len(conflict_entries)
+            warnings.append(
+                f"Bundled mod folder source could not be resolved for config conflict replacement of {destination_path.name}."
+            )
+            continue
+
+        archive_root = _restore_import_archive_root_for_mod_item(
+            mod_item_key=mod_item_key,
+            planning_items_by_key=planning_items_by_key,
+        )
+        if archive_root is None:
+            blocked_entry_count += len(conflict_entries)
+            warnings.append(
+                f"No archive destination is configured for reviewed restore/import replacement of {destination_path}."
+            )
+            continue
+        try:
+            _ensure_archive_root_service(archive_root)
+            archive_destination_path = allocate_archive_destination(
+                archive_root=archive_root,
+                target_folder_name=destination_path.name,
+            )
+        except (SandboxInstallError, ArchiveManagerError, OSError) as exc:
+            blocked_entry_count += len(conflict_entries)
+            warnings.append(
+                f"Could not prepare archive-aware replacement for config conflict {destination_path}: {exc}"
+            )
+            continue
+
+        mod_actions.append(
+            _RestoreImportExecutableModAction(
+                bundle_item_key=mod_item_key,
+                unique_id="<config-conflict>",
+                source_path=source_path,
+                destination_path=destination_path,
+                action_kind="archive_replace",
+                archive_root=archive_root,
+                archive_destination_path=archive_destination_path,
+                replace_config_count=len(conflict_entries),
+            )
+        )
+        scheduled_replace_destinations.add((mod_item_key, folder_key))
+        replace_config_count += len(conflict_entries)
+
+    replace_mod_count = sum(
+        1 for action in mod_actions if action.action_kind == "archive_replace"
+    )
+
     return _RestoreImportExecutionAnalysis(
         mod_actions=tuple(mod_actions),
         config_actions=tuple(config_actions),
+        replace_mod_count=replace_mod_count,
+        replace_config_count=replace_config_count,
         covered_config_count=covered_config_count,
         review_entry_count=review_entry_count,
         blocked_entry_count=blocked_entry_count,
@@ -5741,6 +5924,28 @@ def _analyze_restore_import_execution(
 
 
 def _build_restore_import_mod_source_index(
+    planning_result: RestoreImportPlanningResult,
+    warnings: list[str],
+) -> dict[tuple[str, str], Path]:
+    indexed_sources: dict[tuple[str, str], Path] = {}
+    indexed_sources_by_folder = _build_restore_import_mod_folder_source_index(
+        planning_result,
+        warnings,
+    )
+    for (item_key, _folder_key), source_path in indexed_sources_by_folder.items():
+        unique_key = _restore_import_unique_key_for_bundle_mod_path(
+            planning_result=planning_result,
+            item_key=item_key,
+            source_path=source_path,
+            warnings=warnings,
+        )
+        if unique_key is None:
+            continue
+        indexed_sources[(item_key, unique_key)] = source_path
+    return indexed_sources
+
+
+def _build_restore_import_mod_folder_source_index(
     planning_result: RestoreImportPlanningResult,
     warnings: list[str],
 ) -> dict[tuple[str, str], Path]:
@@ -5764,7 +5969,7 @@ def _build_restore_import_mod_source_index(
             unique_key = canonicalize_unique_id(mod.unique_id)
             if unique_id_counts[unique_key] > 1:
                 continue
-            indexed_sources[(item_key, unique_key)] = mod.folder_path
+            indexed_sources[(item_key, mod.folder_path.name.casefold())] = mod.folder_path
     return indexed_sources
 
 
@@ -5776,10 +5981,60 @@ def _restore_import_config_key_for_mod_item(mod_item_key: str) -> str | None:
     return None
 
 
+def _restore_import_mod_item_key_for_config_item(config_item_key: str) -> str | None:
+    if config_item_key == "real_mod_configs":
+        return "real_mods"
+    if config_item_key == "sandbox_mod_configs":
+        return "sandbox_mods"
+    return None
+
+
+def _restore_import_archive_root_for_mod_item(
+    *,
+    mod_item_key: str,
+    planning_items_by_key: dict[str, RestoreImportPlanningItem],
+) -> Path | None:
+    if mod_item_key == "real_mods":
+        archive_item = planning_items_by_key.get("real_archive")
+    elif mod_item_key == "sandbox_mods":
+        archive_item = planning_items_by_key.get("sandbox_archive")
+    else:
+        archive_item = None
+    if archive_item is None:
+        return None
+    return archive_item.local_target_path
+
+
+def _restore_import_unique_key_for_bundle_mod_path(
+    *,
+    planning_result: RestoreImportPlanningResult,
+    item_key: str,
+    source_path: Path,
+    warnings: list[str],
+) -> str | None:
+    planning_items_by_key = {item.key: item for item in planning_result.items}
+    planning_item = planning_items_by_key.get(item_key)
+    if planning_item is None:
+        return None
+    bundle_directory = planning_result.bundle_path / planning_item.bundle_relative_path
+    bundle_inventory, bundle_error = _scan_inventory_for_restore_planning(bundle_directory)
+    if bundle_inventory is None:
+        if bundle_error:
+            warnings.append(bundle_error)
+        return None
+    for mod in bundle_inventory.mods:
+        if _paths_deterministically_match(mod.folder_path, source_path):
+            return canonicalize_unique_id(mod.unique_id)
+    warnings.append(f"Could not determine bundled UniqueID for {source_path}.")
+    return None
+
+
 def _build_restore_import_execution_summary_message(
     *,
     restored_mod_count: int,
     restored_config_count: int,
+    replaced_mod_count: int,
+    replaced_config_count: int,
     covered_config_count: int,
     review_entry_count: int,
     blocked_entry_count: int,
@@ -5789,6 +6044,13 @@ def _build_restore_import_execution_summary_message(
         "Restore/import execution completed: "
         f"{restored_mod_count} mod folder(s) and {restored_config_count} config artifact(s) restored."
     )
+    if replaced_mod_count > 0:
+        message += f" {replaced_mod_count} mod folder(s) were archive-and-replaced."
+    if replaced_config_count > 0:
+        message += (
+            f" {replaced_config_count} conflicting config artifact(s) were resolved by "
+            "archive-and-replacing the containing mod folder."
+        )
     if covered_config_count > 0:
         message += f" {covered_config_count} config artifact(s) were already covered by restored mod folders."
     if review_entry_count > 0 or blocked_entry_count > 0 or deferred_item_count > 0:
@@ -5798,6 +6060,7 @@ def _build_restore_import_execution_summary_message(
 
 def _rollback_restore_import_paths(
     *,
+    archived_target_restores: tuple[tuple[Path, Path], ...],
     restored_mod_paths: tuple[Path, ...],
     restored_config_paths: tuple[Path, ...],
 ) -> tuple[str, ...]:
@@ -5814,6 +6077,12 @@ def _rollback_restore_import_paths(
                 shutil.rmtree(path)
         except OSError as exc:
             warnings.append(f"Could not remove restored mod folder {path}: {exc}")
+    for archived_path, restore_target in reversed(archived_target_restores):
+        try:
+            if archived_path.exists() and not restore_target.exists():
+                archived_path.rename(restore_target)
+        except OSError as exc:
+            warnings.append(f"Could not restore archived target {archived_path}: {exc}")
     return tuple(warnings)
 
 
@@ -6421,14 +6690,17 @@ def build_restore_import_planning_text(result: RestoreImportPlanningResult) -> s
 def build_restore_import_execution_result_text(
     result: RestoreImportExecutionResult,
 ) -> str:
+    missing_mod_count = result.restored_mod_count - result.replaced_mod_count
+    missing_config_count = result.restored_config_count
     lines = [
         "Stardew Mod Manager restore/import execution",
         f"Bundle folder: {result.bundle_path}",
         f"Summary: {result.message}",
-        "Execution rule: only clearly missing content was restored into the current configured destinations.",
-        "Existing local content was not merged or overwritten in this stage.",
-        f"Restored mod folders: {result.restored_mod_count}",
-        f"Restored config artifacts: {result.restored_config_count}",
+        "Execution rule: missing content may be restored directly, while reviewed conflicts use archive-aware mod-folder replacement.",
+        "No file merge behavior was used in this stage.",
+        f"Restored mod folders: {result.restored_mod_count} (missing restores: {missing_mod_count}, reviewed replaces: {result.replaced_mod_count})",
+        f"Restored config artifacts: {result.restored_config_count} (missing restores: {missing_config_count}, conflict-driven replaces: {result.replaced_config_count})",
+        f"Archived local targets before replacement: {len(result.archived_target_paths)}",
         f"Config artifacts already covered by restored mod folders: {result.covered_config_count}",
         f"Skipped review entries: {result.skipped_review_entry_count}",
         f"Skipped blocked entries: {result.skipped_blocked_entry_count}",
@@ -6446,6 +6718,10 @@ def build_restore_import_execution_result_text(
     if result.restored_config_paths:
         lines.extend(("", "Restored config artifacts:"))
         lines.extend(f"- {path}" for path in result.restored_config_paths)
+
+    if result.archived_target_paths:
+        lines.extend(("", "Archived local targets:"))
+        lines.extend(f"- {path}" for path in result.archived_target_paths)
 
     if not result.restored_mod_paths and not result.restored_config_paths:
         lines.extend(

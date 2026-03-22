@@ -1169,7 +1169,7 @@ def test_execute_restore_import_rolls_back_partial_writes_on_failure(
     assert (local_real_mods / "RealBeta" / "configs" / "ui.json").exists() is False
 
 
-def test_execute_restore_import_blocks_when_only_review_or_blocked_content_exists(
+def test_execute_restore_import_replaces_conflicting_mod_with_archive_aware_restore(
     tmp_path: Path,
 ) -> None:
     state_file = tmp_path / "state" / "app-state.json"
@@ -1240,13 +1240,187 @@ def test_execute_restore_import_blocks_when_only_review_or_blocked_content_exist
     )
 
     review = service.review_restore_import_execution(plan)
+    assert review.allowed is True
+    assert review.executable_mod_count == 1
+    assert review.replace_mod_count == 1
+
+    result = service.execute_restore_import(plan, confirm_execution=True)
+
+    archived_target = result.archived_target_paths[0]
+    assert result.replaced_mod_count == 1
+    assert archived_target.exists() is True
+    assert (archived_target / "config.json").read_text(encoding="utf-8") == '{"enabled":false}'
+    assert local_real_alpha.exists() is True
+    assert '"Version":"1.0.0"' in local_real_alpha.joinpath("manifest.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_execute_restore_import_replaces_conflicting_config_by_archiving_and_replacing_mod_folder(
+    tmp_path: Path,
+) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+
+    bundle_game = tmp_path / "BundleGame"
+    bundle_real_mods = tmp_path / "BundleRealMods"
+    bundle_sandbox_mods = tmp_path / "BundleSandboxMods"
+    bundle_real_archive = tmp_path / "BundleRealArchive"
+    bundle_sandbox_archive = tmp_path / "BundleSandboxArchive"
+    _create_launchable_game_install(bundle_game)
+    bundle_real_alpha = _create_mod(bundle_real_mods, "RealAlpha", "Sample.RealAlpha", version="1.0.0")
+    (bundle_real_alpha / "config.json").write_text('{"enabled":true}', encoding="utf-8")
+    bundle_sandbox_mods.mkdir()
+    bundle_real_archive.mkdir()
+    bundle_sandbox_archive.mkdir()
+
+    bundle_config = AppConfig(
+        game_path=bundle_game,
+        mods_path=bundle_real_mods,
+        app_data_path=tmp_path / "BundleAppData",
+        sandbox_mods_path=bundle_sandbox_mods,
+        sandbox_archive_path=bundle_sandbox_archive,
+        real_archive_path=bundle_real_archive,
+    )
+    exported = service.export_backup_bundle(
+        destination_root_text=str(exports_root),
+        game_path_text=str(bundle_game),
+        mods_dir_text=str(bundle_real_mods),
+        sandbox_mods_path_text=str(bundle_sandbox_mods),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(bundle_real_archive),
+        sandbox_archive_path_text=str(bundle_sandbox_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=bundle_config,
+    )
+
+    local_game = tmp_path / "LocalGame"
+    local_real_mods = tmp_path / "LocalRealMods"
+    local_sandbox_mods = tmp_path / "LocalSandboxMods"
+    local_real_archive = tmp_path / "LocalRealArchive"
+    local_sandbox_archive = tmp_path / "LocalSandboxArchive"
+    _create_launchable_game_install(local_game)
+    local_real_alpha = _create_mod(local_real_mods, "RealAlpha", "Sample.RealAlpha", version="1.0.0")
+    (local_real_alpha / "config.json").write_text('{"enabled":false}', encoding="utf-8")
+    (local_real_alpha / "notes.txt").write_text("local-only", encoding="utf-8")
+    local_sandbox_mods.mkdir()
+    local_real_archive.mkdir()
+    local_sandbox_archive.mkdir()
+
+    plan = service.plan_restore_import_from_backup_bundle(
+        bundle_path_text=str(exported.bundle_path),
+        game_path_text=str(local_game),
+        mods_dir_text=str(local_real_mods),
+        sandbox_mods_path_text=str(local_sandbox_mods),
+        sandbox_archive_path_text=str(local_sandbox_archive),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(local_real_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=None,
+    )
+
+    review = service.review_restore_import_execution(plan)
+    assert review.allowed is True
+    assert review.executable_mod_count == 1
+    assert review.executable_config_count == 0
+    assert review.replace_mod_count == 1
+    assert review.replace_config_count == 1
+
+    result = service.execute_restore_import(plan, confirm_execution=True)
+
+    archived_target = result.archived_target_paths[0]
+    assert result.replaced_mod_count == 1
+    assert result.replaced_config_count == 1
+    assert (local_real_alpha / "config.json").read_text(encoding="utf-8") == '{"enabled":true}'
+    assert (local_real_alpha / "notes.txt").exists() is False
+    assert (archived_target / "config.json").read_text(encoding="utf-8") == '{"enabled":false}'
+    assert (archived_target / "notes.txt").read_text(encoding="utf-8") == "local-only"
+
+
+def test_execute_restore_import_blocks_when_only_ambiguous_content_exists(
+    tmp_path: Path,
+) -> None:
+    state_file = tmp_path / "state" / "app-state.json"
+    service = AppShellService(state_file=state_file)
+    exports_root = tmp_path / "Exports"
+    exports_root.mkdir()
+
+    bundle_game = tmp_path / "BundleGame"
+    bundle_real_mods = tmp_path / "BundleRealMods"
+    bundle_sandbox_mods = tmp_path / "BundleSandboxMods"
+    bundle_real_archive = tmp_path / "BundleRealArchive"
+    bundle_sandbox_archive = tmp_path / "BundleSandboxArchive"
+    _create_launchable_game_install(bundle_game)
+    _create_mod(bundle_real_mods, "RealAlphaA", "Sample.RealAlpha", version="1.0.0")
+    _create_mod(bundle_real_mods, "RealAlphaB", "Sample.RealAlpha", version="1.1.0")
+    bundle_sandbox_mods.mkdir()
+    bundle_real_archive.mkdir()
+    bundle_sandbox_archive.mkdir()
+
+    bundle_config = AppConfig(
+        game_path=bundle_game,
+        mods_path=bundle_real_mods,
+        app_data_path=tmp_path / "BundleAppData",
+        sandbox_mods_path=bundle_sandbox_mods,
+        sandbox_archive_path=bundle_sandbox_archive,
+        real_archive_path=bundle_real_archive,
+    )
+    exported = service.export_backup_bundle(
+        destination_root_text=str(exports_root),
+        game_path_text=str(bundle_game),
+        mods_dir_text=str(bundle_real_mods),
+        sandbox_mods_path_text=str(bundle_sandbox_mods),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(bundle_real_archive),
+        sandbox_archive_path_text=str(bundle_sandbox_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=bundle_config,
+    )
+
+    local_game = tmp_path / "LocalGame"
+    local_real_mods = tmp_path / "LocalRealMods"
+    local_sandbox_mods = tmp_path / "LocalSandboxMods"
+    local_real_archive = tmp_path / "LocalRealArchive"
+    local_sandbox_archive = tmp_path / "LocalSandboxArchive"
+    _create_launchable_game_install(local_game)
+    local_real_mods.mkdir()
+    local_sandbox_mods.mkdir()
+    local_real_archive.mkdir()
+    local_sandbox_archive.mkdir()
+
+    plan = service.plan_restore_import_from_backup_bundle(
+        bundle_path_text=str(exported.bundle_path),
+        game_path_text=str(local_game),
+        mods_dir_text=str(local_real_mods),
+        sandbox_mods_path_text=str(local_sandbox_mods),
+        sandbox_archive_path_text=str(local_sandbox_archive),
+        watched_downloads_path_text="",
+        secondary_watched_downloads_path_text="",
+        real_archive_path_text=str(local_real_archive),
+        nexus_api_key_text="",
+        scan_target=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        install_target=INSTALL_TARGET_SANDBOX_MODS,
+        existing_config=None,
+    )
+
+    review = service.review_restore_import_execution(plan)
     assert review.allowed is False
 
     with pytest.raises(AppShellError, match="no clearly restorable missing content|found nothing to do"):
         service.execute_restore_import(plan, confirm_execution=True)
 
-    assert local_real_alpha.exists() is True
-    assert local_real_alpha.joinpath("config.json").read_text(encoding="utf-8") == '{"enabled":false}'
+    assert tuple(local_real_mods.iterdir()) == tuple()
 
 
 def test_scan_rejects_missing_mods_path(tmp_path: Path) -> None:

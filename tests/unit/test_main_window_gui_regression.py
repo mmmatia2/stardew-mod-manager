@@ -2577,7 +2577,7 @@ def test_main_window_plan_restore_import_enables_execute_button_when_review_allo
     )
     review = RestoreImportExecutionReview(
         allowed=True,
-        message="Restore/import is ready to copy 1 missing mod folder(s) and 0 missing config artifact(s) into the current configured destinations. Existing local content will not be merged or overwritten.",
+        message="Restore/import is ready to write 1 mod folder(s) and 0 config artifact(s) into the current configured destinations. Existing local content will not be merged.",
         executable_mod_count=1,
         executable_config_count=0,
     )
@@ -2615,7 +2615,7 @@ def test_main_window_plan_restore_import_enables_execute_button_when_review_allo
     assert execute_button is not None
     assert captured["operation_name"] == "Restore/import planning"
     assert execute_button.isEnabled() is True
-    assert "ready to copy 1 missing mod folder" in execute_button.toolTip()
+    assert "ready to write 1 mod folder" in execute_button.toolTip()
 
 
 def test_main_window_execute_restore_import_runs_service_and_updates_output(
@@ -2690,7 +2690,7 @@ def test_main_window_execute_restore_import_runs_service_and_updates_output(
     )
     review = RestoreImportExecutionReview(
         allowed=True,
-        message="Restore/import is ready to copy 1 missing mod folder(s) and 0 missing config artifact(s) into the current configured destinations. Existing local content will not be merged or overwritten.",
+        message="Restore/import is ready to write 1 mod folder(s) and 0 config artifact(s) into the current configured destinations. Existing local content will not be merged.",
         executable_mod_count=1,
         executable_config_count=0,
     )
@@ -2792,7 +2792,7 @@ def test_main_window_execute_restore_import_cancel_preserves_no_write(
     )
     review = RestoreImportExecutionReview(
         allowed=True,
-        message="Restore/import is ready to copy 1 missing mod folder(s) and 0 missing config artifact(s) into the current configured destinations. Existing local content will not be merged or overwritten.",
+        message="Restore/import is ready to write 1 mod folder(s) and 0 config artifact(s) into the current configured destinations. Existing local content will not be merged.",
         executable_mod_count=1,
         executable_config_count=0,
     )
@@ -2820,6 +2820,84 @@ def test_main_window_execute_restore_import_cancel_preserves_no_write(
     main_window._on_execute_restore_import()
 
     assert called == []
+    assert main_window._status_strip_label.text() == "Restore/import execution cancelled."
+
+
+def test_main_window_execute_restore_import_conflict_review_mentions_archive_replace(
+    main_window: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    bundle_path = tmp_path / "Exports" / "sdvmm-backup-20260321-120000Z"
+    bundle_path.mkdir(parents=True)
+    manifest_path = bundle_path / "manifest.json"
+    summary_path = bundle_path / "README.txt"
+    inspection = BackupBundleInspectionResult(
+        bundle_path=bundle_path,
+        manifest_path=manifest_path,
+        summary_path=summary_path,
+        bundle_format="sdvmm-local-backup",
+        format_version=1,
+        created_at_utc="2026-03-21T12:00:00Z",
+        items=tuple(),
+        structurally_usable=True,
+        message="Backup bundle looks structurally usable for future restore/import.",
+    )
+    planning_result = RestoreImportPlanningResult(
+        bundle_path=bundle_path,
+        inspection=inspection,
+        items=tuple(),
+        mod_entries=tuple(),
+        config_entries=tuple(),
+        safe_item_count=0,
+        review_item_count=0,
+        blocked_item_count=0,
+        safe_mod_count=0,
+        review_mod_count=0,
+        blocked_mod_count=0,
+        safe_config_count=0,
+        review_config_count=0,
+        blocked_config_count=0,
+        message="Restore/import planning complete.",
+    )
+    review = RestoreImportExecutionReview(
+        allowed=True,
+        message="Restore/import is ready to write 1 mod folder(s) and 0 config artifact(s) into the current configured destinations. Existing local content will not be merged. 1 mod folder(s) will be archive-and-replaced after explicit review. 1 conflicting config artifact(s) will be resolved by archive-and-replacing the containing mod folder.",
+        executable_mod_count=1,
+        executable_config_count=0,
+        replace_mod_count=1,
+        replace_config_count=1,
+    )
+    captured: dict[str, object] = {}
+
+    main_window._current_restore_import_planning_result = planning_result
+    main_window._current_restore_import_execution_review = review
+    main_window._refresh_restore_import_execution_state()
+
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "review_restore_import_execution",
+        lambda planning_result: review,
+    )
+    monkeypatch.setattr(
+        main_window._shell_service,
+        "execute_restore_import",
+        lambda *args, **kwargs: pytest.fail("execute_restore_import should not run when dialog is cancelled"),
+    )
+
+    def fake_question(*args, **kwargs):
+        captured["title"] = args[1]
+        captured["text"] = args[2]
+        return QMessageBox.StandardButton.No
+
+    monkeypatch.setattr("sdvmm.ui.main_window.QMessageBox.question", fake_question)
+
+    main_window._on_execute_restore_import()
+
+    assert captured["title"] == "Execute restore/import?"
+    assert "Archive-and-replace mod folders: 1" in str(captured["text"])
+    assert "Conflicting config artifacts resolved by reviewed mod-folder replace: 1" in str(captured["text"])
+    assert "archive the current local mod folder before the bundled mod folder is restored" in str(captured["text"])
     assert main_window._status_strip_label.text() == "Restore/import execution cancelled."
 
 
