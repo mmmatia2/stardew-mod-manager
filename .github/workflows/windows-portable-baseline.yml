@@ -1,0 +1,111 @@
+name: CI and Windows Portable Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: python -m pytest tests/unit -q
+
+  build-windows-portable:
+    name: Build Windows Portable
+    runs-on: windows-latest
+    needs: test
+    outputs:
+      version: ${{ steps.project_meta.outputs.version }}
+      zip_name: ${{ steps.project_meta.outputs.zip_name }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,build]"
+
+      - name: Read project version
+        id: project_meta
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "zip_name=stardew-mod-manager-$version-windows-portable.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Validate tag matches project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $expectedTag = "v${{ steps.project_meta.outputs.version }}"
+          if ($expectedTag -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match project version $expectedTag."
+          }
+
+      - name: Build Windows portable package
+        run: python scripts/build_windows_portable.py
+
+      - name: Archive Windows portable package
+        shell: pwsh
+        run: |
+          $distFolder = "dist/stardew-mod-manager-${{ steps.project_meta.outputs.version }}-windows-portable"
+          $zipPath = "dist/${{ steps.project_meta.outputs.zip_name }}"
+          if (Test-Path $zipPath) {
+            Remove-Item -Force $zipPath
+          }
+          Compress-Archive -Path $distFolder -DestinationPath $zipPath
+
+      - name: Upload Windows portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stardew-mod-manager-windows-portable
+          path: dist/${{ steps.project_meta.outputs.zip_name }}
+          if-no-files-found: error
+
+  publish-github-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-windows-portable
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download Windows portable artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: stardew-mod-manager-windows-portable
+          path: release-artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Stardew Mod Manager ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-artifacts/${{ needs.build-windows-portable.outputs.zip_name }}
