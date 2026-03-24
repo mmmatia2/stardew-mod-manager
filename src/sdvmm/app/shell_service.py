@@ -7018,7 +7018,7 @@ def build_restore_import_planning_text(result: RestoreImportPlanningResult) -> s
         config_entries_by_item.setdefault(entry.bundle_item_key, []).append(entry)
 
     lines = [
-        "Stardew Mod Manager restore/import planning",
+        "Cinderleaf restore/import planning",
         f"Bundle artifact: {result.bundle_path}",
         f"Inspection summary: {result.inspection.message}",
         f"Planning summary: {result.message}",
@@ -7080,7 +7080,7 @@ def build_restore_import_execution_result_text(
     missing_mod_count = result.restored_mod_count - result.replaced_mod_count
     missing_config_count = result.restored_config_count
     lines = [
-        "Stardew Mod Manager restore/import execution",
+        "Cinderleaf restore/import execution",
         f"Bundle artifact: {result.bundle_path}",
         f"Summary: {result.message}",
         "Execution rule: missing content may be restored directly, while reviewed conflicts use archive-aware mod-folder replacement.",
@@ -7126,7 +7126,7 @@ def build_backup_bundle_inspection_text(result: BackupBundleInspectionResult) ->
     declared_counts = Counter(item.declared_status for item in result.items)
     structure_counts = Counter(item.structure_state for item in result.items)
     lines = [
-        "Stardew Mod Manager backup bundle inspection",
+        "Cinderleaf backup bundle inspection",
         f"Bundle artifact: {result.bundle_path}",
         f"Bundle storage: {result.bundle_storage_kind}",
         (
@@ -7178,7 +7178,7 @@ def build_backup_bundle_export_text(result: BackupBundleExportResult) -> str:
     copied_items = tuple(item for item in result.items if item.status == "copied")
     unavailable_items = tuple(item for item in result.items if item.status != "copied")
     lines = [
-        "Stardew Mod Manager backup export",
+        "Cinderleaf backup export",
         f"Created at (UTC): {result.created_at_utc}",
         f"Bundle artifact: {result.bundle_path}",
         f"Bundle storage: {result.bundle_storage_kind}",

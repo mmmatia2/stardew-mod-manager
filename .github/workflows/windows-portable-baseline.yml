@@ -60,7 +60,7 @@ jobs:
         run: |
           $version = python -c "import tomllib; from pathlib import Path; print(tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])"
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "zip_name=stardew-mod-manager-$version-windows-portable.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "zip_name=cinderleaf-$version-windows-portable.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Validate tag matches project version
         if: startsWith(github.ref, 'refs/tags/v')
@@ -77,7 +77,7 @@ jobs:
       - name: Archive Windows portable package
         shell: pwsh
         run: |
-          $distFolder = "dist/stardew-mod-manager-${{ steps.project_meta.outputs.version }}-windows-portable"
+          $distFolder = "dist/cinderleaf-${{ steps.project_meta.outputs.version }}-windows-portable"
           $zipPath = "dist/${{ steps.project_meta.outputs.zip_name }}"
           if (Test-Path $zipPath) {
             Remove-Item -Force $zipPath
@@ -87,7 +87,7 @@ jobs:
       - name: Upload Windows portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: stardew-mod-manager-windows-portable
+          name: cinderleaf-windows-portable
           path: dist/${{ steps.project_meta.outputs.zip_name }}
           if-no-files-found: error
 
@@ -100,12 +100,12 @@ jobs:
       - name: Download Windows portable artifact
         uses: actions/download-artifact@v4
         with:
-          name: stardew-mod-manager-windows-portable
+          name: cinderleaf-windows-portable
           path: release-artifacts
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Stardew Mod Manager ${{ github.ref_name }}
+          name: Cinderleaf ${{ github.ref_name }}
           generate_release_notes: true
           files: release-artifacts/${{ needs.build-windows-portable.outputs.zip_name }}

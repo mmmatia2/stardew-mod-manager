@@ -1,15 +1,15 @@
-# Contributing
+# Contributing to Cinderleaf
 
 Thanks for contributing.
 
-## Before You Open A Pull Request
+## Before you open a pull request
 
 - keep changes small and focused
 - avoid mixing feature work with unrelated cleanup
 - preserve the app's safety-first behavior, especially around live `Mods` writes
 - do not add scraping, browser automation for downloads, or premium-bypass behavior
 
-## Local Setup
+## Local setup
 
 ```powershell
 py -3.12 -m venv .venv
@@ -31,19 +31,23 @@ If your change affects packaging, also run:
 .\.venv\Scripts\python.exe scripts\build_windows_portable.py
 ```
 
-## Scope Expectations
+## Scope expectations
 
 - sandbox remains the recommended test path
-- compare should stay read-only unless an approved stage explicitly changes that
+- Compare stays read-only unless a specifically approved stage changes it
 - real-Mods operations should remain explicit, reviewable, and recoverable
 - provider-compliant manual download flow remains the default
 
-## Reporting Issues
+## Issues and feature requests
 
-When filing a bug, include:
+Please use the GitHub issue templates and include:
 
 - app version
 - Windows version
-- what you expected
-- what happened instead
-- whether the issue happened in real `Mods`, sandbox `Mods`, or restore/import flow
+- expected behavior
+- actual behavior
+- whether the issue happened in real `Mods`, sandbox `Mods`, compare, or restore/import flow
+
+## License reminder
+
+This repository is source-available under **PolyForm Noncommercial 1.0.0**. Contributions are accepted under that same license model.

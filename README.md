@@ -1,64 +1,53 @@
-# Stardew Mod Manager
+# Cinderleaf
 
-Local-first Stardew Valley mod workflow manager for careful Windows users who want a safer way to install, test, compare, back up, and recover SMAPI mods.
+**Cinderleaf** is a local-first mod workflow manager **for Stardew Valley**. It helps careful Windows players inspect downloaded mods, review installs before writing files, compare live and sandbox environments, and keep recovery paths available when something goes wrong.
 
-`1.1.0` is the current stable portable release.
+`for Stardew Valley` is a descriptive subtitle, not an official affiliation. Cinderleaf is an independent community tool and is not affiliated with or endorsed by ConcernedApe.
 
-## What It Does
+Current stable portable release: **1.1.1**
 
-Stardew Mod Manager is built around three jobs:
+## Why Cinderleaf
 
-- keep your installed mods visible and understandable
-- give you a sandbox-first workflow for testing changes before touching live mods
-- make backup, restore, and recovery steps explicit and reviewable
-
-It is not a one-click downloader, profile manager, or cloud sync tool.
-
-## Key Features
-
-- scan installed mods and surface update status, duplicates, and dependency issues
-- inspect downloaded zip packages before install
 - review installs before any write happens
 - keep sandbox work separate from live `Mods`
-- compare real vs sandbox mod sets with actionable drift shown first
-- export backup bundles as folders or zip files
-- inspect, plan, and execute restore/import with review-first behavior
-- archive and recover managed changes instead of overwriting blindly
-- launch vanilla, SMAPI, or sandbox-dev with optional best-effort Steam start assistance
+- compare real vs sandbox drift without turning Compare into a write surface
+- export backup bundles and inspect/plan restore work before execution
+- preserve reversible workflows with archive and recovery support
 
-## Recommended Workflow
+## Real UI
+
+![Cinderleaf shell header](.github/screenshots/shell-header-1.1.1.png)
+
+![Cinderleaf full window](.github/screenshots/full-window-1.1.1.png)
+
+## Recommended workflow
 
 1. Set your game folder, real `Mods`, and sandbox `Mods` in `Setup`.
 2. Use `Discover` and `Packages` to inspect downloaded zips.
 3. Review the current package in `Review` before applying anything.
-4. Install to the sandbox first.
-5. Use `Compare` to see what drift exists between real and sandbox.
+4. Install to sandbox first.
+5. Use `Compare` to inspect drift between real and sandbox.
 6. Promote selected sandbox mods into real `Mods` only when you are ready.
-7. Use `Backup / Restore` features before larger changes or machine migration.
+7. Use backup, restore, archive, and recovery tools before larger changes or machine migration.
 
 If you are not sure which destination to use, use the sandbox.
 
-## Download And Use The Portable Build
+## Download the portable build
 
 The supported public build is a Windows portable zip published to GitHub Releases.
 
-1. Go to the repository's GitHub Releases page.
-2. Download `stardew-mod-manager-1.1.0-windows-portable.zip`.
+1. Open the repository's GitHub Releases page.
+2. Download `cinderleaf-1.1.1-windows-portable.zip`.
 3. Extract it to a normal folder.
-4. Run `Stardew Mod Manager.exe`.
+4. Run `Cinderleaf.exe`.
 
-Release publishing baseline:
-
-- the repo publishes a GitHub Release when a matching version tag such as `v1.1.0` is pushed
-- the release asset is the zipped Windows portable build
-
-Current portable-build caveats:
+Current release caveats:
 
 - this is a portable folder, not an installer
 - Windows reputation prompts are still expected because code signing is not in place yet
 - auto-update is not implemented yet
 
-## Build From Source
+## Build from source
 
 ```powershell
 py -3.12 -m venv .venv
@@ -71,29 +60,33 @@ py -3.12 -m venv .venv
 The build script produces:
 
 ```text
-dist\stardew-mod-manager-1.1.0-windows-portable\
+dist\cinderleaf-1.1.1-windows-portable\
 ```
 
 The GitHub release workflow then zips that folder for distribution.
 
-## Current Limitations
+## Current limitations
 
 - downloads are still manual
 - Compare is intentionally read-only; it does not sync, promote, or write
 - restore/import conflict handling is archive-aware and folder-oriented; file-level merge is not implemented
 - there is no one-click "sync everything back to real" flow
 - profile and instance management are out of scope
-- installer, signing, and auto-update work are still deferred
 - Windows is the primary supported desktop path today
 
-## Safety Model
+## Support and issue reporting
 
-- sandbox is the recommended destination for testing
-- writes to live `Mods` stay explicit and reviewable
-- archive/recovery paths are used to preserve reversibility where supported
-- the app does not scrape providers or automate gated download flows
+- use GitHub Issues for bugs and feature requests
+- include the app version, Windows version, and whether the issue happened in real `Mods`, sandbox `Mods`, compare, or restore/import flow
+- if the problem is install- or recovery-related, include the review summary or error text shown by the app
 
-## Project Files
+## License
+
+Cinderleaf is **source-available**, not open source.
+
+This repository is licensed under **PolyForm Noncommercial 1.0.0**. You can use, modify, and redistribute it for noncommercial purposes under the terms in [LICENSE](LICENSE).
+
+## Project files
 
 - [CHANGELOG](CHANGELOG.md)
 - [CONTRIBUTING](CONTRIBUTING.md)

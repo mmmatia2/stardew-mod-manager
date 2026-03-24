@@ -358,7 +358,7 @@ def test_export_backup_bundle_copies_available_state_and_managed_directories(tmp
     assert exported_config.real_archive_path == real_archive
     assert exported_config.sandbox_archive_path == sandbox_archive
     summary_text = result.summary_path.read_text(encoding="utf-8")
-    assert "Stardew Mod Manager backup export" in summary_text
+    assert "Cinderleaf backup export" in summary_text
     assert "Generated from the current export configuration snapshot." in summary_text
 
 

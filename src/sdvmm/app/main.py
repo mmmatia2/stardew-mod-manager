@@ -13,10 +13,10 @@ from sdvmm.app.shell_service import AppShellService
 from sdvmm.ui.main_window import MainWindow
 
 APP_PACKAGE_NAME = "stardew-mod-manager"
-APP_DISPLAY_NAME = "Stardew Mod Manager"
+APP_DISPLAY_NAME = "Cinderleaf"
 APP_VERSION_FALLBACK = "0.3.1"
 APP_RUNTIME_ICON_NAMES = ("app-icon.png", "stardew-mod-manager.ico")
-WINDOWS_APP_USER_MODEL_ID = "local.sdvmm.stardew-mod-manager"
+WINDOWS_APP_USER_MODEL_ID = "local.sdvmm.cinderleaf"
 
 
 def _resolve_app_version() -> str:

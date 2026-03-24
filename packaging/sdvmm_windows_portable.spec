@@ -9,7 +9,7 @@ ROOT = Path(SPECPATH).resolve().parent
 PYPROJECT = ROOT / "pyproject.toml"
 PROJECT = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]
 VERSION = PROJECT["version"]
-DIST_NAME = f"stardew-mod-manager-{VERSION}-windows-portable"
+DIST_NAME = f"cinderleaf-{VERSION}-windows-portable"
 APP_ICON = ROOT / "assets" / "stardew-mod-manager.ico"
 
 datas = copy_metadata("stardew-mod-manager") + [(str(APP_ICON), "assets")]
@@ -34,7 +34,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Stardew Mod Manager",
+    name="Cinderleaf",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

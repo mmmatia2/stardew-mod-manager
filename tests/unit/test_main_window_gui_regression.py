@@ -10,8 +10,10 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFrame,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -308,7 +310,7 @@ def test_main_window_bottom_details_toggle_contract_is_removed(
 
 
 def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow) -> None:
-    recovery_tab = main_window.findChild(QWidget, "recovery_tab")
+    recovery_tab = main_window._recovery_page
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
     recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
     recovery_combo = main_window.findChild(QComboBox, "recovery_inspection_operation_combo")
@@ -325,7 +327,7 @@ def test_main_window_recovery_inspection_controls_exist(main_window: MainWindow)
     assert recovery_summary_label is not None
     assert recovery_button is not None
     assert run_recovery_button is not None
-    assert recovery_group.parentWidget() is recovery_tab
+    assert recovery_group.parentWidget() is not recovery_tab
     assert recovery_output_group.parentWidget() is recovery_group
     assert main_window._install_history_combo is recovery_combo
     assert main_window._install_history_filter_combo is recovery_filter_combo
@@ -450,6 +452,9 @@ def test_main_window_status_strip_labels_do_not_use_hardcoded_color_stylesheets(
 def test_main_window_top_context_surface_has_expected_panels(main_window: MainWindow) -> None:
     top_context_group = main_window.findChild(QGroupBox, "top_context_surface_group")
     status_strip_group = main_window.findChild(QGroupBox, "global_status_strip_group")
+    brand_panel = main_window.findChild(QWidget, "top_context_brand_panel")
+    brand_title = main_window.findChild(QLabel, "top_context_brand_title")
+    operations_panel = main_window.findChild(QWidget, "top_context_operational_panel")
     environment_panel = main_window.findChild(QWidget, "top_context_environment_panel")
     runtime_panel = main_window.findChild(QWidget, "top_context_runtime_panel")
     active_context_panel = main_window.findChild(QWidget, "top_context_active_context_panel")
@@ -458,9 +463,69 @@ def test_main_window_top_context_surface_has_expected_panels(main_window: MainWi
     assert status_strip_group is not None
     assert top_context_group is not status_strip_group
     assert top_context_group.isVisible()
+    assert brand_panel is not None
+    assert brand_title is not None
+    assert operations_panel is not None
     assert environment_panel is not None
     assert runtime_panel is not None
     assert active_context_panel is not None
+    assert brand_title.text() != "Stardew Mod Manager"
+    assert active_context_panel.parentWidget() is brand_panel
+    assert environment_panel.parentWidget() is operations_panel
+    assert runtime_panel.parentWidget() is operations_panel
+
+
+def test_main_window_uses_custom_workspace_nav_rail_with_hidden_tab_bar(
+    main_window: MainWindow,
+) -> None:
+    context_tabs = main_window._context_tabs
+    nav_rail = main_window.findChild(QFrame, "workspace_nav_rail")
+    brand_panel = main_window.findChild(QFrame, "workspace_nav_brand_panel")
+    brand_title = main_window.findChild(QLabel, "workspace_nav_brand_title")
+    brand_version = main_window.findChild(QLabel, "workspace_nav_brand_version")
+    footer_panel = main_window.findChild(QFrame, "workspace_nav_footer_panel")
+    setup_button = main_window.findChild(QPushButton, "workspace_nav_button_setup")
+    review_button = main_window.findChild(QPushButton, "workspace_nav_button_review")
+
+    assert context_tabs is not None
+    assert nav_rail is not None
+    assert brand_panel is not None
+    assert brand_title is not None
+    assert brand_version is not None
+    assert footer_panel is not None
+    assert setup_button is not None
+    assert review_button is not None
+    assert context_tabs.tabPosition() == QTabWidget.TabPosition.West
+    assert context_tabs.tabBar().isHidden() is True
+    assert setup_button.property("navRole") == "workspace"
+    assert review_button.property("navRole") == "workspace"
+    assert brand_title.text() == "Cinderleaf"
+    assert brand_version.text() == "Version 1.1.1"
+
+
+def test_main_window_workspace_nav_buttons_drive_context_pages(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    context_tabs = main_window._context_tabs
+    review_page = main_window._plan_install_tab
+    review_button = main_window.findChild(QPushButton, "workspace_nav_button_review")
+    compare_button = main_window.findChild(QPushButton, "workspace_nav_button_compare")
+
+    assert context_tabs is not None
+    assert review_page is not None
+    assert review_button is not None
+    assert compare_button is not None
+
+    compare_button.click()
+    qapp.processEvents()
+    assert context_tabs.currentWidget() is main_window._compare_page
+    assert compare_button.isChecked() is True
+
+    review_button.click()
+    qapp.processEvents()
+    assert context_tabs.currentWidget() is review_page
+    assert review_button.isChecked() is True
 
 
 def test_main_window_top_context_value_labels_exist(main_window: MainWindow) -> None:
@@ -2156,7 +2221,10 @@ def test_main_window_real_archive_autofill_only_when_empty(
     assert main_window._real_archive_path_input.text() == r"C:\Custom\RealArchive"
 
 
-def test_main_window_setup_surface_group_and_scroll_exist(main_window: MainWindow) -> None:
+def test_main_window_setup_surface_group_and_scroll_exist(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
     context_tabs = main_window._context_tabs
     setup_group = main_window.findChild(QGroupBox, "setup_surface_group")
     advanced_group = main_window.findChild(QGroupBox, "setup_advanced_group")
@@ -2164,6 +2232,7 @@ def test_main_window_setup_surface_group_and_scroll_exist(main_window: MainWindo
     setup_output_group = main_window.findChild(QGroupBox, "setup_output_group")
     setup_output_box = main_window.findChild(QPlainTextEdit, "setup_output_box")
     setup_scroll = main_window._setup_scroll
+    setup_page = main_window._setup_page
 
     assert context_tabs is not None
     assert setup_group is not None
@@ -2173,20 +2242,38 @@ def test_main_window_setup_surface_group_and_scroll_exist(main_window: MainWindo
     assert setup_output_box is not None
     assert setup_scroll is not None
     assert isinstance(setup_scroll, QScrollArea)
+    context_tabs.setCurrentWidget(setup_page)
+    qapp.processEvents()
     assert setup_group.isVisible()
     assert advanced_group.isVisible()
     assert backup_group.isVisible()
     assert setup_scroll.widget() is not None
-    assert setup_group.parentWidget() is setup_scroll.widget()
-    assert advanced_group.parentWidget() is setup_scroll.widget()
-    assert backup_group.parentWidget() is setup_scroll.widget()
-    assert setup_output_group.parentWidget() is setup_scroll.widget()
+    workspace_band = setup_scroll.findChild(QWidget, "setup_surface_workspace_band")
+    main_column = setup_scroll.findChild(QWidget, "setup_surface_main_column")
+    secondary_column = setup_scroll.findChild(QWidget, "setup_surface_secondary_column")
+    primary_actions = setup_scroll.findChild(QWidget, "setup_surface_primary_actions")
+    save_button = main_window.findChild(QPushButton, "setup_save_config_button")
+    detect_button = main_window.findChild(QPushButton, "setup_detect_environment_button")
+    assert workspace_band is not None
+    assert main_column is not None
+    assert secondary_column is not None
+    assert primary_actions is not None
+    assert save_button is not None
+    assert detect_button is not None
+    assert setup_group.parentWidget() is main_column
+    assert advanced_group.parentWidget() is main_column
+    assert backup_group.parentWidget() is secondary_column
+    assert setup_output_group.parentWidget() is secondary_column
+    assert save_button.parentWidget() is primary_actions
+    assert detect_button.parentWidget() is primary_actions
     assert setup_output_box.parentWidget() is setup_output_group
     assert main_window._setup_group is setup_group
     assert main_window._setup_scroll.advanced_group is advanced_group
     assert main_window._setup_scroll.backup_group is backup_group
     assert main_window._setup_output_group is setup_output_group
     assert main_window._setup_scroll is setup_scroll
+    assert main_window._setup_scroll.main_column is main_column
+    assert main_window._setup_scroll.secondary_column is secondary_column
     assert setup_scroll.objectName() == "setup_workspace_tab"
     assert setup_scroll.widgetResizable() is True
     assert (
@@ -2196,9 +2283,9 @@ def test_main_window_setup_surface_group_and_scroll_exist(main_window: MainWindo
     assert setup_output_box.isReadOnly() is True
     assert setup_output_box.minimumHeight() >= 70
     assert setup_output_group.isHidden() is True
-    setup_index = context_tabs.indexOf(setup_scroll)
+    setup_index = context_tabs.indexOf(setup_page)
     assert setup_index >= 0
-    assert context_tabs.widget(setup_index) is setup_scroll
+    assert context_tabs.widget(setup_index) is setup_page
     assert "Setup" in {
         context_tabs.tabText(index) for index in range(context_tabs.count())
     }
@@ -2211,6 +2298,7 @@ def test_main_window_top_level_context_tabs_follow_v1_workflow_order(
 
     assert context_tabs is not None
     assert [context_tabs.tabText(index) for index in range(context_tabs.count())] == [
+        "Mods",
         "Setup",
         "Discover",
         "Compare",
@@ -2350,6 +2438,25 @@ def test_main_window_packages_watcher_section_uses_separate_rows_for_paths_and_a
     assert runtime_button_texts == {"Start intake watch", "Stop intake watch"}
 
 
+def test_main_window_packages_surface_uses_guided_intake_composition(
+    main_window: MainWindow,
+) -> None:
+    packages_top_grid = main_window.findChild(QWidget, "packages_top_grid")
+    import_group = main_window.findChild(QGroupBox, "packages_import_group")
+    watcher_group = main_window.findChild(QGroupBox, "packages_watcher_group")
+    review_target_group = main_window.findChild(QGroupBox, "packages_review_target_group")
+
+    assert packages_top_grid is not None
+    assert import_group is not None
+    assert watcher_group is not None
+    assert review_target_group is not None
+
+    top_grid_layout = packages_top_grid.layout()
+    assert isinstance(top_grid_layout, QGridLayout)
+    assert top_grid_layout.itemAtPosition(0, 0).widget() is import_group
+    assert top_grid_layout.itemAtPosition(0, 1).widget() is watcher_group
+
+
 def test_main_window_install_review_surface_onboarding_copy_is_user_facing(
     main_window: MainWindow,
 ) -> None:
@@ -2363,7 +2470,7 @@ def test_main_window_install_review_surface_onboarding_copy_is_user_facing(
     assert intro_label is not None
     assert execute_help_label is not None
     assert review_summary_label is not None
-    assert "choose where it goes" in intro_label.text()
+    assert "confirm where it goes" in intro_label.text()
     assert "Review install before Apply install" in intro_label.text()
     assert "Review install is read-only." in execute_help_label.text()
     assert "Apply install writes to the selected destination" in execute_help_label.text()
@@ -2484,9 +2591,9 @@ def test_main_window_export_backup_bundle_runs_service_and_updates_output(
     assert main_window._status_strip_label.text() == (
         f"Backup export complete: 1 item(s) copied to {bundle_path}"
     )
-    assert "Stardew Mod Manager backup export" in main_window._setup_output_box.toPlainText()
+    assert "Cinderleaf backup export" in main_window._setup_output_box.toPlainText()
     assert str(bundle_path) in main_window._setup_output_box.toPlainText()
-    assert "Stardew Mod Manager backup export" in main_window._findings_box.toPlainText()
+    assert "Cinderleaf backup export" in main_window._findings_box.toPlainText()
     assert str(bundle_path) in main_window._findings_box.toPlainText()
 
 
@@ -3920,12 +4027,12 @@ def test_main_window_plan_install_surface_has_expected_structure(
     main_window: MainWindow,
 ) -> None:
     inventory_tabs = main_window._inventory_controls_tabs
-    inventory_shell = main_window.findChild(QWidget, "inventory_tabs_shell_container")
     context_tabs = main_window._context_tabs
-    context_shell = main_window.findChild(QWidget, "context_tabs_shell_container")
+    mods_page = main_window._mods_page
     plan_tab = main_window.findChild(QWidget, "plan_install_tab")
     plan_scroll = main_window.findChild(QScrollArea, "plan_install_scroll_area")
     plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
+    review_top_row = main_window.findChild(QWidget, "plan_install_top_row")
     destination_group = main_window.findChild(QGroupBox, "plan_install_destination_group")
     safety_panel_group = main_window.findChild(QGroupBox, "plan_install_safety_panel_group")
     staged_package_group = main_window.findChild(QGroupBox, "plan_install_staged_package_group")
@@ -3935,9 +4042,8 @@ def test_main_window_plan_install_surface_has_expected_structure(
     review_output_group = main_window.findChild(QGroupBox, "plan_install_output_group")
 
     assert inventory_tabs is not None
-    assert inventory_shell is not None
     assert context_tabs is not None
-    assert context_shell is not None
+    assert mods_page is not None
     assert isinstance(inventory_tabs, QTabWidget)
     assert isinstance(context_tabs, QTabWidget)
     assert plan_tab is not None
@@ -3953,50 +4059,36 @@ def test_main_window_plan_install_surface_has_expected_structure(
 
     tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
     assert "Review" in tab_labels
-    assert context_tabs.indexOf(plan_tab) >= 0
-    assert inventory_tabs.parentWidget() is inventory_shell
-    assert context_tabs.parentWidget() is context_shell
-    inventory_layout = inventory_shell.parentWidget().layout()
-    inventory_shell_layout = inventory_shell.layout()
-    shell_layout = context_shell.layout()
-    assert isinstance(inventory_layout, QVBoxLayout)
-    assert isinstance(inventory_shell_layout, QVBoxLayout)
-    assert isinstance(shell_layout, QVBoxLayout)
-    inventory_root_margins = inventory_layout.contentsMargins()
-    inventory_margins = inventory_shell_layout.contentsMargins()
-    margins = shell_layout.contentsMargins()
-    assert (
-        inventory_root_margins.left(),
-        inventory_root_margins.top(),
-        inventory_root_margins.right(),
-        inventory_root_margins.bottom(),
-    ) == (6, 0, 6, 4)
-    assert (
-        inventory_margins.left(),
-        inventory_margins.top(),
-        inventory_margins.right(),
-        inventory_margins.bottom(),
-    ) == (0, 4, 0, 0)
-    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (0, 5, 0, 0)
-    assert "QTabWidget::pane { margin-top: 4px; }" in inventory_tabs.styleSheet()
-    assert "QTabWidget::pane { margin-top: 4px; }" in context_tabs.styleSheet()
-    assert "QTabBar::tab {" in inventory_tabs.styleSheet()
-    assert "QTabBar::tab:selected {" in context_tabs.styleSheet()
+    assert context_tabs.indexOf(main_window._plan_install_tab) >= 0
+    assert context_tabs.tabPosition() == QTabWidget.TabPosition.West
+    assert inventory_tabs.parentWidget() is mods_page
+    assert inventory_tabs.objectName() == "mods_workspace_mode_tabs"
+    assert inventory_tabs.tabBar().objectName() == "mods_workspace_mode_tabbar"
 
     assert plan_scroll.parentWidget() is plan_tab
     assert plan_scroll.widget() is plan_content
 
     plan_layout = plan_content.layout()
     intro_label = main_window.findChild(QLabel, "plan_install_intro_label")
+    review_top_row = main_window.findChild(QWidget, "plan_install_top_row")
+    review_middle_row = main_window.findChild(QWidget, "plan_install_middle_row")
     assert plan_layout is not None
     assert intro_label is not None
-    assert plan_layout.indexOf(intro_label) < plan_layout.indexOf(safety_panel_group)
-    assert plan_layout.indexOf(safety_panel_group) < plan_layout.indexOf(staged_package_group)
-    assert plan_layout.indexOf(staged_package_group) < plan_layout.indexOf(destination_group)
-    assert plan_layout.indexOf(destination_group) < plan_layout.indexOf(plan_review_summary_group)
-    assert plan_layout.indexOf(plan_review_summary_group) < plan_layout.indexOf(plan_facts_group)
-    assert plan_layout.indexOf(plan_facts_group) < plan_layout.indexOf(execute_group)
-    assert plan_layout.indexOf(execute_group) < plan_layout.indexOf(review_output_group)
+    assert review_top_row is not None
+    assert review_middle_row is not None
+    assert safety_panel_group.parentWidget() is review_top_row
+    assert staged_package_group.parentWidget() is review_top_row
+    assert execute_group.parentWidget() is review_middle_row
+    assert plan_review_summary_group.parentWidget() is review_middle_row
+    assert plan_facts_group.parentWidget() is review_middle_row
+    review_top_row_layout = review_top_row.layout()
+    assert isinstance(review_top_row_layout, QHBoxLayout)
+    assert review_top_row_layout.itemAt(0).widget() is staged_package_group
+    assert review_top_row_layout.itemAt(1).widget() is safety_panel_group
+    assert plan_layout.indexOf(intro_label) < plan_layout.indexOf(review_top_row)
+    assert plan_layout.indexOf(review_top_row) < plan_layout.indexOf(destination_group)
+    assert plan_layout.indexOf(destination_group) < plan_layout.indexOf(review_middle_row)
+    assert plan_layout.indexOf(review_middle_row) < plan_layout.indexOf(review_output_group)
 
 
 def test_main_window_plan_install_tab_hosts_scroll_content_for_constrained_height(
@@ -4020,14 +4112,27 @@ def test_main_window_plan_install_safety_panel_exists_and_sandbox_text_is_presen
     panel_group = main_window.findChild(QGroupBox, "plan_install_safety_panel_group")
     panel_text = main_window.findChild(QLabel, "plan_install_safety_panel_text")
     plan_content = main_window.findChild(QWidget, "plan_install_tab_content")
+    review_top_row = main_window.findChild(QWidget, "plan_install_top_row")
 
     assert panel_group is not None
     assert panel_text is not None
     assert plan_content is not None
-    assert panel_group.parentWidget() is plan_content
+    assert review_top_row is not None
+    assert panel_group.parentWidget() is review_top_row
     assert "Sandbox destination selected (recommended/test path)." in panel_text.text()
     assert "Destination Mods path:" in panel_text.text()
     assert "Archive path:" in panel_text.text()
+
+
+def test_main_window_mods_workspace_uses_compact_action_band_above_inventory(
+    main_window: MainWindow,
+) -> None:
+    action_band = main_window.findChild(QWidget, "mods_inventory_action_band")
+    inventory_tabs = main_window._inventory_controls_tabs
+
+    assert action_band is not None
+    assert inventory_tabs is not None
+    assert action_band.parentWidget() is inventory_tabs.widget(0)
 
 
 def test_main_window_plan_install_safety_panel_updates_for_real_target(
@@ -4115,7 +4220,7 @@ def test_main_window_plan_install_surface_key_controls_exist(
     assert run_button is not None
     assert plan_tab is not None
 
-    main_window._context_tabs.setCurrentWidget(plan_tab)
+    main_window._context_tabs.setCurrentWidget(main_window._plan_install_tab)
 
     assert main_window._install_target_combo is install_target_combo
     assert main_window._overwrite_checkbox is overwrite_checkbox
@@ -4694,7 +4799,7 @@ def test_main_window_staging_auto_selected_guided_match_switches_to_plan_install
     qapp.processEvents()
 
     assert plan_tab is not None
-    assert main_window._context_tabs.currentWidget() is plan_tab
+    assert main_window._context_tabs.currentWidget() is main_window._plan_install_tab
     assert main_window._zip_path_input.text() == str(matched.package_path)
     assert main_window._staged_package_label.text() == str(matched.package_path)
     assert main_window._staged_package_label.toolTip() == str(matched.package_path)
@@ -5840,9 +5945,8 @@ def test_main_window_discovery_surface_has_expected_structure(
     main_window: MainWindow,
 ) -> None:
     context_tabs = main_window._context_tabs
-    discovery_page = main_window.findChild(QWidget, "discovery_workspace_page")
+    discovery_page = main_window._discovery_page
     discovery_tab = main_window.findChild(QWidget, "discovery_tab")
-    discovery_intro_label = main_window.findChild(QLabel, "discovery_intro_label")
     discovery_output_group = main_window.findChild(QGroupBox, "discovery_output_group")
     discovery_search_group = main_window.findChild(QGroupBox, "discovery_search_group")
     discovery_results_group = main_window.findChild(QGroupBox, "discovery_results_group")
@@ -5851,7 +5955,6 @@ def test_main_window_discovery_surface_has_expected_structure(
     assert isinstance(context_tabs, QTabWidget)
     assert discovery_page is not None
     assert discovery_tab is not None
-    assert discovery_intro_label is not None
     assert discovery_output_group is not None
     assert discovery_search_group is not None
     assert discovery_results_group is not None
@@ -5859,7 +5962,7 @@ def test_main_window_discovery_surface_has_expected_structure(
     tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
     assert "Discover" in tab_labels
     assert context_tabs.indexOf(discovery_page) >= 0
-    assert discovery_tab.parentWidget() is discovery_page
+    assert discovery_tab.parentWidget() is not discovery_page
     assert discovery_output_group.isHidden() is True
 
 
@@ -5934,7 +6037,7 @@ def test_main_window_compare_surface_has_expected_structure(
     assert compare_output_group.isHidden() is True
     compare_layout = compare_tab.layout()
     assert isinstance(compare_layout, QVBoxLayout)
-    assert compare_layout.itemAt(compare_layout.count() - 1).spacerItem() is not None
+    assert compare_layout.count() >= 2
 
 
 def test_main_window_compare_action_renders_real_vs_sandbox_drift(
@@ -6422,10 +6525,10 @@ def test_main_window_archive_surface_has_expected_structure(
     main_window: MainWindow,
 ) -> None:
     context_tabs = main_window._context_tabs
-    archive_page = main_window.findChild(QWidget, "archive_workspace_page")
+    archive_page = main_window._archive_page
     archive_tab = main_window.findChild(QWidget, "archive_tab")
-    archive_intro_label = main_window.findChild(QLabel, "archive_intro_label")
     archive_empty_state_label = main_window.findChild(QLabel, "archive_empty_state_label")
+    archive_state_panel = main_window.findChild(QWidget, "archive_state_panel")
     archive_output_group = main_window.findChild(QGroupBox, "archive_output_group")
     archive_controls_group = main_window.findChild(QGroupBox, "archive_controls_group")
     archive_results_group = main_window.findChild(QGroupBox, "archive_results_group")
@@ -6434,8 +6537,8 @@ def test_main_window_archive_surface_has_expected_structure(
     assert isinstance(context_tabs, QTabWidget)
     assert archive_page is not None
     assert archive_tab is not None
-    assert archive_intro_label is not None
     assert archive_empty_state_label is not None
+    assert archive_state_panel is not None
     assert archive_output_group is not None
     assert archive_controls_group is not None
     assert archive_results_group is not None
@@ -6443,13 +6546,14 @@ def test_main_window_archive_surface_has_expected_structure(
     tab_labels = {context_tabs.tabText(index) for index in range(context_tabs.count())}
     assert "Archive" in tab_labels
     assert context_tabs.indexOf(archive_page) >= 0
-    assert archive_tab.parentWidget() is archive_page
+    assert archive_tab.parentWidget() is not archive_page
     assert archive_empty_state_label.isHidden() is False
+    assert archive_empty_state_label.parentWidget() is archive_state_panel
     assert archive_results_group.isHidden() is True
     assert archive_output_group.isHidden() is True
     archive_page_layout = archive_page.layout()
     assert isinstance(archive_page_layout, QVBoxLayout)
-    assert archive_page_layout.itemAt(archive_page_layout.count() - 1).spacerItem() is not None
+    assert archive_page_layout.count() >= 2
 
 
 def test_main_window_archive_surface_key_controls_exist(
@@ -6478,15 +6582,13 @@ def test_main_window_recovery_surface_has_expected_structure(
     main_window: MainWindow,
 ) -> None:
     context_tabs = main_window._context_tabs
-    recovery_tab = main_window.findChild(QWidget, "recovery_tab")
-    recovery_intro_label = main_window.findChild(QLabel, "recovery_intro_label")
+    recovery_tab = main_window._recovery_page
     recovery_group = main_window.findChild(QGroupBox, "recovery_inspection_group")
     recovery_output_group = main_window.findChild(QGroupBox, "recovery_output_group")
 
     assert context_tabs is not None
     assert isinstance(context_tabs, QTabWidget)
     assert recovery_tab is not None
-    assert recovery_intro_label is not None
     assert recovery_group is not None
     assert recovery_output_group is not None
 
@@ -6501,10 +6603,14 @@ def test_main_window_archive_surface_uses_tighter_spacing_between_actions_and_re
     archive_controls_group = main_window.findChild(QGroupBox, "archive_controls_group")
     archive_results_group = main_window.findChild(QGroupBox, "archive_results_group")
     archive_tab = main_window.findChild(QWidget, "archive_tab")
+    archive_filter_row = main_window.findChild(QWidget, "archive_filter_row")
+    archive_actions_row = main_window.findChild(QWidget, "archive_actions_row")
 
     assert archive_controls_group is not None
     assert archive_results_group is not None
     assert archive_tab is not None
+    assert archive_filter_row is not None
+    assert archive_actions_row is not None
     assert (
         archive_controls_group.sizePolicy().verticalPolicy()
         == QSizePolicy.Policy.Maximum
@@ -6516,8 +6622,8 @@ def test_main_window_archive_surface_uses_tighter_spacing_between_actions_and_re
     results_layout = archive_results_group.layout()
     assert isinstance(results_layout, QVBoxLayout)
     margins = results_layout.contentsMargins()
-    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (8, 2, 8, 6)
-    assert results_layout.spacing() == 2
+    assert (margins.left(), margins.top(), margins.right(), margins.bottom()) == (10, 10, 10, 10)
+    assert results_layout.spacing() == 6
 
 
 def test_main_window_archive_buttons_toggle_with_row_selection(

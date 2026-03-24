@@ -26,8 +26,8 @@ class ArchiveTabSurface(QWidget):
         self.setObjectName("archive_tab")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
 
         archive_controls_group = QGroupBox("Archive Browser")
         archive_controls_group.setObjectName("archive_controls_group")
@@ -35,17 +35,33 @@ class ArchiveTabSurface(QWidget):
         archive_controls_group.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
         )
-        archive_controls_layout = QGridLayout(archive_controls_group)
-        archive_controls_layout.setContentsMargins(8, 6, 8, 6)
-        archive_controls_layout.setHorizontalSpacing(8)
-        archive_controls_layout.setVerticalSpacing(4)
-        archive_controls_layout.addWidget(QLabel("Filter"), 0, 0)
-        archive_controls_layout.addWidget(archive_filter_input, 0, 1, 1, 2)
-        archive_controls_layout.addWidget(archive_filter_stats_label, 0, 3)
-        archive_controls_layout.addWidget(refresh_archives_button, 1, 1)
-        archive_controls_layout.addWidget(restore_archived_button, 1, 2)
-        archive_controls_layout.addWidget(delete_archived_button, 1, 3)
-        layout.addWidget(archive_controls_group)
+        archive_controls_layout = QVBoxLayout(archive_controls_group)
+        archive_controls_layout.setContentsMargins(10, 10, 10, 10)
+        archive_controls_layout.setSpacing(8)
+
+        archive_filter_row = QWidget()
+        archive_filter_row.setObjectName("archive_filter_row")
+        archive_filter_row_layout = QGridLayout(archive_filter_row)
+        archive_filter_row_layout.setContentsMargins(0, 0, 0, 0)
+        archive_filter_row_layout.setHorizontalSpacing(10)
+        archive_filter_row_layout.setVerticalSpacing(4)
+        archive_filter_row_layout.setColumnStretch(1, 1)
+        archive_filter_row_layout.addWidget(QLabel("Filter"), 0, 0)
+        archive_filter_row_layout.addWidget(archive_filter_input, 0, 1)
+        archive_filter_row_layout.addWidget(archive_filter_stats_label, 0, 2)
+        archive_controls_layout.addWidget(archive_filter_row)
+
+        archive_actions_row = QWidget()
+        archive_actions_row.setObjectName("archive_actions_row")
+        archive_actions_row_layout = QGridLayout(archive_actions_row)
+        archive_actions_row_layout.setContentsMargins(0, 0, 0, 0)
+        archive_actions_row_layout.setHorizontalSpacing(8)
+        archive_actions_row_layout.setVerticalSpacing(0)
+        archive_actions_row_layout.addWidget(refresh_archives_button, 0, 0)
+        archive_actions_row_layout.addWidget(restore_archived_button, 0, 1)
+        archive_actions_row_layout.addWidget(delete_archived_button, 0, 2)
+        archive_actions_row_layout.setColumnStretch(3, 1)
+        archive_controls_layout.addWidget(archive_actions_row)
 
         archive_empty_state_label = QLabel(
             "Refresh archive list to browse archived entries from real and sandbox workflows."
@@ -55,15 +71,23 @@ class ArchiveTabSurface(QWidget):
         archive_empty_state_label.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
-        layout.addWidget(archive_empty_state_label)
+        archive_state_panel = QWidget()
+        archive_state_panel.setObjectName("archive_state_panel")
+        archive_state_panel_layout = QVBoxLayout(archive_state_panel)
+        archive_state_panel_layout.setContentsMargins(0, 0, 0, 0)
+        archive_state_panel_layout.setSpacing(0)
+        archive_state_panel_layout.addWidget(archive_empty_state_label)
+        archive_controls_layout.addWidget(archive_state_panel)
+
+        layout.addWidget(archive_controls_group)
 
         archive_results_group = QGroupBox("Archived Entries (real + sandbox)")
         archive_results_group.setObjectName("archive_results_group")
         archive_results_group.setFlat(True)
         archive_results_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         archive_results_layout = QVBoxLayout(archive_results_group)
-        archive_results_layout.setContentsMargins(8, 2, 8, 6)
-        archive_results_layout.setSpacing(2)
+        archive_results_layout.setContentsMargins(10, 10, 10, 10)
+        archive_results_layout.setSpacing(6)
         archive_results_layout.addWidget(archive_table)
         layout.addWidget(archive_results_group)
         archive_results_group.setVisible(False)

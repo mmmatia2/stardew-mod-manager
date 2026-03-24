@@ -5,6 +5,9 @@ import sys
 import tomllib
 from pathlib import Path
 
+PUBLIC_DIST_SLUG = "cinderleaf"
+PUBLIC_EXE_NAME = "Cinderleaf.exe"
+
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
@@ -13,7 +16,7 @@ def main() -> int:
 
     project = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))["project"]
     version = project["version"]
-    dist_path = repo_root / "dist" / f"stardew-mod-manager-{version}-windows-portable"
+    dist_path = repo_root / "dist" / f"{PUBLIC_DIST_SLUG}-{version}-windows-portable"
     work_path = repo_root / "build" / "pyinstaller"
 
     command = [
@@ -27,7 +30,7 @@ def main() -> int:
         str(spec_path),
     ]
     subprocess.run(command, cwd=repo_root, check=True)
-    packaged_exe = dist_path / "Stardew Mod Manager.exe"
+    packaged_exe = dist_path / PUBLIC_EXE_NAME
     qwindows_plugin = (
         dist_path
         / "_internal"

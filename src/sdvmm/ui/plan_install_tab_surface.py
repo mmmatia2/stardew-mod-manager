@@ -40,34 +40,35 @@ class PlanInstallTabSurface(QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.viewport().setObjectName("plan_install_scroll_viewport")
 
         content = QWidget()
         content.setObjectName("plan_install_tab_content")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(6, 6, 6, 6)
-        content_layout.setSpacing(6)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(10)
 
         scroll_area.setWidget(content)
         layout.addWidget(scroll_area)
 
         intro_label = QLabel(
-            "Confirm the current package, choose where it goes, then use Review install before Apply install."
+            "Review the current package first, confirm where it goes, use Review install before Apply install, then write only when the plan looks right."
         )
         intro_label.setObjectName("plan_install_intro_label")
         intro_label.setWordWrap(True)
         _set_auxiliary_label_style(intro_label, bold=True)
         content_layout.addWidget(intro_label)
 
-        destination_group = QGroupBox("Destination")
+        destination_group = QGroupBox("Destination and replace")
         destination_group.setObjectName("plan_install_destination_group")
         destination_group.setFlat(True)
         destination_group.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
         destination_layout = QGridLayout(destination_group)
-        destination_layout.setContentsMargins(8, 6, 8, 6)
-        destination_layout.setHorizontalSpacing(8)
-        destination_layout.setVerticalSpacing(4)
+        destination_layout.setContentsMargins(10, 10, 10, 10)
+        destination_layout.setHorizontalSpacing(10)
+        destination_layout.setVerticalSpacing(6)
         destination_layout.setColumnStretch(1, 1)
         destination_layout.setColumnStretch(2, 0)
         destination_layout.addWidget(QLabel("Install destination"), 0, 0)
@@ -84,13 +85,13 @@ class PlanInstallTabSurface(QWidget):
         destination_layout.addWidget(install_archive_label, 3, 0, 1, 3)
         content_layout.addWidget(destination_group)
 
-        execute_group = QGroupBox("Main actions")
+        execute_group = QGroupBox("Primary actions")
         execute_group.setObjectName("plan_install_execute_group")
         execute_group.setFlat(True)
         execute_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         execute_layout = QVBoxLayout(execute_group)
-        execute_layout.setContentsMargins(8, 6, 8, 6)
-        execute_layout.setSpacing(5)
+        execute_layout.setContentsMargins(10, 10, 10, 10)
+        execute_layout.setSpacing(6)
 
         plan_actions = QHBoxLayout()
         plan_actions.setSpacing(6)
@@ -109,13 +110,13 @@ class PlanInstallTabSurface(QWidget):
 
         content_layout.addWidget(execute_group)
 
-        review_output_group = QGroupBox("Install detail")
+        review_output_group = QGroupBox("Review detail")
         review_output_group.setObjectName("plan_install_output_group")
         review_output_group.setFlat(True)
         review_output_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         review_output_layout = QVBoxLayout(review_output_group)
-        review_output_layout.setContentsMargins(8, 6, 8, 6)
-        review_output_layout.setSpacing(4)
+        review_output_layout.setContentsMargins(10, 10, 10, 10)
+        review_output_layout.setSpacing(6)
         review_output_layout.addWidget(review_output_box)
         content_layout.addWidget(review_output_group)
 
