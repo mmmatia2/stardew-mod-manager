@@ -16,8 +16,6 @@ Current stable portable release: **1.1.1**
 
 ## Real UI
 
-![Cinderleaf shell header](.github/screenshots/shell-header-1.1.1.png)
-
 ![Cinderleaf full window](.github/screenshots/full-window-1.1.1.png)
 
 ## Recommended workflow
