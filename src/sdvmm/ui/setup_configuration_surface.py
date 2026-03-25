@@ -67,7 +67,7 @@ class SetupConfigurationSurface(QScrollArea):
             row_widget.setObjectName(object_name)
             row_layout = QVBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(5)
+            row_layout.setSpacing(4)
 
             row_label = QLabel(label_text)
             row_label.setProperty("setupFieldLabel", True)
@@ -75,7 +75,7 @@ class SetupConfigurationSurface(QScrollArea):
 
             field_row = QHBoxLayout()
             field_row.setContentsMargins(0, 0, 0, 0)
-            field_row.setSpacing(8)
+            field_row.setSpacing(6)
             field_row.addWidget(field_widget, 1)
             field_row.addWidget(primary_button)
             if secondary_button is not None:
@@ -87,7 +87,7 @@ class SetupConfigurationSurface(QScrollArea):
         primary_actions_widget.setObjectName("setup_surface_primary_actions")
         primary_actions_layout = QHBoxLayout(primary_actions_widget)
         primary_actions_layout.setContentsMargins(0, 0, 0, 0)
-        primary_actions_layout.setSpacing(8)
+        primary_actions_layout.setSpacing(6)
         primary_actions_layout.addWidget(save_button)
         primary_actions_layout.addWidget(detect_environment_button)
         primary_actions_layout.addStretch(1)
@@ -96,8 +96,8 @@ class SetupConfigurationSurface(QScrollArea):
         setup_group.setObjectName("setup_surface_group")
         setup_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         setup_layout = QVBoxLayout(setup_group)
-        setup_layout.setContentsMargins(14, 14, 14, 14)
-        setup_layout.setSpacing(12)
+        setup_layout.setContentsMargins(12, 12, 12, 12)
+        setup_layout.setSpacing(10)
         setup_intro_label = QLabel(
             "Start with the live game folder plus your real and sandbox Mods folders. "
             "Saving setup or detecting folders here does not change installed mods."
@@ -137,8 +137,8 @@ class SetupConfigurationSurface(QScrollArea):
         advanced_group.setObjectName("setup_advanced_group")
         advanced_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         advanced_layout = QVBoxLayout(advanced_group)
-        advanced_layout.setContentsMargins(14, 14, 14, 14)
-        advanced_layout.setSpacing(12)
+        advanced_layout.setContentsMargins(12, 12, 12, 12)
+        advanced_layout.setSpacing(10)
         advanced_intro_label = QLabel(
             "Archive folders protect live and sandbox workflows. Nexus and Steam options are optional helpers."
         )
@@ -168,13 +168,13 @@ class SetupConfigurationSurface(QScrollArea):
         nexus_row.setObjectName("setup_nexus_api_key_row")
         nexus_row_layout = QVBoxLayout(nexus_row)
         nexus_row_layout.setContentsMargins(0, 0, 0, 0)
-        nexus_row_layout.setSpacing(5)
+        nexus_row_layout.setSpacing(4)
         nexus_label = QLabel("Nexus API key")
         nexus_label.setProperty("setupFieldLabel", True)
         nexus_row_layout.addWidget(nexus_label)
         nexus_field_row = QHBoxLayout()
         nexus_field_row.setContentsMargins(0, 0, 0, 0)
-        nexus_field_row.setSpacing(8)
+        nexus_field_row.setSpacing(6)
         nexus_field_row.addWidget(nexus_api_key_input, 1)
         nexus_field_row.addWidget(check_nexus_button)
         nexus_row_layout.addLayout(nexus_field_row)
@@ -185,8 +185,8 @@ class SetupConfigurationSurface(QScrollArea):
         setup_actions_widget.setObjectName("setup_actions_widget")
         setup_actions_layout = QGridLayout(setup_actions_widget)
         setup_actions_layout.setContentsMargins(0, 0, 0, 0)
-        setup_actions_layout.setHorizontalSpacing(8)
-        setup_actions_layout.setVerticalSpacing(6)
+        setup_actions_layout.setHorizontalSpacing(6)
+        setup_actions_layout.setVerticalSpacing(5)
         action_buttons = tuple(
             button
             for button in (
@@ -206,8 +206,8 @@ class SetupConfigurationSurface(QScrollArea):
         backup_group.setObjectName("setup_backup_restore_group")
         backup_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         backup_layout = QVBoxLayout(backup_group)
-        backup_layout.setContentsMargins(14, 14, 14, 14)
-        backup_layout.setSpacing(10)
+        backup_layout.setContentsMargins(12, 12, 12, 12)
+        backup_layout.setSpacing(8)
 
         backup_intro_label = QLabel(
             "Export creates a backup bundle. Inspect is read-only and automatically prepares restore/import review. "
@@ -228,8 +228,8 @@ class SetupConfigurationSurface(QScrollArea):
             QSizePolicy.Policy.Maximum,
         )
         setup_output_layout = QVBoxLayout(setup_output_group)
-        setup_output_layout.setContentsMargins(14, 14, 14, 14)
-        setup_output_layout.setSpacing(8)
+        setup_output_layout.setContentsMargins(12, 12, 12, 12)
+        setup_output_layout.setSpacing(6)
         setup_output_layout.addWidget(setup_output_box)
 
         content_widget = QWidget()
@@ -247,26 +247,26 @@ class SetupConfigurationSurface(QScrollArea):
         workspace_band.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         workspace_layout = QHBoxLayout(workspace_band)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
-        workspace_layout.setSpacing(18)
+        workspace_layout.setSpacing(14)
 
         main_column = QWidget()
         main_column.setObjectName("setup_surface_main_column")
         main_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         main_layout = QVBoxLayout(main_column)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(14)
+        main_layout.setSpacing(12)
         main_layout.addWidget(setup_group)
         main_layout.addWidget(advanced_group)
         main_layout.addStretch(1)
 
         secondary_column = QWidget()
         secondary_column.setObjectName("setup_surface_secondary_column")
-        secondary_column.setMinimumWidth(340)
-        secondary_column.setMaximumWidth(440)
+        secondary_column.setMinimumWidth(320)
+        secondary_column.setMaximumWidth(410)
         secondary_column.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         secondary_layout = QVBoxLayout(secondary_column)
         secondary_layout.setContentsMargins(0, 0, 0, 0)
-        secondary_layout.setSpacing(14)
+        secondary_layout.setSpacing(12)
         secondary_layout.addWidget(backup_group)
         secondary_layout.addWidget(setup_output_group)
         secondary_layout.addStretch(1)

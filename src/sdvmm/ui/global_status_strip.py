@@ -37,10 +37,11 @@ class GlobalStatusStrip(QGroupBox):
         summary_label.setObjectName("global_status_summary_label")
         _set_status_label_style(summary_label, bold=True)
         summary_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        summary_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
 
         status_strip_layout = QHBoxLayout(self)
-        status_strip_layout.setContentsMargins(8, 5, 8, 5)
-        status_strip_layout.setSpacing(8)
+        status_strip_layout.setContentsMargins(6, 4, 6, 4)
+        status_strip_layout.setSpacing(6)
         status_strip_layout.addWidget(summary_label, 0)
         status_strip_layout.addWidget(
             _build_status_panel("Current status", self.current_status_label),
@@ -61,8 +62,8 @@ def _build_status_panel(title: str, value_label: QLabel) -> QWidget:
     panel.setObjectName("global_status_panel")
     panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
     layout = QVBoxLayout(panel)
-    layout.setContentsMargins(7, 5, 7, 5)
-    layout.setSpacing(2)
+    layout.setContentsMargins(6, 4, 6, 4)
+    layout.setSpacing(1)
     title_label = QLabel(title)
     title_label.setObjectName("global_status_panel_title")
     _set_status_label_style(title_label, bold=True)

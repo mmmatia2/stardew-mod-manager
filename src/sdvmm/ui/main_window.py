@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFrame,
+    QGraphicsDropShadowEffect,
     QGroupBox,
     QGridLayout,
     QHeaderView,
@@ -41,6 +42,7 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor
 from PySide6.QtGui import QFont
 from PySide6.QtGui import QPalette
 
@@ -933,18 +935,18 @@ class MainWindow(QMainWindow):
         rail = QFrame()
         rail.setObjectName("workspace_nav_rail")
         rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        rail.setMinimumWidth(232)
-        rail.setMaximumWidth(248)
+        rail.setMinimumWidth(214)
+        rail.setMaximumWidth(228)
 
         rail_layout = QVBoxLayout(rail)
-        rail_layout.setContentsMargins(12, 12, 12, 12)
-        rail_layout.setSpacing(10)
+        rail_layout.setContentsMargins(10, 10, 10, 10)
+        rail_layout.setSpacing(8)
 
         brand_panel = QFrame()
         brand_panel.setObjectName("workspace_nav_brand_panel")
         brand_layout = QVBoxLayout(brand_panel)
-        brand_layout.setContentsMargins(12, 12, 12, 12)
-        brand_layout.setSpacing(4)
+        brand_layout.setContentsMargins(10, 10, 10, 10)
+        brand_layout.setSpacing(3)
 
         brand_eyebrow = QLabel("Local-first workflow")
         brand_eyebrow.setObjectName("workspace_nav_brand_eyebrow")
@@ -970,7 +972,7 @@ class MainWindow(QMainWindow):
         nav_buttons_widget.setObjectName("workspace_nav_buttons_widget")
         nav_buttons_layout = QVBoxLayout(nav_buttons_widget)
         nav_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        nav_buttons_layout.setSpacing(4)
+        nav_buttons_layout.setSpacing(3)
 
         self._workspace_nav_buttons: dict[QWidget, QPushButton] = {}
         for index in range(context_tabs.count()):
@@ -993,8 +995,8 @@ class MainWindow(QMainWindow):
         footer_panel = QFrame()
         footer_panel.setObjectName("workspace_nav_footer_panel")
         footer_layout = QVBoxLayout(footer_panel)
-        footer_layout.setContentsMargins(12, 10, 12, 10)
-        footer_layout.setSpacing(2)
+        footer_layout.setContentsMargins(10, 8, 10, 8)
+        footer_layout.setSpacing(1)
         footer_title = QLabel("Write safety")
         footer_title.setObjectName("workspace_nav_section_label")
         footer_hint = QLabel(
@@ -1005,6 +1007,9 @@ class MainWindow(QMainWindow):
         footer_layout.addWidget(footer_title)
         footer_layout.addWidget(footer_hint)
         rail_layout.addWidget(footer_panel)
+        _apply_surface_shadow(rail, blur_radius=22, y_offset=2, alpha=72)
+        _apply_surface_shadow(brand_panel, blur_radius=16, y_offset=1, alpha=52)
+        _apply_surface_shadow(footer_panel, blur_radius=14, y_offset=1, alpha=46)
         return rail
 
     def _build_page_shell(
@@ -1133,8 +1138,8 @@ class MainWindow(QMainWindow):
         container = QWidget()
         container.setObjectName("app_shell_root")
         root_layout = QVBoxLayout(container)
-        root_layout.setContentsMargins(8, 8, 8, 8)
-        root_layout.setSpacing(6)
+        root_layout.setContentsMargins(6, 6, 6, 6)
+        root_layout.setSpacing(5)
 
         context_group = TopContextSurface(
             environment_status_label=self._environment_status_label,
@@ -1148,6 +1153,7 @@ class MainWindow(QMainWindow):
             install_context_label=self._install_context_label,
         )
         self._context_group = context_group
+        _apply_surface_shadow(context_group, blur_radius=18, y_offset=2, alpha=60)
         root_layout.addWidget(context_group)
 
         browse_game_button = QPushButton("Choose game folder")
@@ -1898,6 +1904,7 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(workspace_shell, 1)
 
         root_layout.addWidget(self._status_strip_group)
+        _apply_surface_shadow(self._status_strip_group, blur_radius=14, y_offset=1, alpha=44)
         self._background_action_buttons = (
             self._scan_button,
             self._check_updates_button,
@@ -6066,11 +6073,11 @@ class MainWindow(QMainWindow):
     def _refresh_responsive_panel_bounds(self) -> None:
         window_height = max(self.height(), self.minimumHeight())
 
-        context_cap = max(150, min(202, int(window_height * 0.215)))
+        context_cap = max(132, min(176, int(window_height * 0.188)))
         inventory_controls_cap = max(108, min(144, int(window_height * 0.17)))
         flow_hint_cap = max(28, min(56, int(window_height * 0.07)))
         intake_result_cap = max(92, min(140, int(window_height * 0.18)))
-        status_strip_cap = max(56, min(82, int(window_height * 0.09)))
+        status_strip_cap = max(46, min(66, int(window_height * 0.072)))
         details_cap = max(64, min(108, int(window_height * 0.12)))
 
         if hasattr(self, "_context_group"):
@@ -6921,6 +6928,20 @@ def _resolve_ui_app_version() -> str:
     except PackageNotFoundError:
         pass
     return "unknown"
+
+
+def _apply_surface_shadow(
+    widget: QWidget,
+    *,
+    blur_radius: float,
+    y_offset: float,
+    alpha: int,
+) -> None:
+    shadow = QGraphicsDropShadowEffect(widget)
+    shadow.setBlurRadius(blur_radius)
+    shadow.setOffset(0, y_offset)
+    shadow.setColor(QColor(0, 0, 0, alpha))
+    widget.setGraphicsEffect(shadow)
 
 
 def _summarize_details_text(text: str) -> tuple[str, str]:
