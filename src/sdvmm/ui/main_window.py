@@ -1046,7 +1046,10 @@ class MainWindow(QMainWindow):
         )
 
         inventory_controls_tabs.setObjectName("mods_workspace_mode_tabs")
-        inventory_controls_tabs.tabBar().setObjectName("mods_workspace_mode_tabbar")
+        inventory_controls_tabs.setDocumentMode(True)
+        inventory_controls_tabbar = inventory_controls_tabs.tabBar()
+        inventory_controls_tabbar.setObjectName("mods_workspace_mode_tabbar")
+        inventory_controls_tabbar.setDrawBase(False)
         page_layout.addWidget(inventory_controls_tabs)
 
         workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1975,6 +1978,23 @@ class MainWindow(QMainWindow):
             "existing_config": self._config,
         }
 
+    def _current_backup_export_inputs(self) -> dict[str, object]:
+        return {
+            "game_path_text": self._game_path_input.text(),
+            "mods_dir_text": self._mods_path_input.text(),
+            "sandbox_mods_path_text": self._sandbox_mods_path_input.text(),
+            "sandbox_archive_path_text": self._sandbox_archive_path_input.text(),
+            "watched_downloads_path_text": self._watched_downloads_path_input.text(),
+            "secondary_watched_downloads_path_text": (
+                self._secondary_watched_downloads_path_input.text()
+            ),
+            "real_archive_path_text": self._real_archive_path_input.text(),
+            "nexus_api_key_text": self._nexus_api_key_input.text(),
+            "scan_target": self._current_scan_target(),
+            "install_target": self._current_install_target(),
+            "existing_config": self._config,
+        }
+
     def _persist_session_config_on_close(self) -> None:
         result = self._shell_service.persist_session_config_if_valid(
             **self._current_operational_config_inputs()
@@ -2292,7 +2312,7 @@ class MainWindow(QMainWindow):
             task_fn=lambda: self._shell_service.export_backup_bundle(
                 destination_root_text=destination_root,
                 bundle_storage_kind=bundle_storage_kind,
-                **self._current_operational_config_inputs(),
+                **self._current_backup_export_inputs(),
             ),
             on_success=self._on_backup_bundle_export_completed,
             on_failure=self._set_setup_output_text,

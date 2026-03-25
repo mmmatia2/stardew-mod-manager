@@ -2,6 +2,12 @@
 
 All notable user-facing changes for this repository are tracked here.
 
+## [1.1.2]
+
+- Fixed the `Backup export` regression where the released UI passed an unsupported `steam_auto_start_enabled` argument into backup/export.
+- Fixed the visible background bleed behind the `Installed Mods` / `Launch` sub-tab row in the Mods workspace.
+- Shipped as a narrow hotfix with no workflow-semantics change.
+
 ## [1.1.1]
 
 - Renamed the public app surface to `Cinderleaf`, with `for Stardew Valley` used only as a secondary descriptor.

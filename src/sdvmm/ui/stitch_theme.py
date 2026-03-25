@@ -303,6 +303,10 @@ QTabWidget#mods_workspace_mode_tabs::pane {
     top: -1px;
 }
 
+QTabBar#mods_workspace_mode_tabbar {
+    background: transparent;
+}
+
 QTabBar#mods_workspace_mode_tabbar::tab {
     min-height: 28px;
     padding: 5px 12px;

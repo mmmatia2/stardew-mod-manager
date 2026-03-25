@@ -500,7 +500,7 @@ def test_main_window_uses_custom_workspace_nav_rail_with_hidden_tab_bar(
     assert setup_button.property("navRole") == "workspace"
     assert review_button.property("navRole") == "workspace"
     assert brand_title.text() == "Cinderleaf"
-    assert brand_version.text() == "Version 1.1.1"
+    assert brand_version.text() == "Version 1.1.2"
 
 
 def test_main_window_workspace_nav_buttons_drive_context_pages(
@@ -2586,8 +2586,9 @@ def test_main_window_export_backup_bundle_runs_service_and_updates_output(
     assert captured["service_kwargs"] == {
         "destination_root_text": str(export_root),
         "bundle_storage_kind": "directory",
-        **main_window._current_operational_config_inputs(),
+        **main_window._current_backup_export_inputs(),
     }
+    assert "steam_auto_start_enabled" not in captured["service_kwargs"]
     assert main_window._status_strip_label.text() == (
         f"Backup export complete: 1 item(s) copied to {bundle_path}"
     )
@@ -2796,8 +2797,9 @@ def test_main_window_export_backup_bundle_can_request_zip_creation(
     assert captured["service_kwargs"] == {
         "destination_root_text": str(zip_path),
         "bundle_storage_kind": "zip",
-        **main_window._current_operational_config_inputs(),
+        **main_window._current_backup_export_inputs(),
     }
+    assert "steam_auto_start_enabled" not in captured["service_kwargs"]
 
 
 def test_main_window_plan_restore_import_reuses_bundle_selected_for_inspection_before_completion(
@@ -4064,6 +4066,8 @@ def test_main_window_plan_install_surface_has_expected_structure(
     assert inventory_tabs.parentWidget() is mods_page
     assert inventory_tabs.objectName() == "mods_workspace_mode_tabs"
     assert inventory_tabs.tabBar().objectName() == "mods_workspace_mode_tabbar"
+    assert inventory_tabs.documentMode() is True
+    assert inventory_tabs.tabBar().drawBase() is False
 
     assert plan_scroll.parentWidget() is plan_tab
     assert plan_scroll.widget() is plan_content
