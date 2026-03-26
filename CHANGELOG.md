@@ -2,6 +2,15 @@
 
 All notable user-facing changes for this repository are tracked here.
 
+## [1.1.4]
+
+- Tightened shell chrome and improved workflow emphasis so the main mod workflow reads more clearly than Setup-heavy earlier builds.
+- Refined Setup into a lighter configuration surface with backup and restore tools kept visible but visually secondary.
+- Improved workflow-page clarity across Mods, Packages, Review, Discover, Compare, and Archive with better idle, active, and next-step guidance.
+- Polished action hierarchy, row selection, disabled states, and local interaction feedback across the core workflow surfaces.
+- Hardened the Windows portable package with aligned EXE metadata, removed stale bundled package metadata, and added SHA256 checksum output for the release zip.
+- Shipped as a UX, packaging-trust, and release-surface polish update with no workflow-semantics change.
+
 ## [1.1.3]
 
 - Fixed the restore/import planning regression where the released UI passed an unsupported `steam_auto_start_enabled` argument into restore/import planning.

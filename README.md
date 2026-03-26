@@ -4,7 +4,7 @@
 
 `for Stardew Valley` is a descriptive subtitle, not an official affiliation. Cinderleaf is an independent community tool and is not affiliated with or endorsed by ConcernedApe.
 
-Current stable portable release: **1.1.3**
+Current release candidate prepared in this branch: **1.1.4**
 
 ## Why use it
 
@@ -33,9 +33,11 @@ Current stable portable release: **1.1.3**
 The supported public build is a Windows portable zip published to GitHub Releases.
 
 1. Open the repository's GitHub Releases page.
-2. Download `cinderleaf-1.1.3-windows-portable.zip`.
+2. When the `1.1.4` GitHub Release is published, download `cinderleaf-1.1.4-windows-portable.zip`.
 3. Extract it to a normal folder.
 4. Run `Cinderleaf.exe`.
+
+If a checksum file is published with the release, verify `cinderleaf-1.1.4-windows-portable.zip.sha256` before announcing or mirroring the build.
 
 Current release caveats:
 
@@ -68,7 +70,9 @@ py -3.12 -m venv .venv
 The build script produces:
 
 ```text
-dist\cinderleaf-1.1.3-windows-portable\
+dist\cinderleaf-1.1.4-windows-portable\
+dist\cinderleaf-1.1.4-windows-portable.zip
+dist\cinderleaf-1.1.4-windows-portable.zip.sha256
 ```
 
 ## Current limitations
