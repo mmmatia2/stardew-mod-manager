@@ -4518,6 +4518,25 @@ def test_main_window_mods_workspace_uses_compact_action_band_above_inventory(
     assert action_band.parentWidget() is inventory_tabs.widget(0)
 
 
+def test_main_window_key_actions_keep_clear_button_roles(main_window: MainWindow) -> None:
+    review_install_button = main_window.findChild(QPushButton, "plan_install_plan_button")
+    apply_install_button = main_window.findChild(QPushButton, "plan_install_run_button")
+
+    assert main_window._scan_button.property("buttonRole") == "primary"
+    assert main_window._check_updates_button.property("buttonRole") == "secondary"
+    assert main_window._open_remote_page_button.property("buttonRole") == "utility"
+    assert main_window._search_mods_button.property("buttonRole") == "primary"
+    assert main_window._compare_real_vs_sandbox_button.property("buttonRole") == "primary"
+    assert main_window._compare_copy_identity_button.property("buttonRole") == "utility"
+    assert main_window._refresh_archives_button.property("buttonRole") == "primary"
+    assert main_window._restore_archived_button.property("buttonRole") == "secondary"
+    assert main_window._delete_archived_button.property("buttonRole") == "danger"
+    assert review_install_button is not None
+    assert review_install_button.property("buttonRole") == "secondary"
+    assert apply_install_button is not None
+    assert apply_install_button.property("buttonRole") == "primary"
+
+
 def test_main_window_workflow_state_labels_exist(main_window: MainWindow) -> None:
     assert main_window.findChild(QLabel, "mods_inventory_state_label") is main_window._mods_inventory_state_label
     assert (

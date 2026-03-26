@@ -42,6 +42,7 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtCore import QUrl
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QBrush
 from PySide6.QtGui import QColor
 from PySide6.QtGui import QFont
 from PySide6.QtGui import QPalette
@@ -4048,6 +4049,13 @@ class MainWindow(QMainWindow):
             status_item.setToolTip("Run Check updates to evaluate update actionability.")
             self._mods_table.setItem(row, 4, status_item)
             self._mods_table.setItem(row, 5, QTableWidgetItem(mod.folder_path.name))
+            _set_table_row_visual(
+                self._mods_table,
+                row,
+                foreground="#ece6de",
+                bold_columns=(0,),
+                column_foregrounds={4: "#a79b8f"},
+            )
 
         self._mods_table.setSortingEnabled(was_sorting)
         self._apply_mods_filter()
@@ -4092,6 +4100,14 @@ class MainWindow(QMainWindow):
                 name_item.setData(_ROLE_REMOTE_LINK, "")
                 name_item.setData(_ROLE_UPDATE_ACTIONABLE, False)
                 name_item.setData(_ROLE_UPDATE_BLOCK_REASON, reason)
+                _set_table_row_visual(
+                    self._mods_table,
+                    row,
+                    background="#221c19",
+                    foreground="#e7dbce",
+                    bold_columns=(0,),
+                    column_foregrounds={4: "#e3bf91"},
+                )
                 continue
 
             actionable, blocked_reason = _update_status_actionability(status)
@@ -4110,6 +4126,33 @@ class MainWindow(QMainWindow):
             )
             name_item.setData(_ROLE_UPDATE_ACTIONABLE, actionable)
             name_item.setData(_ROLE_UPDATE_BLOCK_REASON, blocked_reason)
+            if actionable:
+                _set_table_row_visual(
+                    self._mods_table,
+                    row,
+                    background="#19231c",
+                    foreground="#ebefe6",
+                    bold_columns=(0, 4),
+                    column_foregrounds={3: "#f2d492", 4: "#cbe7c1"},
+                )
+            elif status.state == "up_to_date":
+                _set_table_row_visual(
+                    self._mods_table,
+                    row,
+                    background="#171d1a",
+                    foreground="#d6dbd5",
+                    bold_columns=(0,),
+                    column_foregrounds={4: "#9cc38f"},
+                )
+            else:
+                _set_table_row_visual(
+                    self._mods_table,
+                    row,
+                    background="#211c19",
+                    foreground="#e2d6ca",
+                    bold_columns=(0,),
+                    column_foregrounds={4: "#d7ba92"},
+                )
         self._mods_table.setSortingEnabled(was_sorting)
         self._apply_mods_filter()
         self._refresh_workflow_surface_states()
@@ -4146,6 +4189,37 @@ class MainWindow(QMainWindow):
             self._discovery_table.setItem(row, 6, QTableWidgetItem(provider_relation))
             page_text = entry.source_page_url or "-"
             self._discovery_table.setItem(row, 7, QTableWidgetItem(page_text))
+            if entry.compatibility_state in {
+                "compatible",
+                "compatible_with_caveat",
+                "unofficial_update",
+                "workaround_available",
+            }:
+                _set_table_row_visual(
+                    self._discovery_table,
+                    row,
+                    background="#18221c",
+                    foreground="#e6eee1",
+                    bold_columns=(0,),
+                    column_foregrounds={4: "#c7e3bc", 5: "#d4ddd0"},
+                )
+            elif entry.compatibility_state in {"incompatible", "abandoned", "obsolete"}:
+                _set_table_row_visual(
+                    self._discovery_table,
+                    row,
+                    background="#221b1a",
+                    foreground="#e8dbd4",
+                    bold_columns=(0,),
+                    column_foregrounds={4: "#e1b09f"},
+                )
+            else:
+                _set_table_row_visual(
+                    self._discovery_table,
+                    row,
+                    foreground="#e7e1d8",
+                    bold_columns=(0,),
+                    column_foregrounds={5: "#c8d1c5" if correlation is not None else "#b4a89b"},
+                )
 
         self._discovery_table.setSortingEnabled(was_sorting)
         self._apply_discovery_filter()
@@ -4174,6 +4248,24 @@ class MainWindow(QMainWindow):
             self._archive_table.setItem(row, 3, QTableWidgetItem(entry.mod_name or "-"))
             self._archive_table.setItem(row, 4, QTableWidgetItem(entry.unique_id or "-"))
             self._archive_table.setItem(row, 5, QTableWidgetItem(entry.version or "-"))
+            if entry.source_kind == ARCHIVE_SOURCE_REAL:
+                _set_table_row_visual(
+                    self._archive_table,
+                    row,
+                    background="#221c18",
+                    foreground="#e7dbce",
+                    bold_columns=(0, 3),
+                    column_foregrounds={0: "#efc38e"},
+                )
+            else:
+                _set_table_row_visual(
+                    self._archive_table,
+                    row,
+                    background="#18211b",
+                    foreground="#e1eadb",
+                    bold_columns=(0, 3),
+                    column_foregrounds={0: "#aed7a3"},
+                )
 
         self._archive_table.setSortingEnabled(was_sorting)
         self._apply_archive_filter()
@@ -4201,6 +4293,52 @@ class MainWindow(QMainWindow):
             note_item = QTableWidgetItem(note_text)
             note_item.setToolTip(note_text if entry.note else "")
             self._compare_results_table.setItem(row, 4, note_item)
+            match entry.state:
+                case "only_in_real":
+                    _set_table_row_visual(
+                        self._compare_results_table,
+                        row,
+                        background="#221c18",
+                        foreground="#e9ddd0",
+                        bold_columns=(0, 1),
+                        column_foregrounds={1: "#efc58f"},
+                    )
+                case "only_in_sandbox":
+                    _set_table_row_visual(
+                        self._compare_results_table,
+                        row,
+                        background="#18211b",
+                        foreground="#e2eadc",
+                        bold_columns=(0, 1),
+                        column_foregrounds={1: "#aed7a4"},
+                    )
+                case "version_mismatch":
+                    _set_table_row_visual(
+                        self._compare_results_table,
+                        row,
+                        background="#252112",
+                        foreground="#ece3cb",
+                        bold_columns=(0, 1),
+                        column_foregrounds={1: "#efd88e"},
+                    )
+                case "ambiguous_match":
+                    _set_table_row_visual(
+                        self._compare_results_table,
+                        row,
+                        background="#231b21",
+                        foreground="#ebdce5",
+                        bold_columns=(0, 1),
+                        column_foregrounds={1: "#ddb8c9"},
+                    )
+                case _:
+                    _set_table_row_visual(
+                        self._compare_results_table,
+                        row,
+                        background="#171c20",
+                        foreground="#d1ccc4",
+                        bold_columns=(0,),
+                        column_foregrounds={1: "#9ebd98"},
+                    )
 
         self._compare_results_table.setSortingEnabled(was_sorting)
         self._apply_compare_results_filter()
@@ -6964,6 +7102,42 @@ def _set_feedback_label_state(label: QLabel, tone: str, text: str) -> None:
 
 def _visible_table_row_count(table: QTableWidget) -> int:
     return sum(1 for row in range(table.rowCount()) if not table.isRowHidden(row))
+
+
+def _brush_from_hex(color_text: str) -> QBrush:
+    return QBrush(QColor(color_text))
+
+
+def _set_table_row_visual(
+    table: QTableWidget,
+    row: int,
+    *,
+    foreground: str | None = None,
+    background: str | None = None,
+    bold_columns: tuple[int, ...] = tuple(),
+    column_foregrounds: dict[int, str] | None = None,
+    column_backgrounds: dict[int, str] | None = None,
+) -> None:
+    row_foreground = _brush_from_hex(foreground) if foreground is not None else None
+    row_background = _brush_from_hex(background) if background is not None else None
+    foreground_overrides = column_foregrounds or {}
+    background_overrides = column_backgrounds or {}
+
+    for column in range(table.columnCount()):
+        item = table.item(row, column)
+        if item is None:
+            continue
+        if row_foreground is not None:
+            item.setForeground(row_foreground)
+        if row_background is not None:
+            item.setBackground(row_background)
+        if column in foreground_overrides:
+            item.setForeground(_brush_from_hex(foreground_overrides[column]))
+        if column in background_overrides:
+            item.setBackground(_brush_from_hex(background_overrides[column]))
+        font = QFont(item.font())
+        font.setBold(column in bold_columns)
+        item.setFont(font)
 
 
 def _set_primary_button_style(button: QPushButton) -> None:
