@@ -15,7 +15,7 @@ from sdvmm.ui.main_window import MainWindow
 
 APP_PACKAGE_NAME = "stardew-mod-manager"
 APP_DISPLAY_NAME = "Cinderleaf"
-APP_VERSION_FALLBACK = "0.3.1"
+APP_VERSION_FALLBACK = "unknown"
 APP_VERSION_FILENAME = "app-version.txt"
 APP_RUNTIME_ICON_NAMES = ("app-icon.png", "stardew-mod-manager.ico")
 WINDOWS_APP_USER_MODEL_ID = "local.sdvmm.cinderleaf"

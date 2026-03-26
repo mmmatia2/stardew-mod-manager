@@ -42,6 +42,8 @@ Also do a real packaged-app check for the shipped build:
 - launch `dist\cinderleaf-X.Y.Z-windows-portable\Cinderleaf.exe`
 - confirm the visible shell shows the correct version
 - confirm any release-scope workflow changes behave correctly in the packaged app
+- verify the release checksum file exists:
+  - `dist\cinderleaf-X.Y.Z-windows-portable.zip.sha256`
 
 ## Docs and media pass
 
@@ -60,9 +62,12 @@ Before publishing:
 3. create and push tag `vX.Y.Z`
 4. run the GitHub Actions release workflow from `main` with:
    - `release_ref = vX.Y.Z`
-5. verify the GitHub Release exists
-6. verify the release asset exists:
+5. if Authenticode signing is available, sign `dist\cinderleaf-X.Y.Z-windows-portable\Cinderleaf.exe` before the final zip/checksum that will be published
+6. verify the GitHub Release exists
+7. verify the release asset exists:
    - `cinderleaf-X.Y.Z-windows-portable.zip`
+8. verify the published checksum matches:
+   - `cinderleaf-X.Y.Z-windows-portable.zip.sha256`
 
 ## Nexus release steps
 
@@ -80,9 +85,11 @@ For each public release:
 Before announcing a release:
 
 - the packaged app should not show stale version text
+- the packaged `Cinderleaf.exe` should expose normal Windows product/file version metadata
 - disabled actions should look disabled
 - blocked write actions should show a clear reason
 - any scan or trust caveats in the public description should be truthful and calm
+- if the app is unsigned, say so plainly; reputation prompts and heuristic warnings cannot be fully solved without code signing
 
 ## After publishing
 

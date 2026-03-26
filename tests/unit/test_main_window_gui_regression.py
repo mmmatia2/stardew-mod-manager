@@ -285,6 +285,13 @@ def test_main_window_close_persists_practical_setup_paths_across_restart(
     assert reopened_window._secondary_watched_downloads_path_input.text() == str(
         secondary_watched_downloads_path
     )
+    assert reopened_window._game_path_input.cursorPosition() == 0
+    assert reopened_window._mods_path_input.cursorPosition() == 0
+    assert reopened_window._sandbox_mods_path_input.cursorPosition() == 0
+    assert reopened_window._sandbox_archive_path_input.cursorPosition() == 0
+    assert reopened_window._real_archive_path_input.cursorPosition() == 0
+    assert reopened_window._watched_downloads_path_input.cursorPosition() == 0
+    assert reopened_window._secondary_watched_downloads_path_input.cursorPosition() == 0
     assert reopened_window._scan_target_combo.currentData() == SCAN_TARGET_SANDBOX_MODS
     assert (
         reopened_window._install_target_combo.currentData()

@@ -1976,24 +1976,60 @@ class MainWindow(QMainWindow):
         self._refresh_active_backup_bundle_context()
         self._refresh_restore_import_execution_state()
 
+    def _set_programmatic_line_edit_text(self, line_edit: QLineEdit, text: str) -> None:
+        line_edit.setText(text)
+        self._reset_line_edit_view_start(line_edit)
+
+    def _reset_line_edit_view_start(self, line_edit: QLineEdit) -> None:
+        if not line_edit.text():
+            return
+        line_edit.deselect()
+        line_edit.setCursorPosition(0)
+        QTimer.singleShot(
+            0,
+            lambda edit=line_edit: (
+                edit.deselect(),
+                edit.setCursorPosition(0),
+            ),
+        )
+
     def _load_startup_state(self) -> None:
         state = self._shell_service.load_startup_config()
         self._config = state.config
 
         if state.config is not None:
-            self._game_path_input.setText(str(state.config.game_path))
-            self._mods_path_input.setText(str(state.config.mods_path))
+            self._set_programmatic_line_edit_text(
+                self._game_path_input,
+                str(state.config.game_path),
+            )
+            self._set_programmatic_line_edit_text(
+                self._mods_path_input,
+                str(state.config.mods_path),
+            )
             if state.config.sandbox_mods_path is not None:
-                self._sandbox_mods_path_input.setText(str(state.config.sandbox_mods_path))
+                self._set_programmatic_line_edit_text(
+                    self._sandbox_mods_path_input,
+                    str(state.config.sandbox_mods_path),
+                )
             if state.config.sandbox_archive_path is not None:
-                self._sandbox_archive_path_input.setText(str(state.config.sandbox_archive_path))
+                self._set_programmatic_line_edit_text(
+                    self._sandbox_archive_path_input,
+                    str(state.config.sandbox_archive_path),
+                )
             if state.config.real_archive_path is not None:
-                self._real_archive_path_input.setText(str(state.config.real_archive_path))
+                self._set_programmatic_line_edit_text(
+                    self._real_archive_path_input,
+                    str(state.config.real_archive_path),
+                )
             if state.config.watched_downloads_path is not None:
-                self._watched_downloads_path_input.setText(str(state.config.watched_downloads_path))
+                self._set_programmatic_line_edit_text(
+                    self._watched_downloads_path_input,
+                    str(state.config.watched_downloads_path),
+                )
             if state.config.secondary_watched_downloads_path is not None:
-                self._secondary_watched_downloads_path_input.setText(
-                    str(state.config.secondary_watched_downloads_path)
+                self._set_programmatic_line_edit_text(
+                    self._secondary_watched_downloads_path_input,
+                    str(state.config.secondary_watched_downloads_path),
                 )
             if state.config.nexus_api_key is not None:
                 self._nexus_api_key_input.setText(state.config.nexus_api_key)
@@ -2190,7 +2226,7 @@ class MainWindow(QMainWindow):
             self._game_path_input.text() or "",
         )
         if selected:
-            self._game_path_input.setText(selected)
+            self._set_programmatic_line_edit_text(self._game_path_input, selected)
 
     def _on_browse(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -2199,7 +2235,7 @@ class MainWindow(QMainWindow):
             self._mods_path_input.text() or "",
         )
         if selected:
-            self._mods_path_input.setText(selected)
+            self._set_programmatic_line_edit_text(self._mods_path_input, selected)
 
     def _on_browse_zip(self) -> None:
         selected_paths, _ = QFileDialog.getOpenFileNames(
@@ -2232,10 +2268,11 @@ class MainWindow(QMainWindow):
         )
         if selected:
             self._invalidate_pending_plan()
-            self._sandbox_mods_path_input.setText(selected)
+            self._set_programmatic_line_edit_text(self._sandbox_mods_path_input, selected)
             if not self._sandbox_archive_path_input.text().strip():
-                self._sandbox_archive_path_input.setText(
-                    str(Path(selected).parent / ".sdvmm-sandbox-archive")
+                self._set_programmatic_line_edit_text(
+                    self._sandbox_archive_path_input,
+                    str(Path(selected).parent / ".sdvmm-sandbox-archive"),
                 )
 
     def _on_browse_sandbox_archive(self) -> None:
@@ -2246,7 +2283,7 @@ class MainWindow(QMainWindow):
         )
         if selected:
             self._invalidate_pending_plan()
-            self._sandbox_archive_path_input.setText(selected)
+            self._set_programmatic_line_edit_text(self._sandbox_archive_path_input, selected)
 
     def _on_browse_real_archive(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -2256,7 +2293,7 @@ class MainWindow(QMainWindow):
         )
         if selected:
             self._invalidate_pending_plan()
-            self._real_archive_path_input.setText(selected)
+            self._set_programmatic_line_edit_text(self._real_archive_path_input, selected)
 
     def _on_browse_watched_downloads(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -2265,7 +2302,7 @@ class MainWindow(QMainWindow):
             self._watched_downloads_path_input.text() or "",
         )
         if selected:
-            self._watched_downloads_path_input.setText(selected)
+            self._set_programmatic_line_edit_text(self._watched_downloads_path_input, selected)
 
     def _on_browse_secondary_watched_downloads(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -2274,7 +2311,10 @@ class MainWindow(QMainWindow):
             self._secondary_watched_downloads_path_input.text() or "",
         )
         if selected:
-            self._secondary_watched_downloads_path_input.setText(selected)
+            self._set_programmatic_line_edit_text(
+                self._secondary_watched_downloads_path_input,
+                selected,
+            )
 
     def _open_configured_folder(self, *, field_label: str, path_text: str) -> None:
         try:
@@ -5297,7 +5337,10 @@ class MainWindow(QMainWindow):
     def _apply_environment_status(self, status: GameEnvironmentStatus) -> None:
         self._last_environment_status = status
         if status.mods_path is not None and not self._mods_path_input.text().strip():
-            self._mods_path_input.setText(str(status.mods_path))
+            self._set_programmatic_line_edit_text(
+                self._mods_path_input,
+                str(status.mods_path),
+            )
 
         self._environment_status_label.setText(_environment_summary_label(status))
         self._environment_status_label.setToolTip(str(status.game_path))
@@ -6082,8 +6125,9 @@ class MainWindow(QMainWindow):
             self._install_context_label.setText(context_text)
             self._install_context_label.setToolTip(path_text)
             if not self._real_archive_path_input.text().strip() and self._mods_path_input.text().strip():
-                self._real_archive_path_input.setText(
-                    str(Path(self._mods_path_input.text().strip()).parent / ".sdvmm-real-archive")
+                self._set_programmatic_line_edit_text(
+                    self._real_archive_path_input,
+                    str(Path(self._mods_path_input.text().strip()).parent / ".sdvmm-real-archive"),
                 )
             self._refresh_install_safety_panel()
             return
@@ -6099,8 +6143,9 @@ class MainWindow(QMainWindow):
             not self._sandbox_archive_path_input.text().strip()
             and self._sandbox_mods_path_input.text().strip()
         ):
-            self._sandbox_archive_path_input.setText(
-                str(Path(self._sandbox_mods_path_input.text().strip()).parent / ".sdvmm-sandbox-archive")
+            self._set_programmatic_line_edit_text(
+                self._sandbox_archive_path_input,
+                str(Path(self._sandbox_mods_path_input.text().strip()).parent / ".sdvmm-sandbox-archive"),
             )
         self._refresh_install_safety_panel()
 
