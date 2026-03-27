@@ -2,6 +2,11 @@
 
 All notable user-facing changes for this repository are tracked here.
 
+## [1.1.5]
+
+- Fixed Windows dark-theme confirmation dialog readability so confirmation prompts stay legible in the shipped portable app.
+- Shipped as a small UI/readability hotfix with no workflow-semantics change.
+
 ## [1.1.4]
 
 - Tightened shell chrome and improved workflow emphasis so the main mod workflow reads more clearly than Setup-heavy earlier builds.

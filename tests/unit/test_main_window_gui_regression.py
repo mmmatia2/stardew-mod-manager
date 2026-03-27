@@ -534,7 +534,7 @@ def test_main_window_uses_custom_workspace_nav_rail_with_hidden_tab_bar(
     assert setup_button.property("navRole") == "workspace"
     assert review_button.property("navRole") == "workspace"
     assert brand_title.text() == "Cinderleaf"
-    assert brand_version.text() == "Version 1.1.4"
+    assert brand_version.text() == "Version 1.1.5"
 
 
 def test_main_window_workspace_nav_buttons_drive_context_pages(
