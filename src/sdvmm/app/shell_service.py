@@ -22,6 +22,7 @@ from sdvmm.domain.models import (
     ArchiveRestorePlan,
     ArchiveRestoreResult,
     AppConfig,
+    AppUpdateStatus,
     BackupBundleInspectionItem,
     BackupBundleInspectionResult,
     RestoreImportExecutionReview,
@@ -153,6 +154,10 @@ from sdvmm.services.game_launcher import (
     LaunchCommand,
     launch_game_process,
     resolve_launch_command,
+)
+from sdvmm.services.app_update import (
+    check_app_update_status as check_app_update_status_service,
+    default_app_update_page_url,
 )
 from sdvmm.services.smapi_update import (
     check_smapi_update_status as check_smapi_update_status_service,
@@ -1999,6 +2004,18 @@ class AppShellService:
         if status is not None and status.update_page_url.strip():
             return status.update_page_url.strip()
         return default_smapi_update_page_url()
+
+    def check_app_update_status(self, *, current_version: str) -> AppUpdateStatus:
+        try:
+            return check_app_update_status_service(current_version=current_version)
+        except OSError as exc:
+            raise AppShellError(f"Could not check Cinderleaf release status: {exc}") from exc
+
+    @staticmethod
+    def resolve_app_update_page_url(status: AppUpdateStatus | None = None) -> str:
+        if status is not None and status.update_page_url.strip():
+            return status.update_page_url.strip()
+        return default_app_update_page_url()
 
     def check_smapi_log_troubleshooting(
         self,

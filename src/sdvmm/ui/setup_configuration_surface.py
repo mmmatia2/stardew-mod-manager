@@ -37,9 +37,12 @@ class SetupConfigurationSurface(QScrollArea):
         browse_real_archive_button: QPushButton,
         open_real_archive_button: QPushButton,
         check_nexus_button: QPushButton,
+        check_app_update_button: QPushButton,
+        open_app_release_page_button: QPushButton,
         save_button: QPushButton,
         detect_environment_button: QPushButton,
         setup_readiness_label: QLabel,
+        app_update_status_label: QLabel,
         export_backup_button: QPushButton,
         inspect_backup_button: QPushButton,
         plan_restore_import_button: QPushButton | None,
@@ -202,6 +205,25 @@ class SetupConfigurationSurface(QScrollArea):
         nexus_field_row.addWidget(check_nexus_button)
         nexus_row_layout.addLayout(nexus_field_row)
         advanced_layout.addWidget(nexus_row)
+
+        app_updates_row = QWidget()
+        app_updates_row.setObjectName("setup_app_updates_row")
+        app_updates_layout = QVBoxLayout(app_updates_row)
+        app_updates_layout.setContentsMargins(0, 0, 0, 0)
+        app_updates_layout.setSpacing(4)
+        app_updates_label = QLabel("Cinderleaf release")
+        app_updates_label.setProperty("setupFieldLabel", True)
+        app_updates_layout.addWidget(app_updates_label)
+        app_updates_button_row = QHBoxLayout()
+        app_updates_button_row.setContentsMargins(0, 0, 0, 0)
+        app_updates_button_row.setSpacing(6)
+        app_updates_button_row.addWidget(check_app_update_button)
+        app_updates_button_row.addWidget(open_app_release_page_button)
+        app_updates_button_row.addStretch(1)
+        app_updates_layout.addLayout(app_updates_button_row)
+        app_update_status_label.setWordWrap(True)
+        app_updates_layout.addWidget(app_update_status_label)
+        advanced_layout.addWidget(app_updates_row)
         advanced_layout.addWidget(steam_auto_start_checkbox)
 
         setup_actions_widget = QWidget()
@@ -327,6 +349,7 @@ class SetupConfigurationSurface(QScrollArea):
         self.quickstart_label = quickstart_label
         self.quickstart_intro_label = quickstart_intro_label
         self.setup_readiness_label = setup_readiness_label
+        self.app_update_status_label = app_update_status_label
         self.secondary_panel = secondary_panel
         self.setup_group = setup_group
         self.advanced_group = advanced_group

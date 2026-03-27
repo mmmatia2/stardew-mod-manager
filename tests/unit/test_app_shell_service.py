@@ -23,6 +23,7 @@ from sdvmm.app.shell_service import (
     build_mods_compare_text,
 )
 from sdvmm.domain.models import (
+    AppUpdateStatus,
     AppConfig,
     InstallExecutionSummary,
     InstallOperationEntryRecord,
@@ -2655,6 +2656,49 @@ def test_resolve_smapi_update_page_url_uses_status_url_when_available(tmp_path: 
     )
 
     assert AppShellService.resolve_smapi_update_page_url(status) == "https://example.test/releases/latest"
+
+
+def test_check_app_update_status_uses_supplied_current_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    expected = AppUpdateStatus(
+        state="update_available",
+        current_version="1.1.5",
+        latest_version="1.1.6",
+        update_page_url="https://example.test/cinderleaf/releases/latest",
+        message="Cinderleaf 1.1.6 is available.",
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_check_app_update_status(*, current_version: str) -> AppUpdateStatus:
+        captured["current_version"] = current_version
+        return expected
+
+    monkeypatch.setattr(
+        shell_service_module,
+        "check_app_update_status_service",
+        _fake_check_app_update_status,
+    )
+
+    status = service.check_app_update_status(current_version="1.1.5")
+
+    assert captured["current_version"] == "1.1.5"
+    assert status == expected
+
+
+def test_resolve_app_update_page_url_uses_status_url_when_available(tmp_path: Path) -> None:
+    _ = tmp_path
+    status = AppUpdateStatus(
+        state="update_available",
+        current_version="1.1.5",
+        latest_version="1.1.6",
+        update_page_url="https://example.test/cinderleaf/releases/latest",
+        message="Cinderleaf 1.1.6 is available.",
+    )
+
+    assert (
+        AppShellService.resolve_app_update_page_url(status)
+        == "https://example.test/cinderleaf/releases/latest"
+    )
 
 
 def test_check_smapi_log_troubleshooting_accepts_manual_log_without_game_path(

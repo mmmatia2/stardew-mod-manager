@@ -74,6 +74,22 @@ class SmapiUpdateStatus:
     message: str
 
 
+AppUpdateState = Literal[
+    "update_available",
+    "up_to_date",
+    "unable_to_determine",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class AppUpdateStatus:
+    state: AppUpdateState
+    current_version: str | None
+    latest_version: str | None
+    update_page_url: str
+    message: str
+
+
 @dataclass(frozen=True, slots=True)
 class SmapiLogFinding:
     kind: SmapiLogFindingKind

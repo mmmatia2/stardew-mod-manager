@@ -6,6 +6,7 @@ from .models import (
     ArchiveRestoreResult,
     AppConfig,
     AppConfigValidationResult,
+    AppUpdateStatus,
     ModDiscoveryEntry,
     ModDiscoveryResult,
     DependencyPreflightFinding,
@@ -122,6 +123,7 @@ from .warning_codes import ParseWarningCode
 __all__ = [
     "AppConfig",
     "AppConfigValidationResult",
+    "AppUpdateStatus",
     "ArchivedModEntry",
     "ArchiveDeletePlan",
     "ArchiveDeleteResult",

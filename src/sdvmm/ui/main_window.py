@@ -92,6 +92,7 @@ from sdvmm.app.shell_service import (
 )
 from sdvmm.domain.models import (
     AppConfig,
+    AppUpdateStatus,
     BackupBundleInspectionResult,
     DownloadsIntakeResult,
     DownloadsWatchPollResult,
@@ -235,6 +236,7 @@ class MainWindow(QMainWindow):
         self._last_environment_status: GameEnvironmentStatus | None = None
         self._last_smapi_log_report: SmapiLogReport | None = None
         self._last_smapi_update_status: SmapiUpdateStatus | None = None
+        self._last_app_update_status: AppUpdateStatus | None = None
         self._thread_pool = QThreadPool.globalInstance()
         self._active_operation_name: str | None = None
         self._active_background_task: BackgroundTask | None = None
@@ -331,6 +333,12 @@ class MainWindow(QMainWindow):
         self._setup_readiness_label.setObjectName("setup_readiness_label")
         self._setup_readiness_label.setWordWrap(True)
         _set_auxiliary_label_style(self._setup_readiness_label)
+        self._setup_app_update_status_label = QLabel(
+            "Check for app updates to compare this install with the latest Cinderleaf release."
+        )
+        self._setup_app_update_status_label.setObjectName("setup_app_update_status_label")
+        self._setup_app_update_status_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._setup_app_update_status_label)
         self._discovery_results_state_label = QLabel(
             "Search by mod name, UniqueID, or author to build a source list."
         )
@@ -1000,6 +1008,10 @@ class MainWindow(QMainWindow):
         brand_title.setObjectName("workspace_nav_brand_title")
         brand_version = QLabel(f"Version {self._app_version_text}")
         brand_version.setObjectName("workspace_nav_brand_version")
+        brand_release_status = QLabel("Release check available in Setup")
+        brand_release_status.setObjectName("workspace_nav_brand_release_status")
+        brand_release_status.setWordWrap(True)
+        brand_release_status.setVisible(False)
         brand_subtitle = QLabel(_APP_BRAND_DESCRIPTOR)
         brand_subtitle.setObjectName("workspace_nav_brand_subtitle")
         brand_subtitle.setWordWrap(True)
@@ -1007,8 +1019,10 @@ class MainWindow(QMainWindow):
         brand_layout.addWidget(brand_eyebrow)
         brand_layout.addWidget(brand_title)
         brand_layout.addWidget(brand_version)
+        brand_layout.addWidget(brand_release_status)
         brand_layout.addWidget(brand_subtitle)
         rail_layout.addWidget(brand_panel)
+        self._workspace_nav_release_status_label = brand_release_status
 
         section_label = QLabel("Workspaces")
         section_label.setObjectName("workspace_nav_section_label")
@@ -1237,6 +1251,14 @@ class MainWindow(QMainWindow):
         check_nexus_button = QPushButton("Check Nexus connection")
         check_nexus_button.clicked.connect(self._on_check_nexus_connection)
         _set_utility_button_style(check_nexus_button)
+        check_app_update_button = QPushButton("Check for app updates")
+        check_app_update_button.setObjectName("setup_check_app_update_button")
+        check_app_update_button.clicked.connect(self._on_check_app_update)
+        _set_utility_button_style(check_app_update_button)
+        open_app_release_page_button = QPushButton("Open release page")
+        open_app_release_page_button.setObjectName("setup_open_app_release_page_button")
+        open_app_release_page_button.clicked.connect(self._on_open_app_release_page)
+        _set_utility_button_style(open_app_release_page_button)
         save_button = QPushButton("Save setup")
         save_button.setObjectName("setup_save_config_button")
         save_button.clicked.connect(self._on_save_config)
@@ -1278,9 +1300,12 @@ class MainWindow(QMainWindow):
             browse_real_archive_button=browse_real_archive_button,
             open_real_archive_button=open_real_archive_button,
             check_nexus_button=check_nexus_button,
+            check_app_update_button=check_app_update_button,
+            open_app_release_page_button=open_app_release_page_button,
             save_button=save_button,
             detect_environment_button=detect_environment_button,
             setup_readiness_label=self._setup_readiness_label,
+            app_update_status_label=self._setup_app_update_status_label,
             export_backup_button=export_backup_button,
             inspect_backup_button=inspect_backup_button,
             plan_restore_import_button=None,
@@ -1408,7 +1433,6 @@ class MainWindow(QMainWindow):
             flow_hint_label=flow_hint_label,
         )
         self._mods_page = mods_page
-        context_tabs.addTab(mods_page, "Mods")
 
         self._search_mods_button = QPushButton("Find mods")
         self._search_mods_button.setObjectName("discovery_search_button")
@@ -1460,7 +1484,6 @@ class MainWindow(QMainWindow):
             body_widget=discovery_page,
         )
         self._discovery_page = discovery_page
-        context_tabs.addTab(discovery_page, "Discover")
 
         compare_tab = QWidget()
         compare_tab.setObjectName("compare_workspace_body")
@@ -1517,7 +1540,6 @@ class MainWindow(QMainWindow):
             body_widget=compare_tab,
         )
         self._compare_page = compare_tab
-        context_tabs.addTab(compare_tab, "Compare")
 
         intake_tab = QWidget()
         intake_layout = QVBoxLayout(intake_tab)
@@ -1707,7 +1729,6 @@ class MainWindow(QMainWindow):
             body_widget=intake_tab,
         )
         self._packages_page = intake_tab
-        context_tabs.addTab(intake_tab, "Packages")
 
         self._refresh_archives_button = QPushButton("Refresh archive list")
         self._refresh_archives_button.setObjectName("archive_refresh_button")
@@ -1868,7 +1889,6 @@ class MainWindow(QMainWindow):
             subtitle="Confirm the package, destination, and safety summary before any write.",
             body_widget=plan_tab,
         )
-        context_tabs.addTab(review_page, "Review")
         self._plan_install_tab = review_page
         self._review_output_group = plan_tab.review_output_group
         self._review_output_group.setVisible(False)
@@ -1932,8 +1952,6 @@ class MainWindow(QMainWindow):
             body_widget=recovery_tab,
         )
         self._recovery_page = recovery_tab
-        context_tabs.addTab(recovery_tab, "Recovery")
-        context_tabs.addTab(archive_page, "Archive")
         setup_page = self._build_page_shell(
             object_name="setup_workspace_page",
             eyebrow="Configure once, reuse everywhere",
@@ -1943,7 +1961,14 @@ class MainWindow(QMainWindow):
         )
         self._setup_scroll = setup_scroll
         self._setup_page = setup_page
-        context_tabs.insertTab(1, setup_page, "Setup")
+        context_tabs.addTab(mods_page, "Mods")
+        context_tabs.addTab(setup_page, "Setup")
+        context_tabs.addTab(intake_tab, "Packages")
+        context_tabs.addTab(review_page, "Review")
+        context_tabs.addTab(discovery_page, "Discover")
+        context_tabs.addTab(compare_tab, "Compare")
+        context_tabs.addTab(archive_page, "Archive")
+        context_tabs.addTab(recovery_tab, "Recovery")
 
         workspace_shell = QFrame()
         workspace_shell.setObjectName("workspace_shell_frame")
@@ -1963,6 +1988,7 @@ class MainWindow(QMainWindow):
             self._check_smapi_update_button,
             self._check_smapi_log_button,
             self._load_smapi_log_button,
+            check_app_update_button,
             self._search_mods_button,
             self._remove_mod_button,
             self._rollback_mod_button,
@@ -1988,6 +2014,11 @@ class MainWindow(QMainWindow):
         self._execute_restore_import_button = execute_restore_import_button
         self._refresh_active_backup_bundle_context()
         self._refresh_restore_import_execution_state()
+        _set_feedback_label_state(
+            self._setup_app_update_status_label,
+            "empty",
+            "Check for app updates to compare this install with the latest Cinderleaf release.",
+        )
 
     def _set_programmatic_line_edit_text(self, line_edit: QLineEdit, text: str) -> None:
         line_edit.setText(text)
@@ -2226,10 +2257,36 @@ class MainWindow(QMainWindow):
 
     def _on_startup_smapi_log_check_completed(self, report: SmapiLogReport) -> None:
         self._on_check_smapi_log_completed(report)
-        self._startup_checks_completed = True
+        QTimer.singleShot(0, self._run_startup_app_update_check)
 
     def _on_startup_smapi_log_check_failed(self, message: str) -> None:
         self._set_status(message)
+        QTimer.singleShot(0, self._run_startup_app_update_check)
+
+    def _run_startup_app_update_check(self) -> None:
+        if not self._has_meaningful_startup_game_path():
+            self._startup_checks_completed = True
+            return
+        self._run_background_operation(
+            operation_name="Startup app update check",
+            running_label="Startup app update check",
+            started_status="Checking Cinderleaf release status on startup...",
+            error_title="Startup app update check failed",
+            task_fn=lambda: self._shell_service.check_app_update_status(
+                current_version=self._app_version_text,
+            ),
+            on_success=self._on_startup_app_update_check_completed,
+            on_failure=self._on_startup_app_update_check_failed,
+            show_error_dialog=False,
+        )
+
+    def _on_startup_app_update_check_completed(self, status: AppUpdateStatus) -> None:
+        self._apply_app_update_status(status)
+        if status.state == "update_available":
+            self._set_status(status.message)
+        self._startup_checks_completed = True
+
+    def _on_startup_app_update_check_failed(self, _message: str) -> None:
         self._startup_checks_completed = True
 
     def _on_browse_game(self) -> None:
@@ -3307,6 +3364,49 @@ class MainWindow(QMainWindow):
         self._smapi_update_status_label.setToolTip(status.message)
         self._set_inventory_output_text(build_smapi_update_status_text(status))
         self._set_status(status.message)
+
+    def _on_check_app_update(self) -> None:
+        self._run_background_operation(
+            operation_name="App update check",
+            running_label="App update check",
+            started_status="Checking Cinderleaf release status...",
+            error_title="App update check failed",
+            task_fn=lambda: self._shell_service.check_app_update_status(
+                current_version=self._app_version_text,
+            ),
+            on_success=self._on_check_app_update_completed,
+        )
+
+    def _on_check_app_update_completed(self, status: AppUpdateStatus) -> None:
+        self._apply_app_update_status(status)
+        self._set_setup_output_text(
+            f"{status.message}\nRelease page: {self._shell_service.resolve_app_update_page_url(status)}"
+        )
+        self._set_status(status.message)
+
+    def _apply_app_update_status(self, status: AppUpdateStatus) -> None:
+        self._last_app_update_status = status
+        _set_feedback_label_state(
+            self._setup_app_update_status_label,
+            _app_update_feedback_tone(status),
+            status.message,
+        )
+        summary = _app_update_summary_label(status)
+        self._workspace_nav_release_status_label.setVisible(True)
+        _set_feedback_label_state(
+            self._workspace_nav_release_status_label,
+            _app_update_feedback_tone(status),
+            summary,
+        )
+
+    def _on_open_app_release_page(self) -> None:
+        url = self._shell_service.resolve_app_update_page_url(self._last_app_update_status)
+        if not QDesktopServices.openUrl(QUrl(url)):
+            message = f"Could not open Cinderleaf releases page: {url}"
+            QMessageBox.critical(self, "Open failed", message)
+            self._set_status(message)
+            return
+        self._set_status(f"Opened Cinderleaf releases page: {url}")
 
     def _on_check_smapi_log(self) -> None:
         self._run_background_operation(
@@ -7435,6 +7535,24 @@ def _smapi_update_summary_label(status: SmapiUpdateStatus) -> str:
     if status.state == SMAPI_UNABLE_TO_DETERMINE:
         return "Unable to determine"
     return status.state.replace("_", " ")
+
+
+def _app_update_summary_label(status: AppUpdateStatus) -> str:
+    current = status.current_version or "unknown"
+    latest = status.latest_version or "unknown"
+    if status.state == "update_available":
+        return f"Update available ({current} -> {latest})"
+    if status.state == "up_to_date":
+        return f"App up to date ({current})"
+    return "Release status unavailable"
+
+
+def _app_update_feedback_tone(status: AppUpdateStatus) -> str:
+    if status.state == "update_available":
+        return "ready"
+    if status.state == "up_to_date":
+        return "muted"
+    return "empty"
 
 
 def _smapi_log_summary_label(report: SmapiLogReport) -> str:

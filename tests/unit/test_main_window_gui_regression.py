@@ -49,6 +49,7 @@ from sdvmm.domain.smapi_log_codes import SMAPI_LOG_NOT_FOUND, SMAPI_LOG_SOURCE_A
 from sdvmm.domain.update_codes import MISSING_UPDATE_KEY, UNSUPPORTED_UPDATE_KEY_FORMAT
 from sdvmm.domain.models import ArchivedModEntry
 from sdvmm.domain.models import AppConfig
+from sdvmm.domain.models import AppUpdateStatus
 from sdvmm.domain.models import BackupBundleInspectionItem
 from sdvmm.domain.models import BackupBundleInspectionResult
 from sdvmm.domain.models import DownloadsIntakeResult
@@ -195,6 +196,13 @@ def test_main_window_startup_auto_checks_run_in_sequence_when_game_path_is_ready
         notes=tuple(),
         message="No SMAPI log found yet.",
     )
+    app_update_status = AppUpdateStatus(
+        state="up_to_date",
+        current_version="1.1.5",
+        latest_version="1.1.5",
+        update_page_url="https://example.test/cinderleaf/releases/latest",
+        message="Cinderleaf is up to date.",
+    )
     captured: list[str] = []
 
     def _fake_run_background_operation(**kwargs) -> None:
@@ -209,6 +217,9 @@ def test_main_window_startup_auto_checks_run_in_sequence_when_game_path_is_ready
         if operation_name == "Startup SMAPI log check":
             kwargs["on_success"](smapi_log_report)
             return
+        if operation_name == "Startup app update check":
+            kwargs["on_success"](app_update_status)
+            return
         raise AssertionError(f"Unexpected startup operation: {operation_name}")
 
     monkeypatch.setattr(window, "_run_background_operation", _fake_run_background_operation)
@@ -221,10 +232,13 @@ def test_main_window_startup_auto_checks_run_in_sequence_when_game_path_is_ready
         "Startup environment check",
         "Startup SMAPI update check",
         "Startup SMAPI log check",
+        "Startup app update check",
     ]
     assert window._environment_status_label.text() == "mods detected, SMAPI detected"
     assert window._smapi_update_status_label.text() == "Up to date (4.1.0)"
     assert window._smapi_log_status_label.text() == "Log not found"
+    assert window._setup_app_update_status_label.text() == "Cinderleaf is up to date."
+    assert window._workspace_nav_release_status_label.text() == "App up to date (1.1.5)"
     assert window._startup_checks_completed is True
 
     window.close()
@@ -2341,12 +2355,12 @@ def test_main_window_top_level_context_tabs_follow_v1_workflow_order(
     assert [context_tabs.tabText(index) for index in range(context_tabs.count())] == [
         "Mods",
         "Setup",
-        "Discover",
-        "Compare",
         "Packages",
         "Review",
-        "Recovery",
+        "Discover",
+        "Compare",
         "Archive",
+        "Recovery",
     ]
 
 
@@ -2370,12 +2384,21 @@ def test_main_window_setup_surface_onboarding_copy_is_user_facing(
     setup_intro_label = main_window.findChild(QLabel, "setup_local_setup_intro_label")
     backup_intro_label = main_window.findChild(QLabel, "setup_backup_restore_intro_label")
     secondary_intro_label = main_window.findChild(QLabel, "setup_secondary_intro_label")
+    app_update_status_label = main_window.findChild(QLabel, "setup_app_update_status_label")
+    check_app_update_button = main_window.findChild(QPushButton, "setup_check_app_update_button")
+    open_app_release_page_button = main_window.findChild(
+        QPushButton,
+        "setup_open_app_release_page_button",
+    )
 
     assert main_intro_label is not None
     assert quickstart_intro_label is not None
     assert setup_intro_label is not None
     assert backup_intro_label is not None
     assert secondary_intro_label is not None
+    assert app_update_status_label is not None
+    assert check_app_update_button is not None
+    assert open_app_release_page_button is not None
     assert "confirm that Cinderleaf is ready" in main_intro_label.text()
     assert "common workflow" in quickstart_intro_label.text()
     assert "live game folder plus your real and sandbox Mods folders" in (
@@ -2392,6 +2415,9 @@ def test_main_window_setup_surface_onboarding_copy_is_user_facing(
     assert "backup bundle, a restore/import review, or migration detail" in (
         secondary_intro_label.text()
     )
+    assert "Check for app updates" in app_update_status_label.text()
+    assert check_app_update_button.text() == "Check for app updates"
+    assert open_app_release_page_button.text() == "Open release page"
 
 
 def test_main_window_setup_readiness_label_tracks_minimum_paths(
