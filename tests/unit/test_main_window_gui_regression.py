@@ -38,6 +38,7 @@ from sdvmm.app.shell_service import INSTALL_TARGET_SANDBOX_MODS
 from sdvmm.app.shell_service import IntakeUpdateCorrelation
 from sdvmm.app.shell_service import SCAN_TARGET_CONFIGURED_REAL_MODS
 from sdvmm.app.shell_service import SCAN_TARGET_SANDBOX_MODS
+from sdvmm.app.shell_service import ScanResult
 from sdvmm.domain.install_codes import BLOCKED
 from sdvmm.domain.discovery_codes import COMPATIBLE
 from sdvmm.domain.discovery_codes import DISCOVERY_SOURCE_NEXUS
@@ -255,6 +256,198 @@ def test_main_window_startup_app_update_failure_replaces_temporary_footer_status
 
     assert main_window._status_strip_label.text() == "Could not reach the Cinderleaf release feed."
     assert main_window._startup_checks_completed is True
+
+
+def test_main_window_startup_auto_scans_real_and_sandbox_without_switching_selected_source(
+    qapp: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    game_path = tmp_path / "Game"
+    real_mods = tmp_path / "RealMods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    _create_launchable_game_install_for_ui(game_path)
+    real_mods.mkdir()
+    sandbox_mods.mkdir()
+
+    window = MainWindow(shell_service=AppShellService(state_file=tmp_path / "app-state.json"))
+    window._game_path_input.setText(str(game_path))
+    window._mods_path_input.setText(str(real_mods))
+    window._sandbox_mods_path_input.setText(str(sandbox_mods))
+    window._config = AppConfig(
+        game_path=game_path,
+        mods_path=real_mods,
+        app_data_path=tmp_path / "AppData",
+        sandbox_mods_path=sandbox_mods,
+    )
+
+    environment_status = GameEnvironmentStatus(
+        game_path=game_path,
+        mods_path=real_mods,
+        smapi_path=game_path / "StardewModdingAPI.exe",
+        state_codes=("game_path_detected", "mods_path_detected", "smapi_detected"),
+    )
+    smapi_status = SmapiUpdateStatus(
+        state=SMAPI_UP_TO_DATE,
+        game_path=game_path,
+        smapi_path=game_path / "StardewModdingAPI.exe",
+        installed_version="4.1.0",
+        latest_version="4.1.0",
+        update_page_url="https://smapi.io",
+        message="SMAPI is up to date.",
+    )
+    smapi_log_report = SmapiLogReport(
+        state=SMAPI_LOG_NOT_FOUND,
+        source=SMAPI_LOG_SOURCE_AUTO_DETECTED,
+        log_path=None,
+        game_path=game_path,
+        findings=tuple(),
+        notes=tuple(),
+        message="No SMAPI log found yet.",
+    )
+    app_update_status = AppUpdateStatus(
+        state="up_to_date",
+        current_version="1.1.5",
+        latest_version="1.1.5",
+        update_page_url="https://example.test/cinderleaf/releases/latest",
+        message="Cinderleaf is up to date.",
+    )
+    real_scan_result = ScanResult(
+        target_kind=SCAN_TARGET_CONFIGURED_REAL_MODS,
+        scan_path=real_mods,
+        inventory=_mods_inventory(
+            _installed_mod_for_update_ui(
+                name="Real Alpha",
+                unique_id="Sample.RealAlpha",
+                folder_name="RealAlpha",
+            )
+        ),
+    )
+    sandbox_scan_result = ScanResult(
+        target_kind=SCAN_TARGET_SANDBOX_MODS,
+        scan_path=sandbox_mods,
+        inventory=_mods_inventory(
+            _installed_mod_for_update_ui(
+                name="Sandbox Beta",
+                unique_id="Sample.SandboxBeta",
+                folder_name="SandboxBeta",
+            )
+        ),
+    )
+    captured: list[str] = []
+
+    def _fake_run_background_operation(**kwargs) -> None:
+        operation_name = str(kwargs["operation_name"])
+        captured.append(operation_name)
+        if operation_name == "Startup environment check":
+            kwargs["on_success"](environment_status)
+            return
+        if operation_name == "Startup SMAPI update check":
+            kwargs["on_success"](smapi_status)
+            return
+        if operation_name == "Startup SMAPI log check":
+            kwargs["on_success"](smapi_log_report)
+            return
+        if operation_name == "Startup app update check":
+            kwargs["on_success"](app_update_status)
+            return
+        if operation_name == "Startup real Mods directory scan":
+            kwargs["on_success"](real_scan_result)
+            return
+        if operation_name == "Startup sandbox Mods directory scan":
+            kwargs["on_success"](sandbox_scan_result)
+            return
+        raise AssertionError(f"Unexpected startup operation: {operation_name}")
+
+    monkeypatch.setattr(window, "_run_background_operation", _fake_run_background_operation)
+
+    window.show()
+    for _ in range(8):
+        qapp.processEvents()
+
+    assert captured == [
+        "Startup environment check",
+        "Startup SMAPI update check",
+        "Startup SMAPI log check",
+        "Startup app update check",
+        "Startup real Mods directory scan",
+        "Startup sandbox Mods directory scan",
+    ]
+    assert window._current_scan_target() == SCAN_TARGET_CONFIGURED_REAL_MODS
+    assert window._current_inventory is not None
+    assert tuple(mod.unique_id for mod in window._current_inventory.mods) == ("Sample.RealAlpha",)
+    assert set(window._scan_results_by_target) == {
+        SCAN_TARGET_CONFIGURED_REAL_MODS,
+        SCAN_TARGET_SANDBOX_MODS,
+    }
+    assert window._status_strip_label.text() == "Cinderleaf is up to date."
+    assert window._startup_checks_completed is True
+
+    captured.clear()
+    sandbox_index = window._scan_target_combo.findData(SCAN_TARGET_SANDBOX_MODS)
+    assert sandbox_index >= 0
+    window._scan_target_combo.setCurrentIndex(sandbox_index)
+    qapp.processEvents()
+
+    assert captured == []
+    assert window._current_scan_target() == SCAN_TARGET_SANDBOX_MODS
+    assert window._current_inventory is not None
+    assert tuple(mod.unique_id for mod in window._current_inventory.mods) == (
+        "Sample.SandboxBeta",
+    )
+
+    real_index = window._scan_target_combo.findData(SCAN_TARGET_CONFIGURED_REAL_MODS)
+    assert real_index >= 0
+    window._scan_target_combo.setCurrentIndex(real_index)
+    qapp.processEvents()
+
+    assert captured == []
+    assert window._current_inventory is not None
+    assert tuple(mod.unique_id for mod in window._current_inventory.mods) == (
+        "Sample.RealAlpha",
+    )
+
+    window.close()
+    qapp.processEvents()
+
+
+def test_main_window_switching_to_unscanned_source_keeps_inventory_state_truthful(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    real_mods = Path(r"C:\Game\Mods")
+    sandbox_mods = Path(r"C:\Game\SandboxMods")
+    main_window._mods_path_input.setText(str(real_mods))
+    main_window._sandbox_mods_path_input.setText(str(sandbox_mods))
+
+    main_window._on_scan_completed(
+        ScanResult(
+            target_kind=SCAN_TARGET_CONFIGURED_REAL_MODS,
+            scan_path=real_mods,
+            inventory=_mods_inventory(
+                _installed_mod_for_update_ui(
+                    name="Real Alpha",
+                    unique_id="Sample.RealAlpha",
+                    folder_name="RealAlpha",
+                )
+            ),
+        )
+    )
+    qapp.processEvents()
+
+    sandbox_index = main_window._scan_target_combo.findData(SCAN_TARGET_SANDBOX_MODS)
+    assert sandbox_index >= 0
+    main_window._scan_target_combo.setCurrentIndex(sandbox_index)
+    qapp.processEvents()
+
+    assert set(main_window._scan_results_by_target) == {SCAN_TARGET_CONFIGURED_REAL_MODS}
+    assert main_window._current_scan_target() == SCAN_TARGET_SANDBOX_MODS
+    assert main_window._current_inventory is None
+    assert main_window._mods_table.rowCount() == 0
+    assert (
+        main_window._mods_inventory_state_label.text()
+        == "No inventory loaded yet. Scan the selected Mods source to populate the table."
+    )
 
 
 def test_main_window_close_persists_practical_setup_paths_across_restart(
@@ -538,7 +731,9 @@ def test_main_window_uses_custom_workspace_nav_rail_with_hidden_tab_bar(
     nav_rail = main_window.findChild(QFrame, "workspace_nav_rail")
     brand_panel = main_window.findChild(QFrame, "workspace_nav_brand_panel")
     brand_title = main_window.findChild(QLabel, "workspace_nav_brand_title")
+    brand_subtitle = main_window.findChild(QLabel, "workspace_nav_brand_subtitle")
     brand_version = main_window.findChild(QLabel, "workspace_nav_brand_version")
+    brand_release_status = main_window.findChild(QLabel, "workspace_nav_brand_release_status")
     footer_panel = main_window.findChild(QFrame, "workspace_nav_footer_panel")
     setup_button = main_window.findChild(QPushButton, "workspace_nav_button_setup")
     review_button = main_window.findChild(QPushButton, "workspace_nav_button_review")
@@ -547,7 +742,9 @@ def test_main_window_uses_custom_workspace_nav_rail_with_hidden_tab_bar(
     assert nav_rail is not None
     assert brand_panel is not None
     assert brand_title is not None
+    assert brand_subtitle is not None
     assert brand_version is not None
+    assert brand_release_status is not None
     assert footer_panel is not None
     assert setup_button is not None
     assert review_button is not None
@@ -556,7 +753,14 @@ def test_main_window_uses_custom_workspace_nav_rail_with_hidden_tab_bar(
     assert setup_button.property("navRole") == "workspace"
     assert review_button.property("navRole") == "workspace"
     assert brand_title.text() == "Cinderleaf"
+    assert brand_subtitle.text() == "for Stardew Valley"
     assert brand_version.text() == "Version 1.1.5"
+    brand_layout = brand_panel.layout()
+    assert brand_layout is not None
+    assert brand_layout.itemAt(1).widget() is brand_title
+    assert brand_layout.itemAt(2).widget() is brand_subtitle
+    assert brand_layout.itemAt(3).widget() is brand_version
+    assert brand_layout.itemAt(4).widget() is brand_release_status
 
 
 def test_main_window_workspace_nav_buttons_drive_context_pages(

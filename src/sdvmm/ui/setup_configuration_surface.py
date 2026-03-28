@@ -79,7 +79,7 @@ class SetupConfigurationSurface(QScrollArea):
 
             field_row = QHBoxLayout()
             field_row.setContentsMargins(0, 0, 0, 0)
-            field_row.setSpacing(6)
+            field_row.setSpacing(8)
             field_row.addWidget(field_widget, 1)
             field_row.addWidget(primary_button)
             if secondary_button is not None:
@@ -91,7 +91,7 @@ class SetupConfigurationSurface(QScrollArea):
         primary_actions_widget.setObjectName("setup_surface_primary_actions")
         primary_actions_layout = QHBoxLayout(primary_actions_widget)
         primary_actions_layout.setContentsMargins(0, 0, 0, 0)
-        primary_actions_layout.setSpacing(6)
+        primary_actions_layout.setSpacing(8)
         primary_actions_layout.addWidget(save_button)
         primary_actions_layout.addWidget(detect_environment_button)
         primary_actions_layout.addStretch(1)
@@ -200,7 +200,7 @@ class SetupConfigurationSurface(QScrollArea):
         nexus_row_layout.addWidget(nexus_label)
         nexus_field_row = QHBoxLayout()
         nexus_field_row.setContentsMargins(0, 0, 0, 0)
-        nexus_field_row.setSpacing(6)
+        nexus_field_row.setSpacing(8)
         nexus_field_row.addWidget(nexus_api_key_input, 1)
         nexus_field_row.addWidget(check_nexus_button)
         nexus_row_layout.addLayout(nexus_field_row)
@@ -216,7 +216,7 @@ class SetupConfigurationSurface(QScrollArea):
         app_updates_layout.addWidget(app_updates_label)
         app_updates_button_row = QHBoxLayout()
         app_updates_button_row.setContentsMargins(0, 0, 0, 0)
-        app_updates_button_row.setSpacing(6)
+        app_updates_button_row.setSpacing(8)
         app_updates_button_row.addWidget(check_app_update_button)
         app_updates_button_row.addWidget(open_app_release_page_button)
         app_updates_button_row.addStretch(1)
@@ -230,8 +230,8 @@ class SetupConfigurationSurface(QScrollArea):
         setup_actions_widget.setObjectName("setup_actions_widget")
         setup_actions_layout = QGridLayout(setup_actions_widget)
         setup_actions_layout.setContentsMargins(0, 0, 0, 0)
-        setup_actions_layout.setHorizontalSpacing(6)
-        setup_actions_layout.setVerticalSpacing(5)
+        setup_actions_layout.setHorizontalSpacing(8)
+        setup_actions_layout.setVerticalSpacing(6)
         action_buttons = tuple(
             button
             for button in (

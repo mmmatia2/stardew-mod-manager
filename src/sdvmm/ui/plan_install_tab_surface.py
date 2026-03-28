@@ -93,10 +93,10 @@ class PlanInstallTabSurface(QWidget):
         execute_group.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         execute_layout = QVBoxLayout(execute_group)
         execute_layout.setContentsMargins(10, 10, 10, 10)
-        execute_layout.setSpacing(6)
+        execute_layout.setSpacing(8)
 
         plan_actions = QHBoxLayout()
-        plan_actions.setSpacing(6)
+        plan_actions.setSpacing(8)
         plan_actions.addWidget(plan_install_button)
         plan_actions.addWidget(run_install_button)
         plan_actions.addStretch(1)

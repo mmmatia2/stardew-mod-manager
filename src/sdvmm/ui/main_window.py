@@ -215,6 +215,7 @@ class MainWindow(QMainWindow):
         self._config: AppConfig | None = None
         self._pending_install_plan: SandboxInstallPlan | None = None
         self._current_inventory: ModsInventory | None = None
+        self._scan_results_by_target: dict[str, ScanResult] = {}
         self._current_update_report: ModUpdateReport | None = None
         self._current_mods_compare_result: ModsCompareResult | None = None
         self._current_discovery_result: ModDiscoveryResult | None = None
@@ -244,6 +245,10 @@ class MainWindow(QMainWindow):
         self._background_action_buttons: tuple[QPushButton, ...] = tuple()
         self._startup_checks_scheduled = False
         self._startup_checks_completed = False
+        self._startup_auto_scan_started = False
+        self._startup_auto_scan_queue: list[str] = []
+        self._startup_auto_scan_failures: list[str] = []
+        self._startup_auto_scan_status_restore_text: str | None = None
         self._preserve_package_selection_on_zip_path_change = False
         self._preserve_package_inspection_on_zip_path_change = False
         self._auto_overwrite_package_path: str | None = None
@@ -377,7 +382,7 @@ class MainWindow(QMainWindow):
         )
         inventory_source_intent_actions_layout = QHBoxLayout(self._inventory_source_intent_actions_widget)
         inventory_source_intent_actions_layout.setContentsMargins(0, 0, 0, 0)
-        inventory_source_intent_actions_layout.setSpacing(6)
+        inventory_source_intent_actions_layout.setSpacing(8)
         inventory_source_intent_actions_layout.addWidget(self._inventory_source_intent_actions_label)
         inventory_source_intent_actions_layout.addWidget(self._mark_local_private_button)
         inventory_source_intent_actions_layout.addWidget(self._disable_tracking_button)
@@ -405,7 +410,7 @@ class MainWindow(QMainWindow):
             self._inventory_sandbox_sync_actions_widget
         )
         inventory_sandbox_sync_actions_layout.setContentsMargins(0, 0, 0, 0)
-        inventory_sandbox_sync_actions_layout.setSpacing(6)
+        inventory_sandbox_sync_actions_layout.setSpacing(8)
         inventory_sandbox_sync_actions_layout.addWidget(
             self._inventory_sandbox_sync_actions_label
         )
@@ -890,10 +895,7 @@ class MainWindow(QMainWindow):
         )
         self._overwrite_checkbox.toggled.connect(self._invalidate_pending_plan)
         self._overwrite_checkbox.toggled.connect(self._on_overwrite_checkbox_toggled)
-        self._scan_target_combo.currentIndexChanged.connect(self._refresh_scan_context_preview)
-        self._scan_target_combo.currentIndexChanged.connect(
-            self._refresh_inventory_sandbox_sync_action_state
-        )
+        self._scan_target_combo.currentIndexChanged.connect(self._on_scan_target_changed)
         self._install_target_combo.currentIndexChanged.connect(self._on_install_target_changed)
         self._game_path_input.textChanged.connect(self._on_game_path_changed)
         self._mods_path_input.textChanged.connect(self._refresh_scan_context_preview)
@@ -1018,9 +1020,9 @@ class MainWindow(QMainWindow):
 
         brand_layout.addWidget(brand_eyebrow)
         brand_layout.addWidget(brand_title)
+        brand_layout.addWidget(brand_subtitle)
         brand_layout.addWidget(brand_version)
         brand_layout.addWidget(brand_release_status)
-        brand_layout.addWidget(brand_subtitle)
         rail_layout.addWidget(brand_panel)
         self._workspace_nav_release_status_label = brand_release_status
 
@@ -1334,9 +1336,9 @@ class MainWindow(QMainWindow):
         inventory_action_band.setObjectName("mods_inventory_action_band")
         inventory_action_band_layout = QVBoxLayout(inventory_action_band)
         inventory_action_band_layout.setContentsMargins(0, 0, 0, 0)
-        inventory_action_band_layout.setSpacing(4)
+        inventory_action_band_layout.setSpacing(6)
         source_row = QHBoxLayout()
-        source_row.setSpacing(8)
+        source_row.setSpacing(10)
         scan_source_label = QLabel("Source")
         _set_auxiliary_label_style(scan_source_label)
         source_row.addWidget(scan_source_label)
@@ -1354,7 +1356,7 @@ class MainWindow(QMainWindow):
         source_row.addWidget(self._open_remote_page_button)
         inventory_action_band_layout.addLayout(source_row)
         selected_mod_actions_row = QHBoxLayout()
-        selected_mod_actions_row.setSpacing(8)
+        selected_mod_actions_row.setSpacing(10)
         selected_mod_actions_label = QLabel("Selected mod actions")
         _set_auxiliary_label_style(selected_mod_actions_label)
         selected_mod_actions_row.addWidget(selected_mod_actions_label)
@@ -1375,8 +1377,8 @@ class MainWindow(QMainWindow):
         game_smapi_tab = QWidget()
         game_smapi_layout = QGridLayout(game_smapi_tab)
         game_smapi_layout.setContentsMargins(8, 6, 8, 6)
-        game_smapi_layout.setHorizontalSpacing(8)
-        game_smapi_layout.setVerticalSpacing(4)
+        game_smapi_layout.setHorizontalSpacing(10)
+        game_smapi_layout.setVerticalSpacing(6)
         self._check_smapi_update_button = QPushButton("Check SMAPI version")
         self._check_smapi_update_button.clicked.connect(self._on_check_smapi_update)
         _set_utility_button_style(self._check_smapi_update_button)
@@ -1493,7 +1495,7 @@ class MainWindow(QMainWindow):
         compare_actions_widget = QWidget()
         compare_actions_layout = QHBoxLayout(compare_actions_widget)
         compare_actions_layout.setContentsMargins(0, 0, 0, 0)
-        compare_actions_layout.setSpacing(8)
+        compare_actions_layout.setSpacing(10)
         compare_actions_layout.addWidget(self._compare_real_vs_sandbox_button)
         compare_actions_layout.addWidget(_context_caption("Show"))
         compare_actions_layout.addWidget(self._compare_category_filter_combo)
@@ -1591,7 +1593,7 @@ class MainWindow(QMainWindow):
         primary_path_actions_widget.setObjectName("packages_watcher_primary_actions_widget")
         primary_path_actions_layout = QHBoxLayout(primary_path_actions_widget)
         primary_path_actions_layout.setContentsMargins(0, 0, 0, 0)
-        primary_path_actions_layout.setSpacing(6)
+        primary_path_actions_layout.setSpacing(8)
         primary_path_actions_layout.addWidget(browse_downloads_button)
         primary_path_actions_layout.addWidget(open_downloads_button)
         primary_path_actions_layout.addStretch(1)
@@ -1617,7 +1619,7 @@ class MainWindow(QMainWindow):
         )
         secondary_path_actions_layout = QHBoxLayout(secondary_path_actions_widget)
         secondary_path_actions_layout.setContentsMargins(0, 0, 0, 0)
-        secondary_path_actions_layout.setSpacing(6)
+        secondary_path_actions_layout.setSpacing(8)
         secondary_path_actions_layout.addWidget(browse_secondary_downloads_button)
         secondary_path_actions_layout.addWidget(open_secondary_downloads_button)
         secondary_path_actions_layout.addStretch(1)
@@ -1699,7 +1701,7 @@ class MainWindow(QMainWindow):
         detected_actions_widget = QWidget()
         detected_actions_layout = QHBoxLayout(detected_actions_widget)
         detected_actions_layout.setContentsMargins(0, 0, 0, 0)
-        detected_actions_layout.setSpacing(6)
+        detected_actions_layout.setSpacing(8)
         detected_actions_layout.addStretch(1)
         detected_actions_layout.addWidget(self._plan_selected_intake_button)
         detected_actions_layout.addWidget(self._stage_update_intake_button)
@@ -1906,7 +1908,7 @@ class MainWindow(QMainWindow):
         recovery_group_layout.setContentsMargins(8, 6, 8, 6)
         recovery_group_layout.setSpacing(4)
         recovery_controls = QGridLayout()
-        recovery_controls.setHorizontalSpacing(6)
+        recovery_controls.setHorizontalSpacing(8)
         recovery_controls.setVerticalSpacing(4)
         recovery_controls.setColumnStretch(1, 1)
         recovery_controls.addWidget(QLabel("Recorded install"), 0, 0)
@@ -2173,7 +2175,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(150, self._run_startup_checks_if_meaningful)
             return
         if not self._has_meaningful_startup_game_path():
-            self._startup_checks_completed = True
+            self._finish_startup_checks()
             return
 
         self._run_background_operation(
@@ -2203,17 +2205,17 @@ class MainWindow(QMainWindow):
         self._apply_environment_status(status)
         self._set_status("Startup environment check complete.")
         if "invalid_game_path" in status.state_codes:
-            self._startup_checks_completed = True
+            self._finish_startup_checks()
             return
         QTimer.singleShot(0, self._run_startup_smapi_update_check)
 
     def _on_startup_environment_check_failed(self, message: str) -> None:
         self._set_status(message)
-        self._startup_checks_completed = True
+        self._finish_startup_checks()
 
     def _run_startup_smapi_update_check(self) -> None:
         if not self._has_meaningful_startup_game_path():
-            self._startup_checks_completed = True
+            self._finish_startup_checks()
             return
         self._run_background_operation(
             operation_name="Startup SMAPI update check",
@@ -2239,7 +2241,7 @@ class MainWindow(QMainWindow):
 
     def _run_startup_smapi_log_check(self) -> None:
         if not self._has_meaningful_startup_game_path():
-            self._startup_checks_completed = True
+            self._finish_startup_checks()
             return
         self._run_background_operation(
             operation_name="Startup SMAPI log check",
@@ -2265,7 +2267,7 @@ class MainWindow(QMainWindow):
 
     def _run_startup_app_update_check(self) -> None:
         if not self._has_meaningful_startup_game_path():
-            self._startup_checks_completed = True
+            self._finish_startup_checks()
             return
         self._run_background_operation(
             operation_name="Startup app update check",
@@ -2283,11 +2285,119 @@ class MainWindow(QMainWindow):
     def _on_startup_app_update_check_completed(self, status: AppUpdateStatus) -> None:
         self._apply_app_update_status(status)
         self._set_status(self._startup_app_update_final_status_text(status=status))
-        self._startup_checks_completed = True
+        self._finish_startup_checks()
 
     def _on_startup_app_update_check_failed(self, message: str) -> None:
         self._set_status(self._startup_app_update_final_status_text(failure_message=message))
+        self._finish_startup_checks()
+
+    def _finish_startup_checks(self) -> None:
         self._startup_checks_completed = True
+        QTimer.singleShot(0, self._maybe_start_startup_auto_scan)
+
+    def _maybe_start_startup_auto_scan(self) -> None:
+        if self._startup_auto_scan_started:
+            return
+        if self._active_operation_name is not None:
+            QTimer.singleShot(150, self._maybe_start_startup_auto_scan)
+            return
+
+        queue = list(self._startup_auto_scan_candidates())
+        if not queue:
+            return
+
+        self._startup_auto_scan_started = True
+        self._startup_auto_scan_queue = queue
+        self._startup_auto_scan_failures = []
+        status_text = self._status_strip_label.text().strip()
+        self._startup_auto_scan_status_restore_text = status_text or None
+        self._run_next_startup_auto_scan()
+
+    def _startup_auto_scan_candidates(self) -> tuple[str, ...]:
+        if self._config is None:
+            return tuple()
+
+        candidates: list[str] = []
+        if self._has_existing_directory_text(self._mods_path_input.text()):
+            candidates.append(SCAN_TARGET_CONFIGURED_REAL_MODS)
+        if self._has_existing_directory_text(self._sandbox_mods_path_input.text()):
+            candidates.append(SCAN_TARGET_SANDBOX_MODS)
+        if len(candidates) <= 1:
+            return tuple(candidates)
+
+        current_target = self._current_scan_target()
+        ordered = sorted(
+            candidates,
+            key=lambda target: (0 if target == current_target else 1, target),
+        )
+        return tuple(ordered)
+
+    @staticmethod
+    def _has_existing_directory_text(path_text: str) -> bool:
+        raw_path = path_text.strip()
+        if not raw_path:
+            return False
+        path = Path(raw_path).expanduser()
+        return path.exists() and path.is_dir()
+
+    def _run_next_startup_auto_scan(self) -> None:
+        if not self._startup_auto_scan_queue:
+            self._finalize_startup_auto_scan()
+            return
+
+        scan_target = self._startup_auto_scan_queue.pop(0)
+        target_label = self._scan_target_label(scan_target)
+        self._run_background_operation(
+            operation_name=f"Startup {target_label} scan",
+            running_label=f"Startup {target_label} scan",
+            started_status="Refreshing configured mod folders in the background...",
+            error_title=f"Startup {target_label} scan failed",
+            task_fn=lambda _target=scan_target: self._shell_service.scan_with_target(
+                scan_target=_target,
+                configured_mods_path_text=self._mods_path_input.text(),
+                sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+                real_archive_path_text=self._real_archive_path_input.text(),
+                sandbox_archive_path_text=self._sandbox_archive_path_input.text(),
+                existing_config=self._config,
+            ),
+            on_success=lambda result, _target=scan_target: self._on_startup_auto_scan_completed(
+                result,
+                _target,
+            ),
+            on_failure=lambda message, _target=scan_target: self._on_startup_auto_scan_failed(
+                message,
+                _target,
+            ),
+            show_error_dialog=False,
+        )
+
+    def _on_startup_auto_scan_completed(
+        self,
+        result: ScanResult,
+        expected_target: str,
+    ) -> None:
+        self._cache_scan_result(result)
+        if result.target_kind == expected_target and result.target_kind == self._current_scan_target():
+            self._show_scan_result(result)
+        QTimer.singleShot(0, self._run_next_startup_auto_scan)
+
+    def _on_startup_auto_scan_failed(self, message: str, target: str) -> None:
+        self._startup_auto_scan_failures.append(
+            f"{self._scan_target_label(target)} scan failed: {message}"
+        )
+        QTimer.singleShot(0, self._run_next_startup_auto_scan)
+
+    def _finalize_startup_auto_scan(self) -> None:
+        restore_status = self._startup_auto_scan_status_restore_text
+        failures = tuple(self._startup_auto_scan_failures)
+        self._startup_auto_scan_queue = []
+        self._startup_auto_scan_failures = []
+        self._startup_auto_scan_status_restore_text = None
+        if failures:
+            self._set_status(failures[0])
+            return
+        if restore_status:
+            self._set_status(restore_status)
 
     def _on_browse_game(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -2826,8 +2936,8 @@ class MainWindow(QMainWindow):
         )
 
     def _on_scan_completed(self, result: ScanResult) -> None:
-        self._render_inventory(result.inventory)
-        self._set_scan_context(result.scan_path, self._scan_target_label(result.target_kind))
+        self._cache_scan_result(result)
+        self._show_scan_result(result)
         self._set_status(f"Scan complete: {len(result.inventory.mods)} mods")
 
     def _on_compare_real_and_sandbox(self) -> None:
@@ -2968,6 +3078,11 @@ class MainWindow(QMainWindow):
         history_before_install = self._install_operation_history
         self._refresh_install_operation_selector()
         self._select_new_install_operation_for_recovery(history_before_install)
+        self._cache_inventory_for_target(
+            result.destination_kind,
+            result.scan_context_path,
+            result.inventory,
+        )
         self._render_inventory(result.inventory)
         self._set_plan_install_output_text(build_sandbox_install_result_text(result))
         self._set_current_scan_target(result.destination_kind)
@@ -3224,6 +3339,11 @@ class MainWindow(QMainWindow):
         self,
         result: InstallRecoveryExecutionResult,
     ) -> None:
+        self._cache_inventory_for_target(
+            result.destination_kind,
+            result.scan_context_path,
+            result.inventory,
+        )
         self._render_inventory(result.inventory)
         self._set_current_scan_target(result.destination_kind)
         self._set_scan_context(
@@ -3727,6 +3847,11 @@ class MainWindow(QMainWindow):
         )
 
     def _on_remove_selected_mod_completed(self, result: ModRemovalResult) -> None:
+        self._cache_inventory_for_target(
+            result.destination_kind,
+            result.scan_context_path,
+            result.inventory,
+        )
         self._render_inventory(result.inventory)
         self._set_current_scan_target(result.destination_kind)
         self._set_scan_context(
@@ -3870,6 +3995,11 @@ class MainWindow(QMainWindow):
         )
 
     def _on_rollback_selected_mod_completed(self, result: ModRollbackResult) -> None:
+        self._cache_inventory_for_target(
+            result.destination_kind,
+            result.scan_context_path,
+            result.inventory,
+        )
         self._render_inventory(result.inventory)
         self._set_current_scan_target(result.destination_kind)
         self._set_scan_context(
@@ -3978,6 +4108,11 @@ class MainWindow(QMainWindow):
         )
 
     def _on_restore_selected_archive_completed(self, result: ArchiveRestoreResult) -> None:
+        self._cache_inventory_for_target(
+            result.destination_kind,
+            result.scan_context_path,
+            result.inventory,
+        )
         self._render_inventory(result.inventory)
         self._set_current_scan_target(result.destination_kind)
         self._set_scan_context(
@@ -4229,6 +4364,76 @@ class MainWindow(QMainWindow):
         self._refresh_detected_intakes_for_current_inventory()
         self._refresh_discovery_correlations()
         self._refresh_workflow_surface_states()
+
+    def _cache_scan_result(self, result: ScanResult) -> None:
+        self._scan_results_by_target[result.target_kind] = result
+
+    def _cache_inventory_for_target(
+        self,
+        target_kind: str,
+        scan_path: Path,
+        inventory: ModsInventory,
+    ) -> None:
+        self._cache_scan_result(
+            ScanResult(
+                target_kind=target_kind,
+                scan_path=scan_path,
+                inventory=inventory,
+            )
+        )
+
+    def _show_scan_result(self, result: ScanResult) -> None:
+        self._render_inventory(result.inventory)
+        self._set_scan_context(result.scan_path, self._scan_target_label(result.target_kind))
+
+    def _configured_scan_path_for_target(self, target: str) -> Path | None:
+        if target == SCAN_TARGET_CONFIGURED_REAL_MODS:
+            raw_path = self._mods_path_input.text().strip()
+        else:
+            raw_path = self._sandbox_mods_path_input.text().strip()
+        if not raw_path:
+            return None
+        return Path(raw_path).expanduser()
+
+    def _cached_scan_result_for_target(self, target: str) -> ScanResult | None:
+        cached_result = self._scan_results_by_target.get(target)
+        if cached_result is None:
+            return None
+
+        configured_path = self._configured_scan_path_for_target(target)
+        if configured_path is None:
+            self._scan_results_by_target.pop(target, None)
+            return None
+
+        if str(cached_result.scan_path.expanduser()) != str(configured_path):
+            self._scan_results_by_target.pop(target, None)
+            return None
+        return cached_result
+
+    def _clear_visible_inventory_for_unscanned_target(self) -> None:
+        self._current_inventory = None
+        self._current_update_report = None
+        self._guided_update_unique_ids = tuple()
+        was_sorting = self._mods_table.isSortingEnabled()
+        self._mods_table.setSortingEnabled(False)
+        self._mods_table.clearContents()
+        self._mods_table.setRowCount(0)
+        self._mods_table.clearSelection()
+        self._mods_table.setSortingEnabled(was_sorting)
+        self._set_inventory_output_text(
+            "No inventory loaded yet for the selected Mods source. Scan the selected source to populate the table."
+        )
+        self._refresh_detected_intakes_for_current_inventory()
+        self._refresh_discovery_correlations()
+        self._refresh_workflow_surface_states()
+
+    def _restore_cached_inventory_for_selected_source(self) -> None:
+        cached_result = self._cached_scan_result_for_target(self._current_scan_target())
+        if cached_result is not None:
+            self._show_scan_result(cached_result)
+            return
+        if self._scan_results_by_target:
+            self._clear_visible_inventory_for_unscanned_target()
 
     def _apply_update_report(self, report: ModUpdateReport) -> None:
         if self._current_inventory is None:
@@ -6338,6 +6543,11 @@ class MainWindow(QMainWindow):
             context_text = f"{context_text} (path unset)"
         self._scan_context_label.setText(context_text)
         self._scan_context_label.setToolTip(path_text)
+
+    def _on_scan_target_changed(self, *_: object) -> None:
+        self._refresh_scan_context_preview()
+        self._restore_cached_inventory_for_selected_source()
+        self._refresh_inventory_sandbox_sync_action_state()
 
     def _refresh_nexus_status(self, *, validated: bool) -> None:
         status = self._shell_service.get_nexus_integration_status(

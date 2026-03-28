@@ -269,6 +269,14 @@ def _candidate_log_directories(*, game_path: Path | None) -> tuple[Path, ...]:
     if game_path is not None:
         directories.append(game_path / "ErrorLogs")
 
+    appdata_raw = os.getenv("APPDATA", "").strip()
+    if appdata_raw:
+        directories.append(Path(appdata_raw).expanduser() / "StardewValley" / "ErrorLogs")
+
+    local_appdata_raw = os.getenv("LOCALAPPDATA", "").strip()
+    if local_appdata_raw:
+        directories.append(Path(local_appdata_raw).expanduser() / "StardewValley" / "ErrorLogs")
+
     xdg_config_home_raw = os.getenv("XDG_CONFIG_HOME", "").strip()
     if xdg_config_home_raw:
         directories.append(Path(xdg_config_home_raw).expanduser() / "StardewValley" / "ErrorLogs")

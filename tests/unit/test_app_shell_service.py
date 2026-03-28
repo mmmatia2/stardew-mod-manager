@@ -2747,6 +2747,35 @@ def test_check_smapi_log_troubleshooting_requires_game_path_for_auto_lookup(tmp_
         )
 
 
+def test_check_smapi_log_troubleshooting_auto_detects_windows_appdata_log(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AppShellService(state_file=tmp_path / "app-state.json")
+    game_path = tmp_path / "Game"
+    _create_launchable_game_install(game_path)
+    appdata = tmp_path / "AppData" / "Roaming"
+    logs_dir = appdata / "StardewValley" / "ErrorLogs"
+    logs_dir.mkdir(parents=True)
+    latest_log = logs_dir / "SMAPI-latest.txt"
+    latest_log.write_text("[SMAPI] test log\n", encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+    result = service.check_smapi_log_troubleshooting(
+        game_path_text=str(game_path),
+        log_path_text="",
+        existing_config=None,
+    )
+
+    assert result.state == "parsed"
+    assert result.source == "auto_detected"
+    assert result.log_path == latest_log
+    assert result.game_path == game_path
+
+
 def test_inspect_zip_rejects_missing_package_path(tmp_path: Path) -> None:
     service = AppShellService(state_file=tmp_path / "app-state.json")
 
