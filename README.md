@@ -4,7 +4,7 @@
 
 `for Stardew Valley` is a descriptive subtitle, not an official affiliation. Cinderleaf is an independent community tool and is not affiliated with or endorsed by ConcernedApe.
 
-Current release candidate prepared in this branch: **1.1.6**
+Current public release: **1.1.6**
 
 ## Why use it
 
@@ -16,11 +16,17 @@ Current release candidate prepared in this branch: **1.1.6**
 
 ## Screenshots
 
+These screenshots reflect the current low-height-compatible UI at `1366x768`.
+
 ![Cinderleaf setup overview](media/nexus-screenshots/01-setup-overview.png)
 
 ![Cinderleaf mods workspace](media/nexus-screenshots/02-mods-workspace.png)
 
-![Cinderleaf packages workspace](media/nexus-screenshots/05-packages-workspace.png)
+![Cinderleaf discover workspace](media/nexus-screenshots/03-discover-workspace.png)
+
+![Cinderleaf compare workspace](media/nexus-screenshots/04-compare-workspace.png)
+
+![Cinderleaf archive workspace](media/nexus-screenshots/08-archive-workspace.png)
 
 ## Requirements
 
@@ -32,8 +38,8 @@ Current release candidate prepared in this branch: **1.1.6**
 
 The supported public build is a Windows portable zip published to GitHub Releases.
 
-1. Open the repository's GitHub Releases page.
-2. When the `1.1.6` GitHub Release is published, download `cinderleaf-1.1.6-windows-portable.zip`.
+1. Open the repository's [GitHub Releases page](https://github.com/meiameiameia/stardew-mod-manager/releases).
+2. Download `cinderleaf-1.1.6-windows-portable.zip`.
 3. Extract it to a normal folder.
 4. Run `Cinderleaf.exe`.
 
@@ -43,7 +49,7 @@ Current release caveats:
 
 - this is a portable folder, not an installer
 - Windows reputation prompts are still expected because code signing is not in place yet
-- auto-update is not implemented yet
+- Cinderleaf can notify you about newer releases, but it does not download or install updates for you
 
 ## Recommended workflow
 
