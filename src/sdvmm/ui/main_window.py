@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QTableWidget,
@@ -109,6 +110,7 @@ from sdvmm.domain.models import (
     ModRemovalResult,
     ModRollbackResult,
     RecoveryExecutionRecord,
+    SmapiMissingDependency,
     SmapiLogReport,
     ModUpdateStatus,
     ModUpdateReport,
@@ -197,6 +199,10 @@ _COMPARE_FILTER_VERSION_MISMATCH = "version_mismatch"
 _COMPARE_FILTER_AMBIGUOUS = "ambiguous_match"
 _COMPARE_FILTER_SAME_VERSION = "same_version"
 _COMPARE_FILTER_ALL = "all_categories"
+_SMAPI_TROUBLESHOOTING_DETAILS_MIN_HEIGHT = 74
+_SMAPI_TROUBLESHOOTING_DETAILS_MAX_HEIGHT = 96
+_SMAPI_TROUBLESHOOTING_DETAILS_COMPACT_MIN_HEIGHT = 88
+_SMAPI_TROUBLESHOOTING_DETAILS_COMPACT_MAX_HEIGHT = 136
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,17 +502,20 @@ class MainWindow(QMainWindow):
         self._compare_results_table.verticalHeader().setVisible(False)
         self._compare_results_table.setAlternatingRowColors(True)
         self._compare_results_table.setSortingEnabled(True)
+        self._compare_results_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._compare_results_table.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self._compare_results_table.itemSelectionChanged.connect(
             self._on_compare_selection_changed
         )
-        compare_header = self._compare_results_table.horizontalHeader()
-        compare_header.setMinimumSectionSize(64)
-        compare_header.setStretchLastSection(False)
-        compare_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        compare_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        compare_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        compare_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        compare_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        _configure_resizable_table(
+            self._compare_results_table,
+            minimum_visible_rows=8,
+            minimum_section_size=64,
+            initial_widths=(230, 140, 96, 110, 240),
+        )
         self._open_remote_page_button = QPushButton("Open update page")
         self._open_remote_page_button.setObjectName("inventory_open_remote_page_button")
         self._open_remote_page_button.setEnabled(False)
@@ -652,15 +661,12 @@ class MainWindow(QMainWindow):
         self._mods_table.setSortingEnabled(True)
         self._mods_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._mods_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        mods_header = self._mods_table.horizontalHeader()
-        mods_header.setMinimumSectionSize(64)
-        mods_header.setStretchLastSection(False)
-        mods_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        mods_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        mods_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        mods_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        mods_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        mods_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        _configure_resizable_table(
+            self._mods_table,
+            minimum_visible_rows=8,
+            minimum_section_size=64,
+            initial_widths=(250, 220, 96, 96, 140, 180),
+        )
 
         self._discovery_table = QTableWidget(0, 8)
         self._discovery_table.setObjectName("discovery_results_table")
@@ -677,18 +683,12 @@ class MainWindow(QMainWindow):
         self._discovery_table.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        discovery_header = self._discovery_table.horizontalHeader()
-        discovery_header.setMinimumSectionSize(72)
-        discovery_header.setStretchLastSection(False)
-        discovery_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        discovery_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        discovery_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        discovery_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        discovery_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        discovery_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        discovery_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        discovery_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
-        self._discovery_table.setColumnWidth(7, 180)
+        _configure_resizable_table(
+            self._discovery_table,
+            minimum_visible_rows=7,
+            minimum_section_size=72,
+            initial_widths=(220, 220, 150, 110, 130, 180, 170, 180),
+        )
 
         self._archive_table = QTableWidget(0, 6)
         self._archive_table.setObjectName("archive_results_table")
@@ -703,15 +703,12 @@ class MainWindow(QMainWindow):
         self._archive_table.setSortingEnabled(True)
         self._archive_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._archive_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        archive_header = self._archive_table.horizontalHeader()
-        archive_header.setMinimumSectionSize(64)
-        archive_header.setStretchLastSection(False)
-        archive_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        archive_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        archive_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        archive_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        archive_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        archive_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        _configure_resizable_table(
+            self._archive_table,
+            minimum_visible_rows=7,
+            minimum_section_size=64,
+            initial_widths=(120, 190, 180, 220, 190, 96),
+        )
 
         self._inventory_output_box = QPlainTextEdit()
         self._inventory_output_box.setObjectName("inventory_output_box")
@@ -859,6 +856,49 @@ class MainWindow(QMainWindow):
         self._environment_status_label.setObjectName("top_context_environment_status_value")
         self._smapi_update_status_label = QLabel("Not checked")
         self._smapi_log_status_label = QLabel("Not checked")
+        self._smapi_troubleshooting_summary_label = QLabel(
+            "No SMAPI log parsed yet. Launch with SMAPI, then check the latest log."
+        )
+        self._smapi_troubleshooting_summary_label.setObjectName(
+            "mods_smapi_troubleshooting_summary_label"
+        )
+        self._smapi_troubleshooting_summary_label.setWordWrap(True)
+        _set_auxiliary_label_style(self._smapi_troubleshooting_summary_label)
+        self._smapi_dependency_selector = QComboBox()
+        self._smapi_dependency_selector.setObjectName("mods_smapi_dependency_selector")
+        self._smapi_dependency_selector.setVisible(False)
+        _configure_combo_box_readability(
+            self._smapi_dependency_selector,
+            minimum_contents_length=22,
+            sample_text="Pathoschild.ContentPatcher",
+        )
+        self._open_smapi_dependency_in_discover_button = QPushButton("Open in Discover")
+        self._open_smapi_dependency_in_discover_button.setObjectName(
+            "mods_smapi_dependency_discover_button"
+        )
+        self._open_smapi_dependency_in_discover_button.clicked.connect(
+            self._on_open_smapi_dependency_in_discover
+        )
+        _set_utility_button_style(self._open_smapi_dependency_in_discover_button)
+        self._open_smapi_dependency_in_discover_button.setVisible(False)
+        self._smapi_troubleshooting_details_box = QPlainTextEdit()
+        self._smapi_troubleshooting_details_box.setObjectName(
+            "mods_smapi_troubleshooting_details_box"
+        )
+        self._smapi_troubleshooting_details_box.setReadOnly(True)
+        self._smapi_troubleshooting_details_box.setLineWrapMode(
+            QPlainTextEdit.LineWrapMode.WidgetWidth
+        )
+        self._smapi_troubleshooting_details_box.setMinimumHeight(
+            _SMAPI_TROUBLESHOOTING_DETAILS_MIN_HEIGHT
+        )
+        self._smapi_troubleshooting_details_box.setMaximumHeight(
+            _SMAPI_TROUBLESHOOTING_DETAILS_MAX_HEIGHT
+        )
+        self._smapi_troubleshooting_details_box.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self._nexus_status_label = QLabel("Not configured")
         self._nexus_status_label.setObjectName("top_context_runtime_nexus_value")
         self._watch_status_label = QLabel("Stopped")
@@ -901,16 +941,19 @@ class MainWindow(QMainWindow):
         self._mods_path_input.textChanged.connect(self._refresh_scan_context_preview)
         self._mods_path_input.textChanged.connect(self._refresh_install_destination_preview)
         self._mods_path_input.textChanged.connect(self._refresh_sandbox_dev_launch_state)
+        self._mods_path_input.textChanged.connect(self._refresh_smapi_troubleshooting_surface)
         self._mods_path_input.textChanged.connect(self._refresh_inventory_sandbox_sync_action_state)
         self._mods_path_input.textChanged.connect(self._clear_mods_compare_result)
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_scan_context_preview)
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_install_destination_preview)
         self._sandbox_mods_path_input.textChanged.connect(self._refresh_sandbox_dev_launch_state)
+        self._sandbox_mods_path_input.textChanged.connect(self._refresh_smapi_troubleshooting_surface)
         self._sandbox_mods_path_input.textChanged.connect(
             self._refresh_inventory_sandbox_sync_action_state
         )
         self._sandbox_mods_path_input.textChanged.connect(self._clear_mods_compare_result)
         self._game_path_input.textChanged.connect(self._refresh_sandbox_dev_launch_state)
+        self._game_path_input.textChanged.connect(self._refresh_smapi_troubleshooting_surface)
         self._watched_downloads_path_input.textChanged.connect(self._on_watched_path_changed)
         self._secondary_watched_downloads_path_input.textChanged.connect(
             self._on_watched_path_changed
@@ -1034,7 +1077,7 @@ class MainWindow(QMainWindow):
         nav_buttons_widget.setObjectName("workspace_nav_buttons_widget")
         nav_buttons_layout = QVBoxLayout(nav_buttons_widget)
         nav_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        nav_buttons_layout.setSpacing(3)
+        nav_buttons_layout.setSpacing(6)
 
         self._workspace_nav_buttons: dict[QWidget, QPushButton] = {}
         for index in range(context_tabs.count()):
@@ -1046,6 +1089,8 @@ class MainWindow(QMainWindow):
             button.setCheckable(True)
             button.setProperty("navRole", "workspace")
             button.setObjectName(f"workspace_nav_button_{label.lower()}")
+            button.setFixedHeight(30)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             button.clicked.connect(
                 lambda checked=False, target=page: self._context_tabs.setCurrentWidget(target)
             )
@@ -1083,6 +1128,7 @@ class MainWindow(QMainWindow):
         subtitle: str,
         body_widget: QWidget,
         actions_widget: QWidget | None = None,
+        scroll_body: bool = False,
     ) -> QWidget:
         page = QWidget()
         page.setObjectName(object_name)
@@ -1097,8 +1143,42 @@ class MainWindow(QMainWindow):
                 actions_widget=actions_widget,
             )
         )
-        page_layout.addWidget(body_widget, 1)
+        body_container: QWidget = body_widget
+        if scroll_body:
+            body_container = self._build_workspace_body_scroll_area(
+                body_widget=body_widget,
+                object_name=f"{object_name}_scroll_area",
+            )
+        page_layout.addWidget(body_container, 1)
         return page
+
+    def _build_workspace_body_scroll_area(
+        self,
+        *,
+        body_widget: QWidget,
+        object_name: str,
+    ) -> QScrollArea:
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName(object_name)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        viewport = scroll_area.viewport()
+        viewport.setObjectName(f"{object_name}_viewport")
+
+        content = QWidget()
+        content.setObjectName(f"{object_name}_content")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        content_layout.addWidget(body_widget)
+        scroll_area.setWidget(content)
+        return scroll_area
 
     def _build_mods_workspace_page(
         self,
@@ -1157,8 +1237,31 @@ class MainWindow(QMainWindow):
         inspector_panel.setObjectName("mods_selection_context_group")
         inspector_panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         inspector_layout = QVBoxLayout(inspector_panel)
-        inspector_layout.setContentsMargins(12, 10, 12, 12)
-        inspector_layout.setSpacing(8)
+        inspector_layout.setContentsMargins(0, 0, 0, 0)
+        inspector_layout.setSpacing(0)
+
+        inspector_scroll_area = QScrollArea()
+        inspector_scroll_area.setObjectName("mods_selection_context_scroll_area")
+        inspector_scroll_area.setWidgetResizable(True)
+        inspector_scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        inspector_scroll_area.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        inspector_scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        inspector_scroll_area.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding,
+        )
+        inspector_layout.addWidget(inspector_scroll_area)
+
+        inspector_content = QWidget()
+        inspector_content.setObjectName("mods_selection_context_scroll_content")
+        inspector_scroll_area.setWidget(inspector_content)
+        inspector_content_layout = QVBoxLayout(inspector_content)
+        inspector_content_layout.setContentsMargins(12, 10, 12, 12)
+        inspector_content_layout.setSpacing(8)
 
         inspector_intro = QLabel(
             "Use the current selection to inspect guidance and keep source-intent, sandbox sync, and promotion actions together."
@@ -1166,14 +1269,36 @@ class MainWindow(QMainWindow):
         inspector_intro.setObjectName("mods_selection_context_intro_label")
         inspector_intro.setWordWrap(True)
         _set_auxiliary_label_style(inspector_intro)
+        inspector_intro.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
 
-        inspector_layout.addWidget(inspector_intro)
-        inspector_layout.addWidget(self._inventory_update_guidance_label)
-        inspector_layout.addWidget(self._inventory_blocked_detail_label)
-        inspector_layout.addWidget(self._inventory_source_intent_actions_widget)
-        inspector_layout.addWidget(self._inventory_sandbox_sync_actions_widget)
-        inspector_layout.addWidget(flow_hint_label)
-        inspector_layout.addStretch(1)
+        inspector_content_layout.addWidget(inspector_intro)
+        inspector_content_layout.addWidget(self._inventory_update_guidance_label)
+        inspector_content_layout.addWidget(self._inventory_blocked_detail_label)
+        inspector_content_layout.addWidget(self._inventory_source_intent_actions_widget)
+        inspector_content_layout.addWidget(self._inventory_sandbox_sync_actions_widget)
+        inspector_content_layout.addWidget(flow_hint_label)
+        smapi_troubleshooting_group = QGroupBox("SMAPI troubleshooting")
+        smapi_troubleshooting_group.setObjectName("mods_smapi_troubleshooting_group")
+        smapi_troubleshooting_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
+        smapi_troubleshooting_layout = QVBoxLayout(smapi_troubleshooting_group)
+        smapi_troubleshooting_layout.setContentsMargins(8, 6, 8, 8)
+        smapi_troubleshooting_layout.setSpacing(4)
+        smapi_dependency_actions_row = QHBoxLayout()
+        smapi_dependency_actions_row.setContentsMargins(0, 0, 0, 0)
+        smapi_dependency_actions_row.setSpacing(4)
+        smapi_dependency_actions_row.addWidget(self._smapi_dependency_selector, 1)
+        smapi_dependency_actions_row.addWidget(self._open_smapi_dependency_in_discover_button)
+        smapi_troubleshooting_layout.addWidget(self._smapi_troubleshooting_summary_label)
+        smapi_troubleshooting_layout.addLayout(smapi_dependency_actions_row)
+        smapi_troubleshooting_layout.addWidget(self._smapi_troubleshooting_details_box)
+        inspector_content_layout.addWidget(smapi_troubleshooting_group)
+        inspector_content_layout.addStretch(1)
 
         workspace_splitter.addWidget(table_panel)
         workspace_splitter.addWidget(inspector_panel)
@@ -1186,6 +1311,9 @@ class MainWindow(QMainWindow):
         self._mods_workspace_splitter = workspace_splitter
         self._mods_table_group = table_panel
         self._mods_selection_context_group = inspector_panel
+        self._mods_selection_context_scroll_area = inspector_scroll_area
+        self._mods_selection_context_intro_label = inspector_intro
+        self._mods_smapi_troubleshooting_group = smapi_troubleshooting_group
         return page
 
     def _sync_workspace_nav_selection(self) -> None:
@@ -1325,20 +1453,22 @@ class MainWindow(QMainWindow):
         inventory_controls_tabs = QTabWidget()
         inventory_controls_tabs.setDocumentMode(True)
         inventory_controls_tabs.setUsesScrollButtons(True)
-        inventory_controls_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        inventory_controls_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._inventory_controls_tabs = inventory_controls_tabs
 
         inventory_tab = QWidget()
+        inventory_tab.setObjectName("mods_inventory_controls_tab")
         inventory_tab_layout = QVBoxLayout(inventory_tab)
-        inventory_tab_layout.setContentsMargins(6, 4, 6, 4)
-        inventory_tab_layout.setSpacing(6)
+        inventory_tab_layout.setContentsMargins(6, 3, 6, 3)
+        inventory_tab_layout.setSpacing(4)
         inventory_action_band = QWidget()
         inventory_action_band.setObjectName("mods_inventory_action_band")
         inventory_action_band_layout = QVBoxLayout(inventory_action_band)
         inventory_action_band_layout.setContentsMargins(0, 0, 0, 0)
-        inventory_action_band_layout.setSpacing(6)
+        inventory_action_band_layout.setSpacing(5)
         source_row = QHBoxLayout()
-        source_row.setSpacing(10)
+        source_row.setContentsMargins(0, 0, 0, 0)
+        source_row.setSpacing(8)
         scan_source_label = QLabel("Source")
         _set_auxiliary_label_style(scan_source_label)
         source_row.addWidget(scan_source_label)
@@ -1356,7 +1486,8 @@ class MainWindow(QMainWindow):
         source_row.addWidget(self._open_remote_page_button)
         inventory_action_band_layout.addLayout(source_row)
         selected_mod_actions_row = QHBoxLayout()
-        selected_mod_actions_row.setSpacing(10)
+        selected_mod_actions_row.setContentsMargins(0, 0, 0, 0)
+        selected_mod_actions_row.setSpacing(8)
         selected_mod_actions_label = QLabel("Selected mod actions")
         _set_auxiliary_label_style(selected_mod_actions_label)
         selected_mod_actions_row.addWidget(selected_mod_actions_label)
@@ -1375,39 +1506,57 @@ class MainWindow(QMainWindow):
         inventory_controls_tabs.addTab(inventory_tab, "Installed Mods")
 
         game_smapi_tab = QWidget()
+        game_smapi_tab.setObjectName("mods_launch_controls_tab")
         game_smapi_layout = QGridLayout(game_smapi_tab)
-        game_smapi_layout.setContentsMargins(8, 6, 8, 6)
+        game_smapi_layout.setContentsMargins(6, 4, 6, 4)
         game_smapi_layout.setHorizontalSpacing(10)
-        game_smapi_layout.setVerticalSpacing(6)
+        game_smapi_layout.setVerticalSpacing(8)
         self._check_smapi_update_button = QPushButton("Check SMAPI version")
         self._check_smapi_update_button.clicked.connect(self._on_check_smapi_update)
         _set_utility_button_style(self._check_smapi_update_button)
+        self._check_smapi_update_button.setFixedHeight(24)
+        self._check_smapi_update_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         game_smapi_layout.addWidget(self._check_smapi_update_button, 0, 0)
         self._check_smapi_log_button = QPushButton("Check latest SMAPI log")
         self._check_smapi_log_button.clicked.connect(self._on_check_smapi_log)
         _set_utility_button_style(self._check_smapi_log_button)
+        self._check_smapi_log_button.setFixedHeight(24)
+        self._check_smapi_log_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         game_smapi_layout.addWidget(self._check_smapi_log_button, 0, 1)
         self._load_smapi_log_button = QPushButton("Open SMAPI log")
         self._load_smapi_log_button.clicked.connect(self._on_load_smapi_log)
         _set_utility_button_style(self._load_smapi_log_button)
+        self._load_smapi_log_button.setFixedHeight(24)
+        self._load_smapi_log_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         game_smapi_layout.addWidget(self._load_smapi_log_button, 0, 2)
         self._open_smapi_page_button = QPushButton("Open SMAPI website")
         self._open_smapi_page_button.clicked.connect(self._on_open_smapi_page)
         _set_utility_button_style(self._open_smapi_page_button)
+        self._open_smapi_page_button.setFixedHeight(24)
+        self._open_smapi_page_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         game_smapi_layout.addWidget(self._open_smapi_page_button, 1, 0)
         self._launch_vanilla_button = QPushButton("Launch Stardew Valley")
         self._launch_vanilla_button.clicked.connect(self._on_launch_vanilla)
         _set_secondary_button_style(self._launch_vanilla_button)
+        self._launch_vanilla_button.setFixedHeight(26)
+        self._launch_vanilla_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         game_smapi_layout.addWidget(self._launch_vanilla_button, 1, 1)
         self._launch_smapi_button = QPushButton("Launch with SMAPI")
         self._launch_smapi_button.clicked.connect(self._on_launch_smapi)
         _set_primary_button_style(self._launch_smapi_button)
+        self._launch_smapi_button.setFixedHeight(27)
+        self._launch_smapi_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         game_smapi_layout.addWidget(self._launch_smapi_button, 1, 2)
         self._launch_sandbox_dev_button = QPushButton("Launch sandbox test")
         self._launch_sandbox_dev_button.setObjectName("launch_sandbox_dev_button")
         self._launch_sandbox_dev_button.clicked.connect(self._on_launch_sandbox_dev)
         _set_secondary_button_style(self._launch_sandbox_dev_button)
+        self._launch_sandbox_dev_button.setFixedHeight(26)
+        self._launch_sandbox_dev_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         game_smapi_layout.addWidget(self._launch_sandbox_dev_button, 2, 0, 1, 3)
+        game_smapi_layout.setRowMinimumHeight(0, 24)
+        game_smapi_layout.setRowMinimumHeight(1, 27)
+        game_smapi_layout.setRowMinimumHeight(2, 26)
         game_smapi_layout.setColumnStretch(1, 1)
         game_smapi_layout.setColumnStretch(2, 1)
         inventory_controls_tabs.addTab(game_smapi_tab, "Launch")
@@ -1484,6 +1633,7 @@ class MainWindow(QMainWindow):
             title="Discover mods",
             subtitle="Search by name, UniqueID, or author. Opening a source page stays read-only.",
             body_widget=discovery_page,
+            scroll_body=True,
         )
         self._discovery_page = discovery_page
 
@@ -1540,6 +1690,7 @@ class MainWindow(QMainWindow):
             title="Compare real and sandbox",
             subtitle="Check actionable drift before you promote sandbox changes into the live Mods folder.",
             body_widget=compare_tab,
+            scroll_body=True,
         )
         self._compare_page = compare_tab
 
@@ -1729,6 +1880,7 @@ class MainWindow(QMainWindow):
             title="Packages",
             subtitle="Import zips, inspect them immediately, and hand the current package into Review.",
             body_widget=intake_tab,
+            scroll_body=True,
         )
         self._packages_page = intake_tab
 
@@ -1791,6 +1943,7 @@ class MainWindow(QMainWindow):
             title="Archive",
             subtitle="Browse archived folders from live and sandbox workflows. Restore and delete stay explicit.",
             body_widget=archive_page,
+            scroll_body=True,
         )
         self._archive_page = archive_page
 
@@ -1952,6 +2105,7 @@ class MainWindow(QMainWindow):
             title="Recovery",
             subtitle="Inspect recorded installs, check recovery safety, and only apply recovery when the review allows it.",
             body_widget=recovery_tab,
+            scroll_body=True,
         )
         self._recovery_page = recovery_tab
         setup_page = self._build_page_shell(
@@ -3566,11 +3720,38 @@ class MainWindow(QMainWindow):
 
     def _on_check_smapi_log_completed(self, report: SmapiLogReport) -> None:
         self._last_smapi_log_report = report
-        summary = _smapi_log_summary_label(report)
+        context_label, context_detail = _smapi_log_context_details(
+            report,
+            configured_game_path_text=self._game_path_input.text(),
+            configured_real_mods_path_text=self._mods_path_input.text(),
+            configured_sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+        )
+        summary = _smapi_log_summary_label(report, context_label=context_label)
         self._smapi_log_status_label.setText(summary)
-        self._smapi_log_status_label.setToolTip(report.message or summary)
-        self._set_inventory_output_text(build_smapi_log_report_text(report))
-        self._set_status(report.message or "SMAPI log check complete.")
+        tooltip_lines = [summary]
+        tooltip_lines.append(_smapi_log_report_summary_text(report))
+        tooltip_lines.append(f"Log context: {context_label}")
+        if context_detail:
+            tooltip_lines.append(context_detail)
+        missing_targets = _smapi_missing_dependency_targets(report)
+        if missing_targets:
+            tooltip_lines.append(
+                "Missing dependencies: " + ", ".join(missing_targets)
+            )
+        self._smapi_log_status_label.setToolTip("\n".join(tooltip_lines))
+        context_lines = [
+            "SMAPI log context",
+            f"- Detected context: {context_label}",
+        ]
+        if context_detail:
+            context_lines.append(f"- Basis: {context_detail}")
+        self._set_inventory_output_text(
+            "\n".join(context_lines) + "\n\n" + build_smapi_log_report_text(report)
+        )
+        self._refresh_smapi_troubleshooting_surface()
+        self._set_status(
+            _smapi_log_status_message(report, context_label=context_label)
+        )
 
     def _on_open_smapi_page(self) -> None:
         url = self._shell_service.resolve_smapi_update_page_url(self._last_smapi_update_status)
@@ -3580,6 +3761,115 @@ class MainWindow(QMainWindow):
             self._set_status(message)
             return
         self._set_status(f"Opened SMAPI page: {url}")
+
+    def _on_open_smapi_dependency_in_discover(self) -> None:
+        dependency_target = self._smapi_dependency_selector.currentData(
+            int(Qt.ItemDataRole.UserRole)
+        )
+        if not isinstance(dependency_target, str) or not dependency_target.strip():
+            dependency_target = self._smapi_dependency_selector.currentText().strip()
+        if not dependency_target:
+            self._set_status("No missing SMAPI dependency is selected for Discover.")
+            return
+        self._discovery_query_input.setText(dependency_target)
+        self._context_tabs.setCurrentWidget(self._discovery_page)
+        self._set_status(
+            f"Moved missing dependency {dependency_target} into Discover. Next step: run Find mods."
+        )
+
+    def _refresh_smapi_troubleshooting_surface(self) -> None:
+        active_operation = self._active_operation_name
+        if active_operation in {"SMAPI log check", "SMAPI log load", "Startup SMAPI log check"}:
+            _set_feedback_label_state(
+                self._smapi_troubleshooting_summary_label,
+                "active",
+                "Parsing the latest SMAPI log. Missing dependency targets and launch context will appear here when the check completes.",
+            )
+            self._smapi_dependency_selector.setVisible(False)
+            self._open_smapi_dependency_in_discover_button.setVisible(False)
+            self._smapi_troubleshooting_details_box.setPlainText(
+                "SMAPI troubleshooting details will load here after the current log check finishes."
+            )
+            self._refresh_mods_troubleshooting_density()
+            return
+
+        report = self._last_smapi_log_report
+        if report is None:
+            _set_feedback_label_state(
+                self._smapi_troubleshooting_summary_label,
+                "empty",
+                "No SMAPI log parsed yet. Launch with SMAPI, then use Check latest SMAPI log or Open SMAPI log.",
+            )
+            self._smapi_dependency_selector.setVisible(False)
+            self._open_smapi_dependency_in_discover_button.setVisible(False)
+            self._smapi_troubleshooting_details_box.setPlainText(
+                "Troubleshooting details appear here after you check a SMAPI log.\n\n"
+                "This area shows the detected launch context and any missing dependency targets."
+            )
+            self._refresh_mods_troubleshooting_density()
+            return
+
+        context_label, context_detail = _smapi_log_context_details(
+            report,
+            configured_game_path_text=self._game_path_input.text(),
+            configured_real_mods_path_text=self._mods_path_input.text(),
+            configured_sandbox_mods_path_text=self._sandbox_mods_path_input.text(),
+        )
+        if report.missing_dependencies:
+            _set_feedback_label_state(
+                self._smapi_troubleshooting_summary_label,
+                "ready",
+                f"{context_label}: {report.missing_dependency_entry_count} missing dependency entry(s) across {report.missing_dependency_target_count} actionable target(s).",
+            )
+        elif report.state == SMAPI_LOG_NOT_FOUND:
+            _set_feedback_label_state(
+                self._smapi_troubleshooting_summary_label,
+                "empty",
+                "No SMAPI log was found yet. Launch with SMAPI once, then check again.",
+            )
+        elif report.state == SMAPI_LOG_UNABLE_TO_DETERMINE:
+            _set_feedback_label_state(
+                self._smapi_troubleshooting_summary_label,
+                "muted",
+                f"{context_label}: the log could not be parsed confidently. Review the details below.",
+            )
+        else:
+            _set_feedback_label_state(
+                self._smapi_troubleshooting_summary_label,
+                "muted",
+                f"{context_label}: no missing dependency targets were detected in the latest parsed log.",
+            )
+
+        selector_items = _smapi_missing_dependency_targets(report)
+        has_missing_dependencies = bool(selector_items)
+        self._smapi_dependency_selector.blockSignals(True)
+        current_selection = self._smapi_dependency_selector.currentData(
+            int(Qt.ItemDataRole.UserRole)
+        )
+        if not isinstance(current_selection, str):
+            current_selection = self._smapi_dependency_selector.currentText()
+        self._smapi_dependency_selector.clear()
+        if has_missing_dependencies:
+            for target in selector_items:
+                self._smapi_dependency_selector.addItem(target, target)
+            existing_index = self._smapi_dependency_selector.findData(
+                current_selection,
+                int(Qt.ItemDataRole.UserRole),
+            )
+            if existing_index >= 0:
+                self._smapi_dependency_selector.setCurrentIndex(existing_index)
+        self._smapi_dependency_selector.blockSignals(False)
+        self._smapi_dependency_selector.setVisible(has_missing_dependencies)
+        self._open_smapi_dependency_in_discover_button.setVisible(has_missing_dependencies)
+        self._open_smapi_dependency_in_discover_button.setEnabled(has_missing_dependencies)
+        self._smapi_troubleshooting_details_box.setPlainText(
+            _build_smapi_troubleshooting_surface_text(
+                report,
+                context_label=context_label,
+                context_detail=context_detail,
+            )
+        )
+        self._refresh_mods_troubleshooting_density()
 
     def _on_search_discovery(self) -> None:
         query_text = self._discovery_query_input.text()
@@ -4872,6 +5162,7 @@ class MainWindow(QMainWindow):
         )
 
     def _refresh_mods_workspace_state(self) -> None:
+        self._refresh_smapi_troubleshooting_surface()
         visible_count = _visible_table_row_count(self._mods_table)
         total_count = self._mods_table.rowCount()
         active_operation = self._active_operation_name
@@ -5820,6 +6111,7 @@ class MainWindow(QMainWindow):
         self._smapi_log_status_label.setText("Not checked")
         self._smapi_update_status_label.setText("Not checked")
         self._refresh_sandbox_dev_launch_state()
+        self._refresh_smapi_troubleshooting_surface()
 
     def _on_nexus_key_changed(self, *_: object) -> None:
         self._refresh_nexus_status(validated=False)
@@ -5964,7 +6256,10 @@ class MainWindow(QMainWindow):
         row = self._mods_table.currentRow()
         has_selected_items = bool(self._mods_table.selectedItems())
         if row < 0 or self._mods_table.isRowHidden(row) or not has_selected_items:
-            message = "Select an installed mod row to see update guidance."
+            if self._smapi_troubleshooting_has_actionable_entries():
+                message = "No mod selected. Select a row for mod actions."
+            else:
+                message = "Select an installed mod row to see update guidance."
             self._set_inventory_blocked_detail_text(None)
             self._set_open_remote_page_state(
                 enabled=False,
@@ -5978,6 +6273,7 @@ class MainWindow(QMainWindow):
             self._inventory_update_guidance_label.setText(message)
             self._inventory_update_guidance_label.setToolTip(message)
             self._refresh_inventory_sandbox_sync_action_state()
+            self._refresh_mods_troubleshooting_density()
             return
 
         name_item = self._mods_table.item(row, 0)
@@ -5998,6 +6294,7 @@ class MainWindow(QMainWindow):
             self._inventory_update_guidance_label.setText(message)
             self._inventory_update_guidance_label.setToolTip(message)
             self._refresh_inventory_sandbox_sync_action_state()
+            self._refresh_mods_troubleshooting_density()
             return
 
         mod_name = name_item.text().strip() or "Selected mod"
@@ -6079,6 +6376,7 @@ class MainWindow(QMainWindow):
         self._inventory_update_guidance_label.setText(message)
         self._inventory_update_guidance_label.setToolTip(message)
         self._refresh_inventory_sandbox_sync_action_state()
+        self._refresh_mods_troubleshooting_density()
 
     def _resolve_inventory_update_source_intent(self, unique_id: str):
         if not unique_id.strip():
@@ -6098,6 +6396,49 @@ class MainWindow(QMainWindow):
     def _set_open_remote_page_state(self, *, enabled: bool, tooltip: str) -> None:
         self._open_remote_page_button.setEnabled(enabled)
         self._open_remote_page_button.setToolTip(tooltip)
+
+    def _smapi_troubleshooting_has_actionable_entries(self) -> bool:
+        return bool(
+            self._last_smapi_log_report is not None
+            and self._last_smapi_log_report.missing_dependency_entry_count > 0
+        )
+
+    def _mods_selection_has_active_row(self) -> bool:
+        row = self._mods_table.currentRow()
+        return row >= 0 and not self._mods_table.isRowHidden(row) and bool(
+            self._mods_table.selectedItems()
+        )
+
+    def _refresh_mods_troubleshooting_density(self) -> None:
+        has_actionable_smapi = self._smapi_troubleshooting_has_actionable_entries()
+        has_selected_mod = self._mods_selection_has_active_row()
+        compact_for_troubleshooting = has_actionable_smapi and not has_selected_mod
+
+        if hasattr(self, "_mods_selection_context_intro_label"):
+            self._mods_selection_context_intro_label.setVisible(not compact_for_troubleshooting)
+        if hasattr(self, "_inventory_flow_hint_label"):
+            self._inventory_flow_hint_label.setVisible(not compact_for_troubleshooting)
+
+        if compact_for_troubleshooting:
+            compact_message = "No mod selected. Select a row for mod actions."
+            if self._inventory_update_guidance_label.text() != compact_message:
+                self._inventory_update_guidance_label.setText(compact_message)
+                self._inventory_update_guidance_label.setToolTip(compact_message)
+            self._inventory_update_guidance_label.setMaximumHeight(34)
+            self._smapi_troubleshooting_details_box.setMinimumHeight(
+                _SMAPI_TROUBLESHOOTING_DETAILS_COMPACT_MIN_HEIGHT
+            )
+            self._smapi_troubleshooting_details_box.setMaximumHeight(
+                _SMAPI_TROUBLESHOOTING_DETAILS_COMPACT_MAX_HEIGHT
+            )
+        else:
+            self._inventory_update_guidance_label.setMaximumHeight(16777215)
+            self._smapi_troubleshooting_details_box.setMinimumHeight(
+                _SMAPI_TROUBLESHOOTING_DETAILS_MIN_HEIGHT
+            )
+            self._smapi_troubleshooting_details_box.setMaximumHeight(
+                _SMAPI_TROUBLESHOOTING_DETAILS_MAX_HEIGHT
+            )
 
     def _refresh_inventory_source_intent_action_state(
         self,
@@ -7047,11 +7388,11 @@ class MainWindow(QMainWindow):
     def _refresh_responsive_panel_bounds(self) -> None:
         window_height = max(self.height(), self.minimumHeight())
 
-        context_cap = max(132, min(176, int(window_height * 0.188)))
-        inventory_controls_cap = max(108, min(144, int(window_height * 0.17)))
-        flow_hint_cap = max(28, min(56, int(window_height * 0.07)))
+        context_cap = max(146, min(188, int(window_height * 0.205)))
+        inventory_controls_cap = max(116, min(132, int(window_height * 0.162)))
+        flow_hint_cap = max(32, min(60, int(window_height * 0.074)))
         intake_result_cap = max(92, min(140, int(window_height * 0.18)))
-        status_strip_cap = max(46, min(66, int(window_height * 0.072)))
+        status_strip_cap = max(56, min(74, int(window_height * 0.082)))
         details_cap = max(64, min(108, int(window_height * 0.12)))
 
         if hasattr(self, "_context_group"):
@@ -7696,8 +8037,36 @@ def _set_table_row_visual(
         item.setFont(font)
 
 
+def _configure_resizable_table(
+    table: QTableWidget,
+    *,
+    minimum_visible_rows: int,
+    minimum_section_size: int,
+    initial_widths: tuple[int, ...],
+) -> None:
+    header = table.horizontalHeader()
+    header.setMinimumSectionSize(minimum_section_size)
+    header.setStretchLastSection(False)
+    header.setSectionsMovable(False)
+    for column in range(table.columnCount()):
+        header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+    for column, width in enumerate(initial_widths):
+        if column >= table.columnCount():
+            break
+        table.setColumnWidth(column, width)
+    _set_table_minimum_visible_rows(table, minimum_visible_rows)
+
+
+def _set_table_minimum_visible_rows(table: QTableWidget, row_budget: int) -> None:
+    row_height = max(table.verticalHeader().defaultSectionSize(), 20)
+    header_height = max(table.horizontalHeader().sizeHint().height(), 24)
+    frame_allowance = max(table.frameWidth() * 2 + 10, 12)
+    table.setMinimumHeight((row_height * row_budget) + header_height + frame_allowance)
+
+
 def _set_primary_button_style(button: QPushButton) -> None:
-    button.setMinimumHeight(26)
+    button.setMinimumHeight(21)
+    button.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     button.setProperty("buttonRole", "primary")
     button.style().unpolish(button)
     button.style().polish(button)
@@ -7705,7 +8074,8 @@ def _set_primary_button_style(button: QPushButton) -> None:
 
 
 def _set_secondary_button_style(button: QPushButton) -> None:
-    button.setMinimumHeight(22)
+    button.setMinimumHeight(20)
+    button.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     button.setProperty("buttonRole", "secondary")
     button.style().unpolish(button)
     button.style().polish(button)
@@ -7713,7 +8083,8 @@ def _set_secondary_button_style(button: QPushButton) -> None:
 
 
 def _set_utility_button_style(button: QPushButton) -> None:
-    button.setMinimumHeight(20)
+    button.setMinimumHeight(19)
+    button.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     button.setProperty("buttonRole", "utility")
     button.style().unpolish(button)
     button.style().polish(button)
@@ -7721,7 +8092,8 @@ def _set_utility_button_style(button: QPushButton) -> None:
 
 
 def _set_danger_button_style(button: QPushButton) -> None:
-    button.setMinimumHeight(24)
+    button.setMinimumHeight(21)
+    button.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
     button.setProperty("buttonRole", "danger")
     button.style().unpolish(button)
     button.style().polish(button)
@@ -7777,21 +8149,13 @@ def _app_update_feedback_tone(status: AppUpdateStatus) -> str:
     return "empty"
 
 
-def _smapi_log_summary_label(report: SmapiLogReport) -> str:
+def _smapi_log_summary_label(report: SmapiLogReport, *, context_label: str | None = None) -> str:
     if report.state == SMAPI_LOG_NOT_FOUND:
         return "Log not found"
     if report.state == SMAPI_LOG_UNABLE_TO_DETERMINE:
         return "Unable to determine"
 
-    counts = {
-        SMAPI_LOG_ERROR: 0,
-        SMAPI_LOG_WARNING: 0,
-        SMAPI_LOG_FAILED_MOD: 0,
-        SMAPI_LOG_MISSING_DEPENDENCY: 0,
-        SMAPI_LOG_RUNTIME_ISSUE: 0,
-    }
-    for finding in report.findings:
-        counts[finding.kind] = counts.get(finding.kind, 0) + 1
+    counts = _smapi_log_issue_counts(report)
 
     issue_count = (
         counts[SMAPI_LOG_ERROR]
@@ -7800,14 +8164,174 @@ def _smapi_log_summary_label(report: SmapiLogReport) -> str:
         + counts[SMAPI_LOG_RUNTIME_ISSUE]
     )
     if issue_count == 0 and counts[SMAPI_LOG_WARNING] == 0:
+        if context_label:
+            return f"{_smapi_log_context_short_label(context_label)}: no obvious issues"
         return "No obvious issues parsed"
 
-    return (
+    summary = (
         f"Issues: err {counts[SMAPI_LOG_ERROR]}, "
         f"fail {counts[SMAPI_LOG_FAILED_MOD]}, "
         f"dep {counts[SMAPI_LOG_MISSING_DEPENDENCY]}, "
         f"warn {counts[SMAPI_LOG_WARNING]}"
     )
+    if context_label:
+        return f"{_smapi_log_context_short_label(context_label)}: {summary.lower()}"
+    return summary
+
+
+def _smapi_log_status_message(report: SmapiLogReport, *, context_label: str) -> str:
+    context_text = f"Log context: {context_label}."
+    missing_targets = _smapi_missing_dependency_targets(report)
+    if missing_targets:
+        preview = ", ".join(missing_targets[:4])
+        if len(missing_targets) > 4:
+            preview = f"{preview}, +{len(missing_targets) - 4} more"
+        return f"Missing dependencies from SMAPI log: {preview}. {context_text}"
+    if report.message:
+        return f"{report.message} {context_text}"
+    return f"SMAPI log check complete. {context_text}"
+
+
+def _build_smapi_troubleshooting_surface_text(
+    report: SmapiLogReport,
+    *,
+    context_label: str,
+    context_detail: str,
+) -> str:
+    log_name = report.log_path.name if report.log_path is not None else "<not loaded>"
+    lines = [f"Context: {context_label} | Log: {log_name} ({report.source})"]
+    if context_detail:
+        lines.append(f"Basis: {context_detail}")
+    if report.missing_dependencies:
+        lines.append("")
+        lines.append("Missing dependencies:")
+        for entry in report.missing_dependencies:
+            lines.append(f"- {_smapi_missing_dependency_entry_text(entry)}")
+    elif report.state == SMAPI_LOG_NOT_FOUND:
+        lines.append("")
+        lines.append("No SMAPI log was found in the supported locations yet.")
+    else:
+        lines.append("")
+        lines.append("No missing dependency targets were detected in this parsed log.")
+    return "\n".join(lines)
+
+
+def _smapi_missing_dependency_targets(report: SmapiLogReport) -> tuple[str, ...]:
+    return report.actionable_missing_dependency_targets
+
+
+def _smapi_missing_dependency_entry_text(entry: SmapiMissingDependency) -> str:
+    requiring_mod = entry.requiring_mod_name or entry.requiring_mod_unique_id or "Unknown mod"
+    dependency_target = entry.dependency_target or "<unknown dependency>"
+    line = f"{requiring_mod} -> {dependency_target}"
+    if entry.required_version:
+        line += f" (required {entry.required_version})"
+    return line
+
+
+def _smapi_log_issue_counts(report: SmapiLogReport) -> dict[str, int]:
+    counts = {
+        SMAPI_LOG_ERROR: 0,
+        SMAPI_LOG_WARNING: 0,
+        SMAPI_LOG_FAILED_MOD: 0,
+        SMAPI_LOG_MISSING_DEPENDENCY: report.missing_dependency_entry_count,
+        SMAPI_LOG_RUNTIME_ISSUE: 0,
+    }
+    for finding in report.findings:
+        if finding.kind == SMAPI_LOG_MISSING_DEPENDENCY:
+            continue
+        counts[finding.kind] = counts.get(finding.kind, 0) + 1
+    return counts
+
+
+def _smapi_log_report_summary_text(report: SmapiLogReport) -> str:
+    counts = _smapi_log_issue_counts(report)
+    return (
+        "Parsed SMAPI log: "
+        f"errors={counts[SMAPI_LOG_ERROR]}, "
+        f"warnings={counts[SMAPI_LOG_WARNING]}, "
+        f"failed_mods={counts[SMAPI_LOG_FAILED_MOD]}, "
+        f"missing_dependencies={counts[SMAPI_LOG_MISSING_DEPENDENCY]}, "
+        f"runtime_issues={counts[SMAPI_LOG_RUNTIME_ISSUE]}."
+    )
+
+
+def _smapi_log_context_short_label(context_label: str) -> str:
+    if context_label == "Real Mods":
+        return "Real log"
+    if context_label == "Sandbox Mods":
+        return "Sandbox log"
+    return "Unknown log"
+
+
+def _smapi_log_context_details(
+    report: SmapiLogReport,
+    *,
+    configured_game_path_text: str,
+    configured_real_mods_path_text: str,
+    configured_sandbox_mods_path_text: str,
+) -> tuple[str, str]:
+    haystack_parts = [
+        report.message or "",
+        str(report.log_path or ""),
+        str(report.game_path or ""),
+        *report.notes,
+        *(finding.message for finding in report.findings),
+    ]
+    haystack = " ".join(part for part in haystack_parts if part).replace("\\", "/").casefold()
+
+    sandbox_path = _normalized_path_text(configured_sandbox_mods_path_text)
+    real_mods_path = _normalized_path_text(configured_real_mods_path_text)
+    game_path = _normalized_path_text(configured_game_path_text)
+
+    if sandbox_path and sandbox_path in haystack:
+        return (
+            "Sandbox Mods",
+            "Matched the configured sandbox Mods path in the parsed log details.",
+        )
+    if real_mods_path and real_mods_path in haystack:
+        return (
+            "Real Mods",
+            "Matched the configured real Mods path in the parsed log details.",
+        )
+    if "--mods-path" in haystack or " mods-path " in haystack:
+        return (
+            "Unknown",
+            "The log references a custom mods-path override, but it did not match the configured real or sandbox Mods paths.",
+        )
+
+    if report.log_path is not None and report.game_path is not None:
+        log_parent = _normalized_path_text(str(report.log_path.parent))
+        default_error_logs = _normalized_path_text(str(report.game_path / "ErrorLogs"))
+        default_game_mods = _normalized_path_text(str(Path(configured_game_path_text).expanduser() / "Mods"))
+        if log_parent and default_error_logs and log_parent == default_error_logs and real_mods_path and default_game_mods and real_mods_path == default_game_mods:
+            return (
+                "Real Mods",
+                "Used the default game ErrorLogs location and no sandbox override was detected.",
+            )
+
+    if game_path and real_mods_path:
+        default_game_mods = _normalized_path_text(str(Path(configured_game_path_text).expanduser() / "Mods"))
+        if default_game_mods and real_mods_path == default_game_mods and "--mods-path" not in haystack:
+            return (
+                "Real Mods",
+                "No sandbox override was detected, and the configured real Mods path matches the default game Mods folder.",
+            )
+
+    return (
+        "Unknown",
+        "This log did not clearly identify whether it came from the real Mods folder or a sandbox launch.",
+    )
+
+
+def _normalized_path_text(raw_text: str) -> str:
+    text = raw_text.strip()
+    if not text:
+        return ""
+    try:
+        return str(Path(text).expanduser().resolve(strict=False)).replace("\\", "/").casefold()
+    except OSError:
+        return text.replace("\\", "/").casefold()
 
 
 def _discovery_compatibility_label(state: str) -> str:

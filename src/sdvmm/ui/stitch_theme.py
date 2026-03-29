@@ -386,8 +386,8 @@ QLabel#workspace_nav_section_label {
 }
 
 QPushButton[navRole="workspace"] {
-    min-height: 28px;
-    padding: 5px 9px;
+    min-height: 0px;
+    padding: 2px 8px;
     border: 1px solid transparent;
     border-radius: 8px;
     background: transparent;
@@ -459,8 +459,8 @@ QTabBar#mods_workspace_mode_tabbar {
 }
 
 QTabBar#mods_workspace_mode_tabbar::tab {
-    min-height: 26px;
-    padding: 4px 11px;
+    min-height: 24px;
+    padding: 3px 10px;
     margin-right: 6px;
     background: #1c2125;
     color: #c6b19b;
@@ -482,8 +482,8 @@ QTabBar#mods_workspace_mode_tabbar::tab:selected {
 }
 
 QPushButton {
-    min-height: 21px;
-    padding: 4px 8px;
+    min-height: 0px;
+    padding: 2px 8px;
     border: 1px solid rgba(224, 216, 203, 0.06);
     border-radius: 8px;
     background: #23282d;
@@ -518,7 +518,7 @@ QPushButton[buttonRole="primary"] {
     );
     color: #362500;
     font-weight: 700;
-    padding: 5px 11px;
+    padding: 2px 10px;
     border-color: rgba(255, 238, 194, 0.22);
 }
 
@@ -544,7 +544,7 @@ QPushButton[buttonRole="primary"]:disabled {
 QPushButton[buttonRole="secondary"] {
     background: #202a23;
     color: #d0e1ca;
-    padding: 4px 9px;
+    padding: 2px 8px;
     border-color: rgba(156, 195, 143, 0.13);
 }
 
@@ -566,9 +566,83 @@ QPushButton[buttonRole="secondary"]:disabled {
 QPushButton[buttonRole="utility"] {
     background: #171b1e;
     color: #c3b7ab;
-    padding: 3px 7px;
+    padding: 1px 6px;
     font-size: 8.35pt;
     border-color: rgba(224, 216, 203, 0.045);
+}
+
+QScrollArea#discovery_workspace_page_scroll_area,
+QScrollArea#compare_tab_scroll_area,
+QScrollArea#packages_workspace_page_scroll_area,
+QScrollArea#archive_workspace_page_scroll_area,
+QScrollArea#recovery_tab_scroll_area {
+    border: none;
+    background: transparent;
+}
+
+QWidget#discovery_workspace_page_scroll_area_viewport,
+QWidget#compare_tab_scroll_area_viewport,
+QWidget#packages_workspace_page_scroll_area_viewport,
+QWidget#archive_workspace_page_scroll_area_viewport,
+QWidget#recovery_tab_scroll_area_viewport,
+QWidget#discovery_workspace_page_scroll_area_content,
+QWidget#compare_tab_scroll_area_content,
+QWidget#packages_workspace_page_scroll_area_content,
+QWidget#archive_workspace_page_scroll_area_content,
+QWidget#recovery_tab_scroll_area_content {
+    background: transparent;
+}
+
+QWidget#mods_inventory_controls_tab QPushButton,
+QWidget#mods_launch_controls_tab QPushButton {
+    min-height: 0px;
+    padding: 1px 7px;
+}
+
+QWidget#mods_inventory_controls_tab QPushButton[buttonRole="primary"],
+QWidget#mods_launch_controls_tab QPushButton[buttonRole="primary"] {
+    min-height: 0px;
+    padding: 2px 9px;
+}
+
+QWidget#mods_inventory_controls_tab QPushButton[buttonRole="secondary"],
+QWidget#mods_launch_controls_tab QPushButton[buttonRole="secondary"] {
+    min-height: 0px;
+    padding: 2px 7px;
+}
+
+QWidget#mods_inventory_controls_tab QPushButton[buttonRole="utility"],
+QWidget#mods_launch_controls_tab QPushButton[buttonRole="utility"] {
+    min-height: 0px;
+    padding: 1px 6px;
+}
+
+QGroupBox#mods_smapi_troubleshooting_group {
+    margin-top: 8px;
+}
+
+QGroupBox#mods_smapi_troubleshooting_group::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0px 3px 0px 3px;
+}
+
+QScrollArea#mods_selection_context_scroll_area {
+    border: none;
+    background: transparent;
+}
+
+QWidget#mods_selection_context_scroll_content {
+    background: transparent;
+}
+
+QComboBox#mods_smapi_dependency_selector,
+QPushButton#mods_smapi_dependency_discover_button {
+    min-height: 19px;
+}
+
+QPlainTextEdit#mods_smapi_troubleshooting_details_box {
+    padding: 2px 6px;
 }
 
 QPushButton[buttonRole="utility"]:hover {

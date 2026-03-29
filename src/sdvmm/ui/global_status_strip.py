@@ -16,7 +16,8 @@ class GlobalStatusStrip(QGroupBox):
         super().__init__("")
         self.setObjectName("global_status_strip_group")
         self.setFlat(True)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setMinimumHeight(58)
 
         self.current_status_label = QLabel("Waiting for action.")
         self.current_status_label.setObjectName("global_status_current_label")
@@ -33,7 +34,7 @@ class GlobalStatusStrip(QGroupBox):
         self.next_step_label.setWordWrap(True)
         _set_status_label_style(self.next_step_label, bold=True)
 
-        summary_label = QLabel("Workflow guidance")
+        summary_label = QLabel("Workflow")
         summary_label.setObjectName("global_status_summary_label")
         _set_status_label_style(summary_label, bold=True)
         summary_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -44,15 +45,15 @@ class GlobalStatusStrip(QGroupBox):
         status_strip_layout.setSpacing(6)
         status_strip_layout.addWidget(summary_label, 0)
         status_strip_layout.addWidget(
-            _build_status_panel("Current status", self.current_status_label),
+            _build_status_panel("Current", self.current_status_label),
             1,
         )
         status_strip_layout.addWidget(
-            _build_status_panel("Blocking issues", self.blocking_issues_label),
+            _build_status_panel("Blocking", self.blocking_issues_label),
             1,
         )
         status_strip_layout.addWidget(
-            _build_status_panel("Recommended next step", self.next_step_label),
+            _build_status_panel("Next step", self.next_step_label),
             1,
         )
 
@@ -60,7 +61,7 @@ class GlobalStatusStrip(QGroupBox):
 def _build_status_panel(title: str, value_label: QLabel) -> QWidget:
     panel = QWidget()
     panel.setObjectName("global_status_panel")
-    panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+    panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     layout = QVBoxLayout(panel)
     layout.setContentsMargins(6, 4, 6, 4)
     layout.setSpacing(1)

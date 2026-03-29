@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -79,11 +81,14 @@ from sdvmm.domain.models import RestoreImportPlanningResult
 from sdvmm.domain.models import RecoveryExecutionRecord
 from sdvmm.domain.models import SandboxInstallPlan
 from sdvmm.domain.models import SandboxInstallPlanEntry
+from sdvmm.domain.models import SmapiLogFinding
+from sdvmm.domain.models import SmapiMissingDependency
 from sdvmm.domain.models import SmapiLogReport
 from sdvmm.domain.models import SmapiUpdateStatus
 from sdvmm.ui.main_window import MainWindow
 from sdvmm.ui.main_window import _ROLE_DISCOVERY_INDEX
 from sdvmm.ui.main_window import _ROLE_MOD_UPDATE_STATUS
+from sdvmm.ui.main_window import _smapi_log_context_details
 from sdvmm.services.app_state_store import save_app_config
 from sdvmm.ui.main_window import _ROLE_UPDATE_BLOCK_REASON
 
@@ -409,6 +414,385 @@ def test_main_window_startup_auto_scans_real_and_sandbox_without_switching_selec
 
     window.close()
     qapp.processEvents()
+
+
+def test_main_window_smapi_log_report_surfaces_missing_dependencies_and_context(
+    main_window: MainWindow,
+    tmp_path: Path,
+) -> None:
+    game_path = tmp_path / "Game"
+    real_mods = game_path / "Mods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    error_logs = game_path / "ErrorLogs"
+    error_logs.mkdir(parents=True)
+    real_mods.mkdir(parents=True)
+    sandbox_mods.mkdir()
+    log_path = error_logs / "SMAPI-latest.txt"
+    log_path.write_text("", encoding="utf-8")
+
+    main_window._game_path_input.setText(str(game_path))
+    main_window._mods_path_input.setText(str(real_mods))
+    main_window._sandbox_mods_path_input.setText(str(sandbox_mods))
+
+    report = SmapiLogReport(
+        state="parsed",
+        source="manual",
+        log_path=log_path,
+        game_path=game_path,
+        findings=(
+            SmapiLogFinding(
+                kind="missing_dependency",
+                line_number=18,
+                message=(
+                    "[SMAPI] Launch arguments included --mods-path "
+                    f"{sandbox_mods} | detected targets: Pathoschild.ContentPatcher, spacechase0.SpaceCore"
+                ),
+            ),
+        ),
+        missing_dependencies=(
+            SmapiMissingDependency(
+                requiring_mod_name="Expanded Preconditions Utility",
+                dependency_unique_id="Pathoschild.ContentPatcher",
+                required_version="5.0.8 or later",
+            ),
+            SmapiMissingDependency(
+                requiring_mod_name="Stardew Valley Expanded",
+                dependency_unique_id="spacechase0.SpaceCore",
+            ),
+        ),
+        missing_dependency_ids=("Pathoschild.ContentPatcher", "spacechase0.SpaceCore"),
+        notes=tuple(),
+        message="Parsed SMAPI log: errors=0, warnings=0, failed_mods=1, missing_dependencies=1, runtime_issues=0.",
+    )
+
+    main_window._on_check_smapi_log_completed(report)
+
+    assert main_window._smapi_log_status_label.text() == "Sandbox log: issues: err 0, fail 0, dep 2, warn 0"
+    assert "Missing dependencies from SMAPI log: Pathoschild.ContentPatcher, spacechase0.SpaceCore." in (
+        main_window._status_strip_label.text()
+    )
+    assert main_window._smapi_dependency_selector.isVisible() is True
+    assert main_window._open_smapi_dependency_in_discover_button.isVisible() is True
+    assert main_window._smapi_dependency_selector.currentText() == "Pathoschild.ContentPatcher"
+    troubleshooting_text = main_window._smapi_troubleshooting_details_box.toPlainText()
+    assert "Missing dependencies:" in troubleshooting_text
+    assert "Expanded Preconditions Utility -> Pathoschild.ContentPatcher (required 5.0.8 or later)" in troubleshooting_text
+    assert "Stardew Valley Expanded -> spacechase0.SpaceCore" in troubleshooting_text
+    assert "Context: Sandbox Mods" in troubleshooting_text
+    output_text = main_window._findings_box.toPlainText()
+    assert "Detected context: Sandbox Mods" in output_text
+    assert "missing dependencies=2" in output_text
+    assert "Expanded Preconditions Utility -> Pathoschild.ContentPatcher (required 5.0.8 or later)" in output_text
+
+
+def test_smapi_log_context_detection_distinguishes_real_sandbox_and_unknown(tmp_path: Path) -> None:
+    game_path = tmp_path / "Game"
+    real_mods = game_path / "Mods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    error_logs = game_path / "ErrorLogs"
+    error_logs.mkdir(parents=True)
+    real_mods.mkdir(parents=True)
+    sandbox_mods.mkdir()
+
+    real_report = SmapiLogReport(
+        state="parsed",
+        source="auto_detected",
+        log_path=error_logs / "SMAPI-latest.txt",
+        game_path=game_path,
+        findings=tuple(),
+        notes=tuple(),
+        message="Parsed SMAPI log: errors=0, warnings=0, failed_mods=0, missing_dependencies=0, runtime_issues=0.",
+    )
+    sandbox_report = SmapiLogReport(
+        state="parsed",
+        source="manual",
+        log_path=tmp_path / "SMAPI-sandbox.txt",
+        game_path=game_path,
+        findings=(
+            SmapiLogFinding(
+                kind="warning",
+                line_number=3,
+                message=f"[SMAPI] Launch arguments: --mods-path {sandbox_mods}",
+            ),
+        ),
+        notes=tuple(),
+        message="Parsed SMAPI log: errors=0, warnings=1, failed_mods=0, missing_dependencies=0, runtime_issues=0.",
+    )
+    unknown_report = SmapiLogReport(
+        state="parsed",
+        source="manual",
+        log_path=tmp_path / "SMAPI-unknown.txt",
+        game_path=game_path,
+        findings=(
+            SmapiLogFinding(
+                kind="warning",
+                line_number=4,
+                message="[SMAPI] Launch arguments: --mods-path D:/Elsewhere/CustomMods",
+            ),
+        ),
+        notes=tuple(),
+        message="Parsed SMAPI log: errors=0, warnings=1, failed_mods=0, missing_dependencies=0, runtime_issues=0.",
+    )
+
+    real_label, _ = _smapi_log_context_details(
+        real_report,
+        configured_game_path_text=str(game_path),
+        configured_real_mods_path_text=str(real_mods),
+        configured_sandbox_mods_path_text=str(sandbox_mods),
+    )
+    sandbox_label, _ = _smapi_log_context_details(
+        sandbox_report,
+        configured_game_path_text=str(game_path),
+        configured_real_mods_path_text=str(real_mods),
+        configured_sandbox_mods_path_text=str(sandbox_mods),
+    )
+    unknown_label, _ = _smapi_log_context_details(
+        unknown_report,
+        configured_game_path_text=str(game_path),
+        configured_real_mods_path_text=str(real_mods),
+        configured_sandbox_mods_path_text=str(sandbox_mods),
+    )
+
+    assert real_label == "Real Mods"
+    assert sandbox_label == "Sandbox Mods"
+    assert unknown_label == "Unknown"
+
+
+def test_main_window_smapi_dependency_discover_handoff_populates_query(
+    main_window: MainWindow,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    game_path = tmp_path / "Game"
+    real_mods = game_path / "Mods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    error_logs = game_path / "ErrorLogs"
+    error_logs.mkdir(parents=True)
+    real_mods.mkdir(parents=True)
+    sandbox_mods.mkdir()
+
+    main_window._game_path_input.setText(str(game_path))
+    main_window._mods_path_input.setText(str(real_mods))
+    main_window._sandbox_mods_path_input.setText(str(sandbox_mods))
+    main_window._on_check_smapi_log_completed(
+        SmapiLogReport(
+            state="parsed",
+            source="manual",
+            log_path=error_logs / "SMAPI-latest.txt",
+            game_path=game_path,
+            findings=(
+                SmapiLogFinding(
+                    kind="missing_dependency",
+                    line_number=6,
+                    message=f"[SMAPI] Launch arguments: --mods-path {sandbox_mods} | detected targets: Pathoschild.ContentPatcher",
+                ),
+            ),
+            missing_dependencies=(
+                SmapiMissingDependency(
+                    requiring_mod_name="Expanded Preconditions Utility",
+                    dependency_unique_id="Pathoschild.ContentPatcher",
+                    required_version="5.0.8 or later",
+                ),
+            ),
+            missing_dependency_ids=("Pathoschild.ContentPatcher",),
+            notes=tuple(),
+            message="Parsed SMAPI log: errors=0, warnings=0, failed_mods=0, missing_dependencies=1, runtime_issues=0.",
+        )
+    )
+
+    main_window._open_smapi_dependency_in_discover_button.click()
+    qapp.processEvents()
+
+    assert main_window._discovery_query_input.text() == "Pathoschild.ContentPatcher"
+    assert main_window._context_tabs.currentWidget() is main_window._discovery_page
+
+
+def test_main_window_low_height_shell_and_launch_controls_keep_readable_minimums(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    context_group = main_window.findChild(QGroupBox, "top_context_surface_group")
+    status_strip_group = main_window.findChild(QGroupBox, "global_status_strip_group")
+    mods_button = main_window.findChild(QPushButton, "workspace_nav_button_mods")
+    setup_button = main_window.findChild(QPushButton, "workspace_nav_button_setup")
+    launch_tab_index = main_window._inventory_controls_tabs.indexOf(main_window._inventory_controls_tabs.widget(1))
+    check_smapi_update_button = main_window._check_smapi_update_button
+    open_smapi_page_button = main_window._open_smapi_page_button
+    launch_button = main_window.findChild(QPushButton, "launch_sandbox_dev_button")
+
+    assert context_group is not None
+    assert status_strip_group is not None
+    assert mods_button is not None
+    assert setup_button is not None
+    assert check_smapi_update_button is not None
+    assert open_smapi_page_button is not None
+    assert launch_button is not None
+
+    main_window.resize(1366, 768)
+    main_window._inventory_controls_tabs.setCurrentIndex(launch_tab_index)
+    qapp.processEvents()
+
+    assert context_group.maximumHeight() >= 146
+    assert status_strip_group.maximumHeight() >= 56
+    assert 116 <= main_window._inventory_controls_tabs.maximumHeight() <= 132
+    assert mods_button.maximumHeight() == 30
+    assert setup_button.maximumHeight() == 30
+    assert check_smapi_update_button.maximumHeight() == 24
+    assert open_smapi_page_button.maximumHeight() == 24
+    assert launch_button.maximumHeight() == 26
+    assert 74 <= main_window._smapi_troubleshooting_details_box.minimumHeight() <= 80
+    assert 90 <= main_window._smapi_troubleshooting_details_box.maximumHeight() <= 100
+    assert setup_button.geometry().top() - mods_button.geometry().bottom() >= 5
+    assert (
+        open_smapi_page_button.geometry().top()
+        - check_smapi_update_button.geometry().bottom()
+        >= 6
+    )
+    assert launch_button.geometry().top() - open_smapi_page_button.geometry().bottom() >= 6
+
+
+def test_main_window_low_height_smapi_troubleshooting_compacts_selected_mod_guidance(
+    main_window: MainWindow,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    game_path = tmp_path / "Game"
+    real_mods = game_path / "Mods"
+    sandbox_mods = tmp_path / "SandboxMods"
+    error_logs = game_path / "ErrorLogs"
+    inspector_intro = main_window.findChild(QLabel, "mods_selection_context_intro_label")
+    inspector_scroll_area = main_window.findChild(
+        QScrollArea,
+        "mods_selection_context_scroll_area",
+    )
+
+    error_logs.mkdir(parents=True)
+    real_mods.mkdir(parents=True)
+    sandbox_mods.mkdir()
+
+    assert inspector_intro is not None
+    assert inspector_scroll_area is not None
+
+    main_window._game_path_input.setText(str(game_path))
+    main_window._mods_path_input.setText(str(real_mods))
+    main_window._sandbox_mods_path_input.setText(str(sandbox_mods))
+    main_window.resize(1366, 768)
+    main_window._on_check_smapi_log_completed(
+        SmapiLogReport(
+            state="parsed",
+            source="manual",
+            log_path=error_logs / "SMAPI-latest.txt",
+            game_path=game_path,
+            findings=(
+                SmapiLogFinding(
+                    kind="missing_dependency",
+                    line_number=12,
+                    message=f"[SMAPI] Launch arguments: --mods-path {sandbox_mods}",
+                ),
+            ),
+            missing_dependencies=(
+                SmapiMissingDependency(
+                    requiring_mod_name="Expanded Preconditions Utility",
+                    dependency_unique_id="Pathoschild.ContentPatcher",
+                    required_version="5.0.8 or later",
+                ),
+                SmapiMissingDependency(
+                    requiring_mod_name="Stardew Valley Expanded",
+                    dependency_unique_id="spacechase0.SpaceCore",
+                ),
+            ),
+            notes=tuple(),
+            message="Parsed SMAPI log: errors=0, warnings=0, failed_mods=0, missing_dependencies=0, runtime_issues=0.",
+        )
+    )
+    qapp.processEvents()
+
+    assert inspector_scroll_area.widgetResizable() is True
+    assert (
+        inspector_scroll_area.verticalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+    )
+    assert (
+        inspector_scroll_area.horizontalScrollBarPolicy()
+        == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    )
+    assert inspector_intro.isVisible() is False
+    assert main_window._inventory_flow_hint_label.isVisible() is False
+    assert main_window._inventory_update_guidance_label.text() == "No mod selected. Select a row for mod actions."
+    assert 88 <= main_window._smapi_troubleshooting_details_box.minimumHeight() <= 96
+    assert 124 <= main_window._smapi_troubleshooting_details_box.maximumHeight() <= 140
+    main_window._inventory_source_intent_actions_widget.setVisible(True)
+    main_window._inventory_sandbox_sync_actions_widget.setVisible(True)
+    qapp.processEvents()
+    assert inspector_scroll_area.verticalScrollBar().maximum() > 0
+
+
+def test_main_window_major_tables_keep_row_budget_and_interactive_headers(
+    main_window: MainWindow,
+) -> None:
+    table_expectations = (
+        (main_window._mods_table, 8, (0, 1, 5)),
+        (main_window._discovery_table, 7, (0, 1, 5, 6, 7)),
+        (main_window._compare_results_table, 8, (0, 1, 4)),
+        (main_window._archive_table, 7, (1, 2, 3, 4)),
+    )
+
+    for table, row_budget, interactive_columns in table_expectations:
+        expected_height = (max(table.verticalHeader().defaultSectionSize(), 20) * row_budget) + 30
+        assert table.minimumHeight() >= expected_height
+        header = table.horizontalHeader()
+        for column in interactive_columns:
+            assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
+
+
+def test_main_window_tall_workspace_pages_use_scrollable_body_shells(
+    main_window: MainWindow,
+) -> None:
+    scroll_area_names = (
+        "discovery_workspace_page_scroll_area",
+        "compare_tab_scroll_area",
+        "packages_workspace_page_scroll_area",
+        "archive_workspace_page_scroll_area",
+        "recovery_tab_scroll_area",
+    )
+
+    for object_name in scroll_area_names:
+        scroll_area = main_window.findChild(QScrollArea, object_name)
+        assert scroll_area is not None
+        assert scroll_area.widgetResizable() is True
+        assert (
+            scroll_area.verticalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        assert (
+            scroll_area.horizontalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+
+
+def test_main_window_global_action_buttons_match_compact_launch_density(
+    main_window: MainWindow,
+    qapp: QApplication,
+) -> None:
+    archive_refresh_button = main_window.findChild(QPushButton, "archive_refresh_button")
+    archive_restore_button = main_window.findChild(QPushButton, "archive_restore_button")
+    archive_delete_button = main_window.findChild(QPushButton, "archive_delete_button")
+    discovery_search_button = main_window.findChild(QPushButton, "discovery_search_button")
+    launch_smapi_button = main_window._launch_smapi_button
+
+    assert archive_refresh_button is not None
+    assert archive_restore_button is not None
+    assert archive_delete_button is not None
+    assert discovery_search_button is not None
+
+    main_window.resize(1366, 768)
+    qapp.processEvents()
+
+    assert 18 <= archive_refresh_button.height() <= 25
+    assert 18 <= archive_restore_button.height() <= 25
+    assert 18 <= archive_delete_button.height() <= 25
+    assert 18 <= discovery_search_button.height() <= 25
+    assert 23 <= launch_smapi_button.height() <= 27
 
 
 def test_main_window_switching_to_unscanned_source_keeps_inventory_state_truthful(
